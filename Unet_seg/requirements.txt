@@ -1,0 +1,18 @@
+# Core (required)
+torch>=2.0
+torchvision>=0.15
+numpy>=1.23
+Pillow>=9.3
+PyYAML>=6.0
+opencv-python-headless>=4.7   # optical flow, connected components, video I/O, overlays
+tqdm>=4.64
+
+# Testing
+pytest>=7.2
+
+# Optional -- install only if you need the corresponding feature
+# onnx>=1.15                  # scripts/export_onnx.py
+# onnxruntime>=1.16           # ONNX export verification
+# onnxscript>=0.1             # required by torch>=2.6 for ONNX export
+# matplotlib>=3.6             # legacy predict.py visualisation (--viz)
+# wandb>=0.13                 # legacy root train.py logging only

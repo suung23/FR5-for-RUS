@@ -1,0 +1,26 @@
+# Byte-compiled / cache
+*.pyc
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+
+# Datasets and generated artefacts.
+# Leading slash matters: a bare "data/" would also exclude the src/data/ package.
+/data/
+/checkpoints/
+/runs/
+
+# Model weights and exports
+*.pth
+*.pt
+*.onnx
+*.onnx.data
+
+# Environments and editors
+venv/
+.venv/
+.idea/
+.vscode/
+
+# Third-party logging
+wandb/

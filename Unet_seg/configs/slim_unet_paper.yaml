@@ -1,0 +1,31 @@
+# Paper-faithful Slim U-Net (unofficial reimplementation of arXiv:2302.11524).
+#
+# Architecture reproduction and baseline comparison: 128 x 128 input, spatial
+# loss only, no temporal regularisation. Exactly 4,705,377 trainable
+# parameters, matching the figure reported in the paper.
+
+defaults: _base.yaml
+
+experiment:
+  name: slim_unet_paper
+  output_dir: runs/slim_unet_paper
+
+model:
+  name: slim_unet
+  preset: paper
+  input_channels: 1
+  output_channels: 1
+  channels: [32, 64, 128, 256, 512]
+  input_size: [128, 128]
+  dropout: 0.125
+  decoder_dropout: 0.0
+  dropout_kind: standard          # standard | spatial
+  normalization: batch_norm
+  conv_bias: true
+  upsampling: transposed_conv
+  up_kernel_size: 3
+  encoder_convs: 1                # 1 = slim contracting path
+  decoder_convs: 1                # 1 = paper-faithful (see README)
+
+train:
+  checkpoint_dir: checkpoints/slim_unet_paper

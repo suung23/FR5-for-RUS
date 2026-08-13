@@ -1,0 +1,5 @@
+# Request: 이미지 (보통 bgr8 또는 rgb8 인코딩)
+sensor_msgs/Image image
+---
+# Response: Relative Depth Map (보통 mono8 또는 32fc1 인코딩)
+sensor_msgs/Image depth_image

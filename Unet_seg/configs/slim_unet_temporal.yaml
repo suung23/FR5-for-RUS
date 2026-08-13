@@ -1,0 +1,43 @@
+# Slim U-Net with motion-aligned temporal-consistency regularisation.
+#
+# The runtime model remains single-frame and stateless; the temporal terms
+# exist only during training. Every lambda below is an EXPERIMENT DEFAULT, not
+# a clinically validated setting.
+
+defaults: slim_unet_production.yaml
+
+experiment:
+  name: slim_unet_temporal
+  output_dir: runs/slim_unet_temporal
+
+data:
+  # Pairs are formed even when a frame is unlabeled: the spatial loss is masked
+  # per frame while the temporal loss uses every pair with usable flow.
+  require_labeled_current: false
+  temporal_interval: 1
+
+loss:
+  temporal:
+    enabled: true
+    lambda_temp_pixel: 0.2
+    lambda_temp_control: 0.05
+    temporal_warmup_epochs: 5
+    ramp_epochs: 5
+    robust_kind: charbonnier      # charbonnier | l1 | smooth_l1
+    charbonnier_eps: 1.0e-3
+    min_reliable_ratio: 0.10
+    reliable_pixel_threshold: 0.5
+    detach_target: true
+    centroid_weight: 1.0
+    area_weight: 1.0
+    min_mass: 1.0
+
+flow:
+  backend: precomputed
+  require_flow: false
+
+train:
+  checkpoint_dir: checkpoints/slim_unet_temporal
+  model_selection:
+    spatial_weight: 0.8
+    temporal_weight: 0.2

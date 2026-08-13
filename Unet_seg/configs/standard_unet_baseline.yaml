@@ -1,0 +1,32 @@
+# Standard U-Net baseline.
+#
+# `preset: paper` reproduces the 8,635,809-parameter Standard U-Net baseline
+# reported by Raina et al. exactly: 32 -> 512 channels, two biased 3x3
+# convolutions per stage, BatchNorm, ConvTranspose2d(k=3, s=2).
+#
+# Use `preset: original` instead to recover the upstream milesial/Pytorch-UNet
+# architecture (base_channels=64, bias-free convolutions, k=2 transposed
+# convolutions, 31,037,698 parameters at 3-channel input / 2 classes).
+
+defaults: _base.yaml
+
+experiment:
+  name: standard_unet_baseline
+  output_dir: runs/standard_unet_baseline
+
+model:
+  name: standard_unet
+  preset: paper
+  input_channels: 1
+  output_channels: 1
+  base_channels: 32
+  depth: 4
+  input_size: [128, 128]
+  normalization: batch_norm
+  upsampling: transposed_conv
+  up_kernel_size: 3
+  conv_bias: true
+  dropout: 0.0
+
+train:
+  checkpoint_dir: checkpoints/standard_unet_baseline

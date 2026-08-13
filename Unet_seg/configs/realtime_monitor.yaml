@@ -1,0 +1,106 @@
+# Real-time monitoring application.
+#
+# Every threshold that changes behaviour lives here, not in the Python source.
+
+experiment:
+  name: realtime_monitor
+  seed: 42
+
+model:
+  name: slim_unet
+  preset: production
+  input_size: [256, 256]
+
+data:
+  intensity_normalization: zero_one
+
+monitor:
+  device: auto
+  amp: false
+  channels_last: false
+  headless: false
+  display_scale: 1.0
+  max_queue_size: 2
+  drop_stale_frames: true
+  threaded_capture: true
+  warmup_frames: 5
+  enable_temporal: true
+  snapshot_on_validity_change: true
+  snapshot_dir: runs/monitor/snapshots
+  history_length: 240              # bounded deque length for the rolling plots
+  frame_rate: 30.0                 # assumed rate for image-directory sources
+  save_video: null                 # path to an annotated .mp4, or null
+  jsonl_log: runs/monitor/control_states.jsonl
+  csv_log: runs/monitor/control_states.csv
+  log_probability_map: false       # keep dense arrays out of the JSONL log
+  status_colors:
+    valid: [0, 200, 0]             # BGR green
+    marginal: [0, 200, 255]        # BGR yellow
+    invalid: [0, 0, 255]           # BGR red
+  marginal_quality_threshold: 0.55
+
+flow:
+  backend: farneback
+  params:
+    winsize: 15
+    levels: 3
+  reliability:
+    flow_consistency_threshold: 1.5
+    photometric_threshold: 0.15
+    max_flow_magnitude: 20.0
+    border_exclusion_px: 4
+    temperature: 0.5
+
+postprocess:
+  threshold: 0.5
+  largest_component: true
+  min_component_area_ratio: 0.0005
+  fill_holes: true
+  smooth_contour: true
+  smooth_kernel: 5
+  connectivity: 8
+
+control:
+  boundary_band_px: 2
+  surrounding_ring_px: 6
+  keep_binary_mask: true
+  keep_probability_map: true
+  validity:
+    min_area_ratio: 0.005
+    max_area_ratio: 0.80
+    min_segmentation_confidence: 0.50
+    max_border_contact_ratio: 0.50
+    min_largest_component_ratio: 0.60
+    min_temporal_warped_iou: 0.50
+    max_centroid_jump: 0.15
+    max_relative_area_change: 0.50
+    min_lumen_contrast: null
+    max_boundary_entropy: null
+    min_temporal_stability_score: null
+    min_control_quality_score: null
+    require_temporal: false
+  quality:
+    target_area_ratio: 0.15
+    area_tolerance: 0.10
+    contrast_reference: 0.35
+    centroid_jump_scale: 0.05
+    area_change_scale: 0.25
+    border_penalty_scale: 0.15
+    weights:
+      segmentation_confidence: 1.0
+      mask_completeness: 1.0
+      lumen_contrast: 0.5
+      border_penalty: 1.0
+      component_quality: 1.0
+      temporal_iou: 1.0
+      centroid_stability: 0.5
+      area_stability: 0.5
+  stability:
+    iou_weight: 1.0
+    centroid_weight: 0.5
+    area_weight: 0.5
+    centroid_jump_scale: 0.05
+    area_change_scale: 0.25
+
+logging:
+  level: INFO

@@ -1,0 +1,10 @@
+torch
+torchvision
+hydra-core
+dill
+omegaconf
+termcolor
+zarr
+imageio
+opencv-python
+

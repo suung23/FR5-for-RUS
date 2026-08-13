@@ -1,0 +1,29 @@
+# Production Slim U-Net: identical lightweight architecture, higher resolution.
+#
+# The network is unchanged from the paper preset (4,705,377 parameters); only
+# the working resolution, augmentation budget and runtime postprocessing
+# differ, so the model stays suitable for ONNX / TensorRT export.
+
+defaults: slim_unet_paper.yaml
+
+experiment:
+  name: slim_unet_production
+  output_dir: runs/slim_unet_production
+
+model:
+  preset: production
+  input_size: [256, 256]
+
+data:
+  image_size: [256, 256]
+
+train:
+  epochs: 60
+  batch_size: 4
+  amp: true
+  checkpoint_dir: checkpoints/slim_unet_production
+
+postprocess:
+  fill_holes: true
+  smooth_contour: true
+  smooth_kernel: 5

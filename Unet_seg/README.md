@@ -47,9 +47,15 @@ controller that keeps the bladder lumen clearly visible; this repository provide
 the **perception half** of that loop:
 
 ```
-one ultrasound frame -> Slim U-Net -> probability map -> postprocessing
-                     -> geometric control features -> validity gate -> controller
+                    -> Slim U-Net -> probability map -> postprocessing
+one ultrasound frame    -> geometric control features -> validity gate -> Q_seg --.
+                    |                                                             |-> controller
+                    `-> raw B-mode quality (no network, no mask) ------> Q_raw ---'
 ```
+
+Two quality functions, because the second one has to be defined before the first
+one is: `Q_seg` presupposes that the bladder was found, `Q_raw` does not. See
+[Two image-quality scores](#two-image-quality-scores).
 
 Design commitments:
 
@@ -69,7 +75,10 @@ Design commitments:
 
 * This repository **does not control a robot.** It emits no velocities, forces,
   positions, joint targets or impedance parameters, and a test enforces that no
-  such field ever appears in the output.
+  such field ever appears in either output type (`ControlState`,
+  `RawQualityResult`). It also owns no state machine: `valid_for_control` and
+  `usable_for_contact_search` are *observation verdicts*, never commands, and
+  what a controller does about them is out of scope here.
 * It is **not a clinically validated medical device** and must not be used for
   diagnosis or treatment.
 * All control thresholds and quality weights are **experimental defaults chosen
@@ -122,7 +131,7 @@ The original `milesial/Pytorch-UNet` model is preserved **unmodified** in
 [unet/](unet/) and still serves the legacy scripts in the repository root. It is
 the architectural baseline for every comparison.
 
-[src/models/standard_unet.py](src/models/standard_unet.py) adds `StandardUNet`, a
+[rus_perception/models/standard_unet.py](rus_perception/models/standard_unet.py) adds `StandardUNet`, a
 generalisation of that model in which channel width, depth, convolution bias,
 normalization and upsampling are configurable. Two presets:
 
@@ -157,7 +166,7 @@ Standard U-Net  vs.  Paper-based Slim U-Net  vs.  Slim U-Net + temporal-consiste
 
 ## Slim U-Net architecture
 
-[src/models/slim_unet.py](src/models/slim_unet.py) implements `SlimUNet` as an
+[rus_perception/models/slim_unet.py](rus_perception/models/slim_unet.py) implements `SlimUNet` as an
 independent class — not an alias, not a renamed baseline.
 
 **Input:** `B × 1 × H × W`, grayscale B-mode ultrasound.
@@ -227,7 +236,7 @@ which is a different network. Use `preset: paper` for the paper comparison.
 
 ### Implementation details inferred from the paper
 
-Recorded in code as `src.models.slim_unet.INFERRED_DETAILS` and printed by
+Recorded in code as `rus_perception.models.slim_unet.INFERRED_DETAILS` and printed by
 `scripts/architecture_report.py`:
 
 1. **Decoder stages use a single 3×3 convolution**, like the encoder. A
@@ -571,7 +580,7 @@ versions are likely to work but have not been verified here.
 
 ```bash
 git clone <this-repository>
-cd Pytorch-UNet
+cd Unet_seg
 
 python3 -m venv venv
 source venv/bin/activate        # Windows: venv\Scripts\activate
@@ -582,20 +591,47 @@ pip install --upgrade pip
 
 ```bash
 pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
-pip install -r requirements.txt
+pip install -e .
 ```
 
 **CUDA:** install the torch build matching your driver from
-<https://pytorch.org/get-started/locally/>, then `pip install -r requirements.txt`.
+<https://pytorch.org/get-started/locally/>, then `pip install -e .`.
 Everything runs on CPU; CUDA only changes speed and enables mixed precision.
 
 **Optional extras**
 
 ```bash
-pip install onnx onnxruntime onnxscript   # scripts/export_onnx.py (+ verification)
-pip install matplotlib                    # legacy predict.py --viz
-pip install wandb                         # legacy root train.py logging only
+pip install -e ".[onnx]"    # scripts/export_onnx.py (+ verification)
+pip install -e ".[viz]"     # legacy predict.py --viz
+pip install -e ".[dev]"     # pytest
+pip install wandb           # legacy root train.py logging only
 ```
+
+### The installed package
+
+`pip install -e .` puts **one** top-level name on the import path:
+
+```python
+from rus_perception.inference import Predictor
+from rus_perception.control import ControlState, compute_control_quality, compute_raw_quality
+```
+
+That matters for the intended downstream use. This repository is imported *into*
+a robot control workspace, where a top-level package called `src` — the name
+this package used to have — would collide with any other project laid out the
+same way, and `utils` or `unet` would collide with almost anything. So:
+
+* only `rus_perception/` is installed;
+* `unet/`, `utils/` and the root-level `train.py` / `predict.py` / `evaluate.py`
+  / `hubconf.py` are the **unmodified upstream** entry points. They stay
+  importable when you run from a clone — which is all `tests/test_models.py`
+  needs for its baseline-parity check — and are deliberately never installed;
+* `scripts/` is not packaged either; those are `python scripts/x.py` entry
+  points that bootstrap their own `sys.path` through `scripts/_common.py`, so
+  the repository still works without being installed at all.
+
+`requirements.txt` remains for a plain `pip install -r` workflow; the core
+dependency list in `pyproject.toml` is kept in sync with it.
 
 RAFT-Small optical flow needs a `torchvision` build that includes
 `torchvision.models.optical_flow`. The Farneback backend needs only OpenCV, which
@@ -834,7 +870,7 @@ pushes into a **bounded** queue (`monitor.max_queue_size`).
 ## ControlState interface
 
 Every frame produces one `ControlState`
-([src/control/state.py](src/control/state.py)). Example JSON:
+([rus_perception/control/state.py](rus_perception/control/state.py)). Example JSON:
 
 ```json
 {
@@ -956,7 +992,37 @@ initiate reacquisition or trigger a safety stop — those policies are outside t
 scope of this repository. A previous valid state is never silently reused as if
 it were a new observation.
 
-### Control-quality score
+### Two image-quality scores
+
+The repository defines **two** quality functions over the same frame. They are
+not variants of each other — they answer different questions, are computed from
+different inputs, and become defined at different moments:
+
+| | `Q_seg` — [rus_perception/control/quality.py](rus_perception/control/quality.py) | `Q_raw` — [rus_perception/control/raw_quality.py](rus_perception/control/raw_quality.py) |
+|---|---|---|
+| question | *is the bladder usably imaged?* | *is the probe acoustically coupled at all?* |
+| input | probability map + mask + previous state | raw B-mode frame only |
+| needs the network | yes | **no** |
+| defined when the bladder is not visible | **no** — `valid_for_control` is false and `Q` is undefined | yes |
+| sub-scores | 8, incl. temporal | 4, none temporal |
+| reason codes | `REJECTION_REASONS` (13) | `RAW_REJECTION_REASONS` (4), disjoint |
+| config | `control.quality` | `control.raw_quality` |
+
+`Q_raw` exists because every quantity in a `ControlState` presupposes the
+bladder was found. Before that — at the start of a contact search, with a poor
+acoustic window — there is no `Q` to optimise at all. A downstream controller
+that has to establish contact *first* and image well *second* therefore needs a
+score that is defined in the first regime, and that score must not depend on the
+network, which is least trustworthy in exactly that regime.
+
+They live in one package because they share the acquisition geometry: the
+fan/sector ROI mask, the depth scale and the A-line convention are properties of
+the ultrasound machine, not of either score. Defining them in two places
+guarantees they drift apart.
+
+Neither score is a robot command, and neither is clinically validated.
+
+#### `Q_seg` — the control-quality score
 
 $$
 Q = \frac{\sum_i w_i s_i}{\sum_i w_i}
@@ -973,6 +1039,47 @@ weights and normalisation scales are configurable under `control.quality`.
 > This is a transparent heuristic for *how usable this frame is as a control
 > measurement*. It is **not clinically validated** and is not a measure of
 > anatomical correctness or diagnostic image quality.
+
+#### `Q_raw` — the segmentation-independent score
+
+Same weighted-mean form, over four sub-scores computed per **A-line** — one
+acoustic ray — because that is the unit in which acoustic coupling fails. An air
+gap kills one ray completely rather than dimming the whole image.
+
+| sub-score | definition | default weight |
+|---|---|---|
+| `near_field_echo` | near-field band mean, normalized by a reference intensity | 1.0 |
+| `contact_continuity` | `1 −` fraction of A-lines whose near field is dark | **1.5** |
+| `total_echo_energy` | plateau function of the ROI mean intensity | 0.5 |
+| `shadow_penalty` | `1 −` fraction of A-lines whose far field collapsed | 1.0 |
+
+`contact_continuity` carries the most weight because a dead A-line is the least
+ambiguous evidence of an air gap; every other sub-score can be depressed by
+anatomy alone.
+
+Two design points worth stating because they are easy to get wrong:
+
+* **Shadowing is judged relative to the frame's own unshadowed far-field level**,
+  so a machine-side gain or TGC change does not register as new shadowing. The
+  reference is a **high percentile, not the median** — past 50 % shadowed lines
+  the median *is* the shadow level and a median-based test goes blind exactly
+  when the frame is worst. A small absolute floor is the backstop for *uniform*
+  far-field loss, where no unshadowed reference survives at all.
+* **`score` is `None`, never `0.0`, when the frame could not be measured** (too
+  few A-lines with ROI support). Zero would be indistinguishable from a
+  genuinely terrible frame.
+
+`sector` (curvilinear/phased) scan geometry raises `ScanGeometryError` rather
+than sampling image columns: after scan conversion an A-line is a ray from the
+virtual apex, not a column, and treating columns as A-lines would average across
+different depths.
+
+> **Skeleton status.** The structure, config schema and reason codes are final;
+> every numeric default is provisional and marked `PROVISIONAL` in source. They
+> cannot be fixed until the ultrasound image geometry is known (probe type,
+> depth scale, fan ROI). **None of the four sub-scores has been shown to be
+> monotone or unimodal in contact force.** That is an experiment, not an
+> assumption; until it is run, `Q_raw` must not be trusted as a search objective.
 
 ---
 
@@ -1008,7 +1115,8 @@ explanatory message rather than silently changing behaviour.
 | **Optical-flow thresholds** | `flow`, `flow.reliability` | `backend`, `flow_consistency_threshold`, `photometric_threshold`, `max_flow_magnitude`, `border_exclusion_px`, `temperature` |
 | **Postprocessing** | `postprocess` | `threshold`, `largest_component`, `min_component_area_ratio`, `fill_holes`, `smooth_contour` |
 | **Control-validity heuristics** | `control.validity` | area bounds, confidence floor, border/component/temporal thresholds |
-| **Quality-score weights (clinically unvalidated)** | `control.quality` | per-component `weights`, `target_area_ratio`, normalisation scales |
+| **`Q_seg` weights (clinically unvalidated)** | `control.quality` | per-component `weights`, `target_area_ratio`, normalisation scales |
+| **`Q_raw` bands and weights (all PROVISIONAL)** | `control.raw_quality` | `scan_geometry`, depth-band fractions, `dark_intensity_threshold`, `shadow_reference_percentile`, per-component `weights`, gate thresholds |
 | **Monitoring** | `monitor` | queue size, drop policy, logs, snapshot, status colours |
 | **Reproducibility** | `experiment`, `logging` | `seed`, `output_dir`, `level` |
 
@@ -1019,19 +1127,21 @@ No threshold that changes behaviour is buried in Python source.
 ## Repository structure
 
 ```
-Pytorch-UNet/
-├── src/
+Unet_seg/
+├── rus_perception/      THE INSTALLED PACKAGE -- the only thing pip puts on
+│   │                    the import path
 │   ├── models/          blocks.py, standard_unet.py, slim_unet.py, registry.py, report.py
 │   ├── losses/          segmentation.py, temporal.py
 │   ├── data/            manifest.py, splits.py, image_dataset.py, video_dataset.py,
 │   │                    augment.py, io.py, synthetic.py
 │   ├── flow/            base.py, backends.py, precomputed.py, warp.py, reliability.py
-│   ├── control/         state.py, features.py, postprocess.py, quality.py, validity.py
+│   ├── control/         state.py, features.py, postprocess.py, validity.py,
+│   │                    quality.py (Q_seg), raw_quality.py (Q_raw)
 │   ├── metrics/         spatial.py, temporal.py, latency.py
 │   ├── inference/       predictor.py, realtime.py, sources.py, visualization.py
 │   ├── training/        trainer.py
 │   └── utils/           config.py, checkpoint.py, logging_utils.py, seeding.py
-├── scripts/
+├── scripts/             NOT packaged -- `python scripts/x.py` entry points
 │   ├── train.py                 evaluate.py             infer.py
 │   ├── live_monitor.py          precompute_flow.py      export_onnx.py
 │   ├── benchmark.py             architecture_report.py  make_synthetic_dataset.py
@@ -1039,7 +1149,8 @@ Pytorch-UNet/
 │   └── download_data.sh / .bat  (original Carvana helpers)
 ├── configs/             _base.yaml + 5 experiment configs
 ├── tests/               test_models.py, test_losses.py, test_flow.py, test_data.py,
-│                        test_control.py, test_metrics.py, test_pipeline.py, conftest.py
+│                        test_control.py, test_raw_quality.py, test_metrics.py,
+│                        test_pipeline.py, conftest.py
 ├── docs/
 │   └── ORIGINAL_README.md       the upstream README, preserved verbatim
 │
@@ -1051,6 +1162,7 @@ Pytorch-UNet/
 ├── hubconf.py           ORIGINAL torch.hub entry point (preserved)
 ├── Dockerfile           ORIGINAL (preserved)
 ├── LICENSE              GNU GPL v3, inherited from milesial/Pytorch-UNet
+├── pyproject.toml       packaging; installs rus_perception ONLY
 ├── requirements.txt
 ├── pytest.ini
 └── README.md
@@ -1145,14 +1257,17 @@ python -m pytest tests/test_models.py -v      # architecture, parameter counts, 
 python -m pytest tests/test_losses.py -v      # spatial + temporal losses, gradient flow
 python -m pytest tests/test_flow.py -v        # warp direction, reliability, file validation
 python -m pytest tests/test_data.py -v        # manifests, patient splits, paired augmentation
-python -m pytest tests/test_control.py -v     # geometry, quality, validity, serialization
+python -m pytest tests/test_control.py -v     # geometry, Q_seg, validity, serialization
+python -m pytest tests/test_raw_quality.py -v # Q_raw sub-scores, reason codes, scan geometry
 python -m pytest tests/test_metrics.py -v     # spatial, temporal, latency metrics
 python -m pytest tests/test_pipeline.py -v    # config, training, inference, monitor, ONNX
 ```
 
-**263 tests, all passing.** Every test runs on synthetic data — none requires
-private clinical data or a network connection. The ONNX test skips itself if
-`onnxruntime` is absent.
+**263 tests were passing** before `tests/test_raw_quality.py` was added; its 27
+tests pass, but the full suite has **not** been re-run since the package rename
+(`src` → `rus_perception`), so treat the combined figure as unverified until you
+run it. Every test runs on synthetic data — none requires private clinical data
+or a network connection. The ONNX test skips itself if `onnxruntime` is absent.
 
 ---
 
@@ -1187,7 +1302,9 @@ private clinical data or a network connection. The ONNX test skips itself if
 | Inference latency / FPS on target hardware | **Not yet benchmarked** |
 | GPU memory usage | **Not yet benchmarked** |
 | Benefit of the temporal loss over the spatial-only baseline | **Not yet benchmarked** |
-| Validity-gate and quality-score threshold calibration | **Not yet benchmarked** |
+| Validity-gate and `Q_seg` threshold calibration | **Not yet benchmarked** |
+| `Q_raw` sub-score monotonicity/unimodality in contact force | **Not yet benchmarked** — and the whole contact-search idea rests on it |
+| `Q_raw` band, ROI and threshold calibration | **Not yet benchmarked** — blocked on the ultrasound image geometry |
 
 Everything marked *Not yet benchmarked* has a command in this README that
 produces the number. None of them is estimated, extrapolated or quoted from the
@@ -1271,9 +1388,9 @@ the license file is unmodified and all copyright notices are preserved.
   `.github/workflows/main.yml`, `LICENSE`
 * `docs/ORIGINAL_README.md` — the upstream README, preserved verbatim
 
-**Newly implemented in this work:** everything under `src/`, `configs/`,
+**Newly implemented in this work:** everything under `rus_perception/`, `configs/`,
 `tests/`, and every script in `scripts/` except the two original `download_data.*`
-files. `src/models/standard_unet.py` is a new, generalised implementation whose
+files. `rus_perception/models/standard_unet.py` is a new, generalised implementation whose
 default configuration is verified numerically identical to the original
 `unet.UNet`; the original class itself was not modified.
 

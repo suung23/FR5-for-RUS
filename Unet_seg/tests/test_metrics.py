@@ -5,15 +5,15 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from src.metrics.latency import LatencyTracker, benchmark_callable, device_report
-from src.metrics.spatial import (
+from rus_perception.metrics.latency import LatencyTracker, benchmark_callable, device_report
+from rus_perception.metrics.spatial import (
     aggregate_metrics,
     build_metric_report,
     compute_frame_metrics,
     confusion_counts,
     hausdorff_95,
 )
-from src.metrics.temporal import (
+from rus_perception.metrics.temporal import (
     TemporalFrameRecord,
     aggregate_temporal_metrics,
     classify_sequence_frames,

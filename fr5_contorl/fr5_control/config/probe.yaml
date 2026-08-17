@@ -1,0 +1,147 @@
+# 초음파 프로브 기하 · F/T 장착 · 페이로드 — 단일 진실 공급원
+#
+# 이전 스택은 툴 변환을 5개 파일에 하드코딩했고 값이 서로 달랐다 (0.64 / 0.615 / 0.22).
+# 여기가 유일한 정의이며, 모든 노드가 이 파일에서 읽는다.
+#
+# .nan 인 항목은 아직 측정되지 않았다는 뜻이다. 노드는 이를 0 으로 대체하지 않고
+# 기동을 거부해야 한다 — 0 으로 채우면 조용히 틀린 기하로 동작한다.
+#
+# null 이 아니라 .nan 을 쓰는 이유: ROS2 파라미터는 null 을 표현하지 못한다.
+# 타입 추론에 실패해 노드 기동 자체가 깨진다.
+#
+# 참고: legacy_laparoscopic/ 의 값은 복강경 로드 기준이므로 그대로 쓰면 안 된다.
+
+/**:
+  ros__parameters:
+
+    # ---- 대상 로봇 ------------------------------------------------------
+    robot:
+      name: fr5_right
+      ip: "192.168.58.3"
+      # mock: 하드웨어 없이 구동 (DESIGN_NOTES §12.5)
+      # fairino: 실로봇
+      backend: mock
+
+    # ---- 툴 변환: J6 → 프로브 접촉면 -------------------------------------
+    # +z = 조직 침투 방향(법선), +x = 트랜스듀서 배열 방향(영상면 내 lateral),
+    # +y = elevational (영상면 밖).  DESIGN_NOTES §4.1
+    tool:
+      # [x, y, z] 미터
+      j6_to_probe_xyz: [.nan, .nan, .nan]     # CAD 대기
+      # [roll, pitch, yaw] 라디안, 고정축 XYZ
+      j6_to_probe_rpy: [.nan, .nan, .nan]     # CAD 대기
+
+      # 위 값이 .nan 이면 노드는 기동을 거부한다. 이 플래그를 명시적으로 켜면
+      # J6 플랜지를 툴 프레임으로 삼아 도는데, Phase 0 의 자유공간 twist 추종
+      # 검증에만 쓴다. 접촉 제어에 켠 채로 쓰면 기하가 틀린다.
+      allow_missing_tool: true
+
+    # ---- F/T 센서 -------------------------------------------------------
+    ft_sensor:
+      # J6 → 센서 원점. wrench 기준점 이동에 필요하다 (DESIGN_NOTES §4.3)
+      #   M_probe = M_sensor + r x F,  r = 센서원점 → 접촉면
+      # r ~ 0.1 m, F_z ~ 5 N 이면 오프셋 0.5 N·m 로 정렬 신호를 덮는다.
+      j6_to_sensor_xyz: [.nan, .nan, .nan]    # 장착 위치 확인 대기
+      j6_to_sensor_rpy: [.nan, .nan, .nan]
+
+      # 접촉 법선력의 부호. F_n = sign * F_z^probe, 양수 = 압축.
+      # Phase 1 의 첫 검증 항목이다. 반대면 admittance 가 발산한다.
+      normal_force_sign: -1.0
+
+      # 데드밴드. 잡음 실측 후 조정한다 (DESIGN_NOTES §8).
+      force_deadband_n: 0.1
+      moment_deadband_nm: 0.01
+
+    # ---- 페이로드 (중력 보상) --------------------------------------------
+    # 이 값이 없으면 Mx/My 자세 정렬이 원리적으로 불가능하다 (DESIGN_NOTES §2.3).
+    # ForceSensorAutoComputeLoad 식별 절차로 채운다.
+    payload:
+      mass_kg: .nan
+      cog_xyz: [.nan, .nan, .nan]             # 센서 프레임 기준
+
+    # ---- 안전 한계 ------------------------------------------------------
+    safety:
+      max_normal_force_n: 7.0                 # 하드 한계
+      warn_normal_force_n: 6.0                # 소프트 — 경고 + 상승 금지
+      max_moment_nm: 0.3
+
+      # 접촉 중 값. 자유공간 기준 1.5 rad/s 는 과도하다.
+      max_joint_vel_rad_s: 0.5
+      max_linear_vel_m_s: 0.010
+      max_angular_vel_rad_s: 0.2
+
+      # 관절 한계 (도). 이전 스택은 J6 만 ±165 로 하드코딩했다.
+      joint_limits_deg:
+        lower: [-175.0, -265.0, -160.0, -265.0, -175.0, -165.0]
+        upper: [ 175.0,   85.0,  160.0,   85.0,  175.0,  165.0]
+
+    # ---- 워치독 (DESIGN_NOTES §12.2, 2층 구조) ----------------------------
+    watchdog:
+      # 하위: servo_node. 관절 지령이 끊기면 정지한다. 방향을 모르므로 후퇴하지 않는다.
+      joint_cmd_timeout_s: 0.1
+      # 상위: diff_ik_node. twist 가 끊기면 프로브 -z 로 후퇴한다.
+      twist_timeout_s: 0.1
+      joint_state_timeout_s: 0.2
+      wrench_timeout_s: 0.05
+
+      retreat_speed_m_s: 0.005
+      retreat_until_force_n: 0.2
+      # 후퇴 종료 조건이 힘이므로, wrench 가 함께 죽으면 무한히 물러난다.
+      # 시간으로 상한을 둔다: 3 s x 5 mm/s = 15 mm.
+      max_retreat_s: 3.0
+
+    # ---- Touch 원격조작 (DESIGN_NOTES §10 TELEOP_APPROACH) -----------------
+    # 프로파일이 스케일·필터·데드존을 통째로 묶는다. 값 하나만 바꾸면 안 되는 이유는
+    # 복강경 자유공간 조작과 초음파 접근 조작의 요구 분해능이 자릿수로 다르기 때문이다.
+    # teleop.profile 은 매 주기 읽으므로 조작 중에도 바꿀 수 있다:
+    #   ros2 param set /touch_teleop_node teleop.profile us_approach
+    teleop:
+      profile: us_approach
+
+      # 기존 복강경 값. 참조용으로 남긴다.
+      laparoscopic:
+        linear_scale: 0.6
+        angular_scale: 0.6
+        filter_alpha: 0.4
+        linear_deadzone: 0.001
+        angular_deadzone: 0.1
+
+      # 초음파 접근용. 회전 데드존이 핵심이다.
+      #   이전(0.1 rad/s x 0.6): 최소 지령 0.060 rad/s / 상한 0.2  →  사용구간  3:1
+      #   현재(0.02      x 0.15): 최소 지령 0.003 rad/s / 상한 0.2  →  사용구간 67:1
+      # angular_deadzone 은 Touch 장치의 회전 잡음 바닥 위에 있어야 한다. 실측 전이라
+      # 추정값이며, 너무 낮으면 손을 멈춰도 프로브가 천천히 흐른다.
+      us_approach:
+        linear_scale: 0.08          # 손 100 mm/s → EE 8 mm/s
+        angular_scale: 0.15         # 손 1 rad/s  → EE 0.15 rad/s
+        filter_alpha: 0.25          # 더 무겁게 — 접근은 느려도 된다
+        linear_deadzone: 0.002
+        angular_deadzone: 0.02      # ⏳ 장치 잡음 실측 후 확정
+
+    # ---- 루프 주기 (DESIGN_NOTES §11) -------------------------------------
+    rates:
+      servo_hz: 125.0
+      cartesian_hz: 100.0
+      wrench_publish_hz: 100.0
+      status_publish_hz: 30.0
+
+    # ---- 역기구학 -------------------------------------------------------
+    ik:
+      # DLS 로 상위 아키텍처를 먼저 검증한다. QP 는 보류 (DESIGN_NOTES §9).
+      solver: dls
+      dls_damping: 0.02
+      # 축별 추종오차 임계. 힘축이 조용히 뭉개지는 것을 잡는다.
+      tracking_error_linear_m_s: 0.002
+      tracking_error_angular_rad_s: 0.05
+
+    # ---- mock 백엔드 전용 -------------------------------------------------
+    # 실패 경로는 실로봇에서 일부러 일으키기 곤란하므로 여기서 주입한다.
+    mock:
+      # 프로브가 이 깊이(base +z 기준, 미터)보다 아래로 내려가면 접촉으로 친다.
+      contact_plane_z: 0.30
+      # 합성 접촉 강성 [N/m]. 침투 깊이에 비례한 F_z 를 낸다.
+      contact_stiffness_n_m: 2000.0
+      ft_noise_std_n: 0.02
+      # 주입 실패 (0 = 비활성)
+      drop_wrench_after_s: 0.0
+      freeze_state_after_s: 0.0

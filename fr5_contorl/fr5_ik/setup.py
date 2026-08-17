@@ -24,16 +24,10 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            #'free_control = fr5_ik.free_control_node:main', # deprecated
-            #'rcm_control = fr5_ik.rcm_control_node:main',
-            'rcm_two_twist = fr5_ik.rcm_two_twist:main',
-            'rcm_two_pos = fr5_ik.rcm_two_pos:main',
+            # RCM(트로카 구속) 계열은 초음파에 대응물이 없어 legacy_laparoscopic/ 으로 분리됨.
+            # 표면 접촉 정렬은 RCM이 아니라 Mx/My 기반 자세 정렬로 처리한다 (DESIGN_NOTES §5).
+            'us_diff_ik = fr5_ik.us_diff_ik_node:main',
             'freespace_two_twist = fr5_ik.freespace_two_twist:main',
-            'freespace_two_pos = fr5_ik.freespace_two_pos:main',
-            'rcm_two_delta = fr5_ik.rcm_two_delta:main',
-            'calc_gripper_wrt_new_rcm = fr5_ik.calc_gripper_wrt_new_rcm_node:main',
-            'rcm_two_delta_new_rcm = fr5_ik.rcm_two_delta_new_rcm:main',
-            'rcm_two_absolute_new_rcm = fr5_ik.rcm_two_absolute_new_rcm:main'
         ],
     },
 )

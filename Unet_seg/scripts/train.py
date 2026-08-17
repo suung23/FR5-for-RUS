@@ -20,12 +20,12 @@ from pathlib import Path
 
 from _common import parse_overrides, prepare_manifest  # noqa: E402  (path setup)
 
-from src.models.registry import build_model
-from src.models.report import build_architecture_report
-from src.training.trainer import Trainer
-from src.utils.config import load_config
-from src.utils.logging_utils import setup_logging
-from src.utils.seeding import seed_everything
+from rus_perception.models.registry import build_model
+from rus_perception.models.report import build_architecture_report
+from rus_perception.training.trainer import Trainer
+from rus_perception.utils.config import load_config
+from rus_perception.utils.logging_utils import setup_logging
+from rus_perception.utils.seeding import seed_everything
 
 logger = logging.getLogger("train")
 

@@ -19,23 +19,23 @@ from pathlib import Path
 
 from _common import parse_overrides, prepare_manifest  # noqa: E402  (path setup)
 
-from src.control.features import (
+from rus_perception.control.features import (
     FeatureExtractionConfig,
     warp_mask_with_flow,
 )
-from src.data.io import load_grayscale, load_mask, resize_image, resize_mask
-from src.flow.precomputed import load_flow_pair
-from src.inference.predictor import Predictor, PredictorConfig
-from src.metrics.latency import LatencyTracker
-from src.metrics.spatial import build_metric_report, compute_frame_metrics
-from src.metrics.temporal import (
+from rus_perception.data.io import load_grayscale, load_mask, resize_image, resize_mask
+from rus_perception.flow.precomputed import load_flow_pair
+from rus_perception.inference.predictor import Predictor, PredictorConfig
+from rus_perception.metrics.latency import LatencyTracker
+from rus_perception.metrics.spatial import build_metric_report, compute_frame_metrics
+from rus_perception.metrics.temporal import (
     TemporalFrameRecord,
     aggregate_temporal_metrics,
     compute_sequence_temporal_metrics,
 )
-from src.utils.config import load_config
-from src.utils.logging_utils import CsvWriter, JsonlWriter, setup_logging
-from src.utils.seeding import seed_everything
+from rus_perception.utils.config import load_config
+from rus_perception.utils.logging_utils import CsvWriter, JsonlWriter, setup_logging
+from rus_perception.utils.seeding import seed_everything
 
 logger = logging.getLogger("evaluate")
 
@@ -129,7 +129,7 @@ def main() -> int:
                     if path is not None and path.is_file():
                         try:
                             pair = load_flow_pair(path)
-                            from src.data.video_dataset import resize_flow
+                            from rus_perception.data.video_dataset import resize_flow
 
                             flow_backward = resize_flow(pair.backward, target_size)
                         except ValueError as exc:

@@ -1,0 +1,1820 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FR5 초음파 제어 아키텍처</title>
+
+<style>
+  /* 팔레트는 학술 도판 관례를 따른다: 흰 바탕, 저채도, 색은 기능적으로만.
+     힘/영상 두 도메인은 색상만이 아니라 **명도**로도 갈라 둔다 (L* 약 42 vs 27).
+     저널이 흑백으로 인쇄해도 두 계열이 회색조에서 구분되어야 하기 때문이다.
+     배경 톤도 따뜻함/차가움으로 한 번 더 갈라 이중으로 부호화한다. */
+  :root {
+    --bg:        #FFFFFF;
+    --surface:   #FFFFFF;
+    --surface-2: #F1F0ED;
+    --ink:       #111111;
+    --ink-2:     #3D3D3B;
+    --ink-3:     #6E6E6B;
+    --rule:      #BFBFBC;
+    --rule-2:    #E2E2DF;
+
+    --force:     #8A5A00;   /* 따뜻함 · 선 L*42 */
+    --force-bg:  #E8E1CE;   /*            면 L*90 — 음영 상자 */
+    --force-rule:#BFA269;
+
+    --image:     #17455C;   /* 차가움 · 선 L*27 */
+    --image-bg:  #FFFFFF;   /*            면 L*100 — 흰 상자 */
+    --image-rule:#93AAB8;
+
+    --warn:      #8C1D1D;
+    --warn-bg:   #F7EDED;
+    --warn-rule: #C9A2A2;
+
+    --ok:        #1F5130;
+
+    /* 논문 관례: 본문은 명조/Times, 도판 라벨은 Helvetica 계열.
+       작은 크기에서 산세리프가 더 잘 읽히기 때문이다. */
+    --serif: 'Times New Roman', 'Nimbus Roman', 'Liberation Serif',
+             'Noto Serif KR', Batang, '바탕', serif;
+    --sans: 'Helvetica Neue', Helvetica, Arial, 'Malgun Gothic',
+            'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+    --mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas,
+            'Liberation Mono', monospace;
+
+    --measure: 68ch;
+    --pad: clamp(20px, 4vw, 56px);
+  }
+
+  /* 다크는 화면 판독용이다. 인쇄본은 항상 위의 라이트 팔레트다. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:        #14140F;
+      --surface:   #1B1B17;
+      --surface-2: #24241F;
+      --ink:       #EDEBE4;
+      --ink-2:     #A8A69D;
+      --ink-3:     #77756D;
+      --rule:      #35352F;
+      --rule-2:    #26261F;
+
+      --force:     #D2A85C;
+      --force-bg:  #2A2214;
+      --force-rule:#5F5030;
+
+      --image:     #8FB6CC;
+      --image-bg:  #171F26;
+      --image-rule:#3A4C58;
+
+      --warn:      #D08C8C;
+      --warn-bg:   #2A1A1A;
+      --warn-rule: #5A3838;
+
+      --ok:        #7FB394;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg:        #14140F;
+    --surface:   #1B1B17;
+    --surface-2: #24241F;
+    --ink:       #EDEBE4;
+    --ink-2:     #A8A69D;
+    --ink-3:     #77756D;
+    --rule:      #35352F;
+    --rule-2:    #26261F;
+
+    --force:     #D2A85C;
+    --force-bg:  #2A2214;
+    --force-rule:#5F5030;
+
+    --image:     #8FB6CC;
+    --image-bg:  #171F26;
+    --image-rule:#3A4C58;
+
+    --warn:      #D08C8C;
+    --warn-bg:   #2A1A1A;
+    --warn-rule: #5A3838;
+
+    --ok:        #7FB394;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 0 var(--pad) 96px;
+  }
+
+  /* ---------- header ---------- */
+
+  .masthead {
+    padding: clamp(48px, 9vw, 104px) 0 40px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .kicker {
+    font-family: var(--sans);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0 0 20px;
+  }
+  h1 {
+    font-size: clamp(30px, 5vw, 46px);
+    line-height: 1.12;
+    letter-spacing: -0.012em;
+    font-weight: 700;
+    margin: 0 0 22px;
+    text-wrap: balance;
+    max-width: 18ch;
+  }
+  .standfirst {
+    font-size: clamp(16px, 1.8vw, 19px);
+    color: var(--ink-2);
+    max-width: 56ch;
+    margin: 0 0 34px;
+    line-height: 1.6;
+  }
+  .metastrip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 10px;
+  }
+  .meta {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.02em;
+    color: var(--ink-2);
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 5px 10px;
+    white-space: nowrap;
+  }
+  .meta b { color: var(--ink); font-weight: 600; }
+
+  /* ---------- sections ---------- */
+
+  section { padding-top: 72px; }
+
+  .eyebrow {
+    font-family: var(--sans);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin: 0 0 18px;
+  }
+  .eyebrow::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--rule);
+  }
+
+  h2 {
+    font-size: clamp(22px, 2.9vw, 28px);
+    line-height: 1.24;
+    letter-spacing: -0.008em;
+    font-weight: 700;
+    margin: 0 0 14px;
+    text-wrap: balance;
+    max-width: 26ch;
+  }
+  h3 {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0;
+    margin: 40px 0 12px;
+  }
+  p { max-width: var(--measure); margin: 0 0 16px; }
+  p.lead { font-size: 18px; color: var(--ink-2); }
+
+  a { color: var(--image); }
+
+  code, .m {
+    font-family: var(--mono);
+    font-size: 0.885em;
+    letter-spacing: -0.01em;
+  }
+  code {
+    background: var(--surface-2);
+    border-radius: 3px;
+    padding: 1px 5px;
+  }
+
+  strong { font-weight: 700; }
+  .fc { color: var(--force); }
+  .ic { color: var(--image); }
+  .wc { color: var(--warn); }
+
+  /* ---------- status chips ---------- */
+
+  .chip {
+    display: inline-block;
+    font-family: var(--sans);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 2px;
+    border: 1px solid;
+    vertical-align: 2px;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+  .chip-fix  { color: var(--ok);     border-color: var(--ok);     background: transparent; }
+  .chip-prop { color: var(--force);  border-color: var(--force-rule); background: var(--force-bg); }
+  .chip-meas { color: var(--image);  border-color: var(--image-rule); background: var(--image-bg); }
+  .chip-open { color: var(--warn);   border-color: var(--warn-rule);  background: var(--warn-bg); }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 22px;
+    padding: 16px 18px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    margin: 28px 0 0;
+  }
+  .legend div { font-size: 13.5px; color: var(--ink-2); }
+
+  /* ---------- figures ---------- */
+
+  figure {
+    margin: 30px 0 0;
+    padding: 24px 22px 18px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    overflow-x: auto;
+  }
+  figure svg {
+    display: block;
+    width: 100%;
+    min-width: 560px;
+    max-width: 100%;
+    height: auto;
+    color: var(--ink-2);
+  }
+  figcaption {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--rule-2);
+    font-size: 14px;
+    line-height: 1.58;
+    color: var(--ink-2);
+    max-width: 78ch;
+    min-width: 0;
+  }
+  figcaption b { color: var(--ink); font-weight: 700; }
+
+  /* ---- svg primitives ----
+     학술 도판 관례: 가는 선(0.9–1.1), 각진 모서리, 옅은 면.
+     라벨은 Helvetica 계열 — 작은 크기에서 세리프보다 잘 읽힌다.
+     ROS 노드·토픽 이름만 고정폭으로 두어 식별자임을 드러낸다. */
+  .nd   { fill: var(--surface-2); stroke: var(--ink-3); stroke-width: 0.9; }
+  .nd-f { fill: var(--force-bg);  stroke: var(--force); stroke-width: 1.1; }
+  .nd-i { fill: var(--image-bg);  stroke: var(--image); stroke-width: 1.1; }
+  .nd-w { fill: var(--warn-bg);   stroke: var(--warn);  stroke-width: 1.1; }
+  .nd-o { fill: none;             stroke: var(--rule);  stroke-width: 0.9; }
+  /* SVG2 기하 속성. 마크업의 rx="5" 를 한 줄로 덮어 모두 각지게 만든다. */
+  .nd, .nd-f, .nd-i, .nd-w, .nd-o { rx: 1.5px; ry: 1.5px; }
+
+  .ed   { fill: none; stroke: var(--ink-3); stroke-width: 0.9; }
+  .ed-f { fill: none; stroke: var(--force); stroke-width: 1.1; }
+  .ed-i { fill: none; stroke: var(--image); stroke-width: 1.1; }
+  .ed-w { fill: none; stroke: var(--warn);  stroke-width: 1.0; }
+  .dash { stroke-dasharray: 4 3; }
+
+  .lbl   { fill: var(--ink);   font-family: var(--sans); font-size: 12px; font-weight: 700; }
+  .lbl-s { fill: var(--ink);   font-family: var(--mono); font-size: 10.5px; font-weight: 500; }
+  .lbl-d { fill: var(--ink-3); font-family: var(--sans); font-size: 10.5px; letter-spacing: 0.01em; }
+  .lbl-f { fill: var(--force); font-family: var(--sans); font-size: 10.5px; font-weight: 600; }
+  .lbl-i { fill: var(--image); font-family: var(--sans); font-size: 10.5px; font-weight: 600; }
+  .lbl-w { fill: var(--warn);  font-family: var(--sans); font-size: 10.5px; font-weight: 600; }
+  .hd-f  { fill: var(--force); font-family: var(--sans); font-size: 12px; font-weight: 700; }
+  .hd-i  { fill: var(--image); font-family: var(--sans); font-size: 12px; font-weight: 700; }
+
+  .ah   { fill: var(--ink-3); }
+  .ah-f { fill: var(--force); }
+  .ah-i { fill: var(--image); }
+  .ah-w { fill: var(--warn); }
+
+  .figlegend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    margin-top: 14px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-3);
+    letter-spacing: 0.02em;
+  }
+  .figlegend span { display: inline-flex; align-items: center; gap: 7px; }
+  .sw { width: 22px; height: 0; border-top-width: 2px; border-top-style: solid; display: inline-block; }
+
+  /* ---------- tables ---------- */
+
+  .tw { overflow-x: auto; margin: 24px 0 0; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 520px;
+    font-size: 14px;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 14px 10px 0;
+    border-bottom: 1px solid var(--rule-2);
+    vertical-align: top;
+  }
+  th {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    font-weight: 500;
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+  td.num, th.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: none; }
+
+  /* ---------- callouts ---------- */
+
+  .call {
+    margin: 28px 0 0;
+    padding: 20px 22px;
+    border-radius: 5px;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+  }
+  .call-w { border-color: var(--warn-rule); background: var(--warn-bg); }
+  .call-f { border-color: var(--force-rule); background: var(--force-bg); }
+  .call h4 {
+    margin: 0 0 8px;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: -0.008em;
+  }
+  .call-w h4 { color: var(--warn); }
+  .call-f h4 { color: var(--force); }
+  .call p { margin: 0 0 10px; font-size: 14.5px; max-width: 72ch; }
+  .call p:last-child { margin-bottom: 0; }
+
+  .eq {
+    font-family: var(--mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink);
+    padding: 14px 16px;
+    background: var(--bg);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    margin: 14px 0;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  /* ---------- cards ---------- */
+
+  .grid2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 18px;
+    margin: 28px 0 0;
+  }
+  .card {
+    padding: 22px;
+    border-radius: 6px;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+  }
+  .card-f { border-color: var(--force-rule); }
+  .card-i { border-color: var(--image-rule); }
+  .card h4 {
+    margin: 0 0 4px;
+    font-family: var(--mono);
+    font-size: 15px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+  }
+  .card-f h4 { color: var(--force); }
+  .card-i h4 { color: var(--image); }
+  .card .sub {
+    font-size: 12.5px;
+    color: var(--ink-3);
+    margin: 0 0 16px;
+    font-family: var(--mono);
+  }
+  .card ul { margin: 0; padding-left: 17px; font-size: 14px; color: var(--ink-2); }
+  .card li { margin-bottom: 6px; }
+  .card li b { color: var(--ink); font-weight: 650; }
+
+  /* diagnostic matrix */
+  .mx { width: 100%; min-width: 480px; border-collapse: separate; border-spacing: 6px; }
+  .mx td, .mx th { border: none; padding: 0; }
+  .mx th {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--ink-3); padding: 0 0 4px 4px;
+  }
+  .cell {
+    padding: 14px 16px;
+    border-radius: 5px;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+    font-size: 13.5px;
+    line-height: 1.5;
+    height: 100%;
+  }
+  .cell b { display: block; font-size: 14px; margin-bottom: 3px; }
+  .cell.bad  { border-color: var(--warn-rule);  background: var(--warn-bg); }
+  .cell.bad b { color: var(--warn); }
+  .cell.mid  { border-color: var(--image-rule); background: var(--image-bg); }
+  .cell.mid b { color: var(--image); }
+  .cell.good b { color: var(--ok); }
+  .cell.odd  { border-color: var(--force-rule); background: var(--force-bg); }
+  .cell.odd b { color: var(--force); }
+  .rowlbl {
+    font-family: var(--mono); font-size: 12px; color: var(--ink-2);
+    white-space: nowrap; padding-right: 8px; vertical-align: middle;
+  }
+
+  /* phase list */
+  .phases { list-style: none; margin: 26px 0 0; padding: 0; }
+  .phases li {
+    display: grid;
+    grid-template-columns: 60px 1fr;
+    gap: 18px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--rule-2);
+    align-items: start;
+  }
+  .phases li:last-child { border-bottom: none; }
+  .ph {
+    font-family: var(--mono); font-size: 12px; font-weight: 650;
+    color: var(--ink); background: var(--surface-2);
+    border-radius: 3px; padding: 4px 0; text-align: center;
+  }
+  .ph-done { color: var(--force); background: var(--force-bg); }
+  .phbody b { display: block; font-size: 15px; margin-bottom: 3px; }
+  .phbody span { font-size: 13.5px; color: var(--ink-2); }
+  .phbody em { font-style: normal; color: var(--ink-3); font-family: var(--mono); font-size: 12px; }
+
+  footer {
+    margin-top: 84px;
+    padding-top: 26px;
+    border-top: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-3);
+    line-height: 1.8;
+  }
+
+  :focus-visible { outline: 2px solid var(--image); outline-offset: 2px; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    html { scroll-behavior: smooth; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="kicker">설계 도식 · DESIGN_NOTES 요약 · 2026-08-14</p>
+    <h1>FR5 초음파 제어 아키텍처</h1>
+    <p class="standfirst">
+      복강경 봉합용 듀얼암 스택을 오른팔 단일 초음파 프로브 제어로 전환한다.
+      힘 축과 영상 축을 분리해 학습 대상을 5-DoF에서 3-DoF로 줄이는 것이 설계의 뼈대다.
+    </p>
+    <div class="metastrip">
+      <span class="meta">로봇 <b>FR5 오른팔</b></span>
+      <span class="meta">IP <b>192.168.58.3</b></span>
+      <span class="meta">IK <b>DLS (λ=0.02)</b></span>
+      <span class="meta">힘 한계 <b>7.0 N</b></span>
+      <span class="meta">policy <b>3-DoF</b></span>
+    </div>
+  </header>
+
+  <!-- ============ 전환의 성격 ============ -->
+  <section id="shift">
+    <p class="eyebrow">전환의 성격</p>
+    <h2>복강경 가정은 네 층위로 박혀 있다</h2>
+    <p class="lead">
+      층위마다 대응이 다르다. 위 세 층은 삭제와 교체로 끝나지만, 마지막 하나가 제어 구조를 바꾼다.
+    </p>
+
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th>층위</th><th>복강경</th><th>초음파</th><th>대응</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>표면</td><td>그리퍼 토픽, 듀얼암 네이밍</td><td>없음</td>
+            <td>삭제</td>
+          </tr>
+          <tr>
+            <td>기하</td><td>로드 0.64 m, RCM 거리 0.19 m</td><td>프로브 마운트</td>
+            <td>상수 교체 <span class="chip chip-meas">CAD 대기</span></td>
+          </tr>
+          <tr>
+            <td>구속</td><td>RCM — 트로카 고정점 통과</td><td>표면 접촉</td>
+            <td>구속 <b>삭제</b>, 대체물은 힘·모멘트</td>
+          </tr>
+          <tr>
+            <td><b>패러다임</b></td><td>접촉 = 이상(異常)</td><td><b>접촉 = 정상 상태</b></td>
+            <td>제어 구조 변경</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="call call-w">
+      <h4>오픈루프 위치 적분이 접촉 상태에서 갖는 의미</h4>
+      <p>
+        현재 서보 루프는 명령 속도를 그대로 적분한다 —
+        <code>current_joint_pos_deg[i] += vel_deg_s * dt</code>.
+        자유공간에서는 문제없지만, 조직이 밀어내도 적분기는 계속 전진한다.
+        admittance가 twist를 공급하는 정상 동작에서는 안전하나,
+        <b>루프가 죽으면</b>(노드 크래시 / US 끊김 / F/T 드롭아웃)
+        적분기는 마지막 속도를 워치독 시간만큼 유지한다.
+      </p>
+      <div class="eq">워치독 시간 × 접근 속도 = 최악 침투 깊이</div>
+      <p>
+        이 한 줄이 시스템의 안전 설계를 지배한다.
+        워치독을 <b>0.5 s → 0.1 s</b>로 줄이고, 만료 시 동작을 &ldquo;속도 0&rdquo;이 아니라
+        <b>법선 방향 후퇴</b>로 바꾼다. 0.1 s × 10 mm/s = 최악 1 mm.
+      </p>
+    </div>
+
+    <div class="legend">
+      <div><span class="chip chip-fix">확정</span> 사용자 결정</div>
+      <div><span class="chip chip-prop">제안</span> 승인된 초기값 · 튜닝 대상</div>
+      <div><span class="chip chip-meas">실측</span> 하드웨어 확인 후 확정</div>
+      <div><span class="chip chip-open">미결</span> 미논의</div>
+    </div>
+  </section>
+
+  <!-- ============ 전체 아키텍처 ============ -->
+  <section id="arch">
+    <p class="eyebrow">전체 아키텍처</p>
+    <h2>왼쪽이 힘, 오른쪽이 영상</h2>
+    <p class="lead">
+      영상 한 장이 세 갈래로 갈라진다. 세그멘테이션을 쓰지 않는 원시 품질 <span class="m fc">Q_raw</span>는
+      힘 축으로, 세그 기반 <span class="m ic">Q_seg</span>는 면내 축으로 내려간다.
+      두 최적화가 같은 축을 두고 다투지 않는다.
+    </p>
+
+    <figure>
+      <svg viewBox="0 0 1020 836" role="img"
+           aria-label="US 프레임그래버에서 시작해 원시 품질과 세그멘테이션 두 경로로 갈라진 뒤, 힘 탐색과 영상 policy를 거쳐 admittance, DLS 역기구학, 125 Hz 서보로 내려가는 제어 아키텍처. 서보에서 wrench가 admittance로 되먹임된다.">
+        <defs>
+          <marker id="aA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,1 L9,5 L0,9 z" class="ah"/>
+          </marker>
+          <marker id="aAf" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,1 L9,5 L0,9 z" class="ah-f"/>
+          </marker>
+          <marker id="aAi" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,1 L9,5 L0,9 z" class="ah-i"/>
+          </marker>
+        </defs>
+
+        <!-- R1 -->
+        <rect class="nd" x="400" y="24" width="220" height="48" rx="5"/>
+        <text class="lbl-s" x="510" y="44" text-anchor="middle">us_frame_node</text>
+        <text class="lbl-d" x="510" y="60" text-anchor="middle">프레임그래버 · 30 Hz</text>
+
+        <path class="ed" d="M510,72 L510,98 L265,98 L265,120" marker-end="url(#aA)"/>
+        <path class="ed" d="M510,98 L755,98 L755,120" marker-end="url(#aA)"/>
+        <text class="lbl-d" x="524" y="92">/us/image</text>
+
+        <!-- R2 -->
+        <rect class="nd-f" x="150" y="120" width="230" height="58" rx="5"/>
+        <text class="lbl-s" x="265" y="142" text-anchor="middle">quality_raw_node</text>
+        <text class="lbl-d" x="265" y="159" text-anchor="middle">고전 영상처리 · 세그 비의존</text>
+
+        <rect class="nd-i" x="640" y="120" width="230" height="58" rx="5"/>
+        <text class="lbl-s" x="755" y="142" text-anchor="middle">perception_node</text>
+        <text class="lbl-d" x="755" y="159" text-anchor="middle">Slim U-Net → ControlState</text>
+
+        <path class="ed-f" d="M265,178 L265,212 L130,212 L130,242" marker-end="url(#aAf)"/>
+        <path class="ed" d="M265,212 L460,212 L460,242" marker-end="url(#aA)"/>
+        <path class="ed-i" d="M755,178 L755,212 L890,212 L890,242" marker-end="url(#aAi)"/>
+        <path class="ed" d="M755,212 L560,212 L560,242" marker-end="url(#aA)"/>
+        <text class="lbl-f" x="188" y="205" text-anchor="middle">Q_raw</text>
+        <text class="lbl-i" x="836" y="205" text-anchor="middle">Q_seg · center_error</text>
+
+        <!-- R3 -->
+        <rect class="nd-f" x="30" y="242" width="200" height="58" rx="5"/>
+        <text class="lbl-s" x="130" y="264" text-anchor="middle">force_search_node</text>
+        <text class="lbl-d" x="130" y="281" text-anchor="middle">0.2 Hz</text>
+
+        <rect class="nd" x="410" y="242" width="200" height="58" rx="5"/>
+        <text class="lbl-s" x="510" y="264" text-anchor="middle">supervisor</text>
+        <text class="lbl-d" x="510" y="281" text-anchor="middle">상태머신 · 복구</text>
+
+        <rect class="nd-i" x="790" y="242" width="200" height="58" rx="5"/>
+        <text class="lbl-s" x="890" y="264" text-anchor="middle">policy_node</text>
+        <text class="lbl-d" x="890" y="281" text-anchor="middle">3-DoF · 5 Hz</text>
+
+        <path class="ed-f" d="M130,300 L130,360 L250,360 L250,418" marker-end="url(#aAf)"/>
+        <text class="lbl-f" x="196" y="353" text-anchor="middle">F_n*</text>
+
+        <path class="ed-i" d="M890,300 L890,360 L700,360 L700,418" marker-end="url(#aAi)"/>
+        <text class="lbl-i" x="796" y="353" text-anchor="middle">x, y, rz</text>
+
+        <path class="ed dash" d="M510,300 L510,384" marker-end="url(#aA)"/>
+        <text class="lbl-d" x="522" y="348">mode</text>
+
+        <!-- R4 admittance -->
+        <rect class="nd-o" x="170" y="386" width="680" height="132" rx="6"/>
+        <text class="lbl-s" x="192" y="408">admittance_node</text>
+        <text class="lbl-d" x="828" y="408" text-anchor="end">100 Hz</text>
+
+        <rect class="nd-f" x="192" y="418" width="286" height="82" rx="4"/>
+        <text class="lbl-f" x="335" y="441" text-anchor="middle">z  ←  F_z  →  F_n*</text>
+        <text class="lbl-f" x="335" y="461" text-anchor="middle">rx ←  M_x  →  0</text>
+        <text class="lbl-f" x="335" y="481" text-anchor="middle">ry ←  M_y  →  0</text>
+
+        <rect class="nd" x="560" y="418" width="268" height="82" rx="4"/>
+        <text class="lbl-s" x="694" y="447" text-anchor="middle">twist arbiter</text>
+        <text class="lbl-d" x="694" y="466" text-anchor="middle">힘축 3 + 영상축 3</text>
+        <text class="lbl-d" x="694" y="483" text-anchor="middle">QP 전환 지점</text>
+
+        <path class="ed" d="M478,459 L554,459" marker-end="url(#aA)"/>
+
+        <!-- R5 diff ik -->
+        <path class="ed" d="M510,518 L510,574" marker-end="url(#aA)"/>
+        <text class="lbl-d" x="522" y="550">/desired_twist · 100 Hz</text>
+
+        <rect class="nd" x="310" y="576" width="400" height="62" rx="5"/>
+        <text class="lbl-s" x="510" y="600" text-anchor="middle">diff_ik_node</text>
+        <text class="lbl-d" x="510" y="618" text-anchor="middle">solve(V, q) → q̇  ·  DLS λ=0.02</text>
+
+        <path class="ed dash" d="M710,607 L796,607" marker-end="url(#aA)"/>
+        <text class="lbl-d" x="802" y="604">추종오차 → supervisor</text>
+
+        <!-- R6 servo -->
+        <path class="ed" d="M510,638 L510,684" marker-end="url(#aA)"/>
+        <text class="lbl-d" x="522" y="666">q̇ · 100 Hz</text>
+
+        <rect class="nd" x="310" y="686" width="400" height="62" rx="5"/>
+        <text class="lbl-s" x="510" y="710" text-anchor="middle">servo_node</text>
+        <text class="lbl-d" x="510" y="728" text-anchor="middle">q += q̇·dt → ServoJ  ·  워치독 0.1 s</text>
+
+        <path class="ed" d="M510,748 L510,770" marker-end="url(#aA)"/>
+        <text class="lbl-d" x="522" y="765">125 Hz</text>
+
+        <rect class="nd" x="430" y="772" width="160" height="42" rx="5"/>
+        <text class="lbl-s" x="510" y="798" text-anchor="middle">FR5 오른팔</text>
+
+        <!-- wrench feedback, left rail -->
+        <path class="ed-f" d="M310,717 L110,717 L110,459 L186,459" marker-end="url(#aAf)"/>
+        <text class="lbl-f" x="120" y="620">wrench</text>
+        <text class="lbl-f" x="120" y="636">100 Hz</text>
+      </svg>
+
+      <div class="figlegend">
+        <span><i class="sw" style="border-color: var(--force);"></i> 힘 경로</span>
+        <span><i class="sw" style="border-color: var(--image);"></i> 영상 경로</span>
+        <span><i class="sw" style="border-color: var(--ink-3);"></i> 데이터</span>
+        <span><i class="sw" style="border-color: var(--ink-3); border-top-style: dashed;"></i> 모드 · 진단</span>
+      </div>
+
+      <figcaption>
+        <b>공간 배치가 곧 축 분담이다.</b> 왼쪽 레일은 힘 도메인(<span class="m">quality_raw → force_search → wrench</span>),
+        오른쪽은 영상 도메인(<span class="m">perception → policy</span>). 둘은 admittance 안의 arbiter에서 처음 만난다.
+        <span class="m">wrench</span> 되먹임이 servo에서 admittance로 올라가는 것이 유일한 폐루프이며,
+        나머지는 전부 하향 흐름이다.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ============ 축 분담 ============ -->
+  <section id="axes">
+    <p class="eyebrow">축 분담</p>
+    <h2>모멘트는 모호하지 않다</h2>
+    <p class="lead">
+      프로브면을 표면 법선에 맞추는 것은 rx/ry 회전이고, <b>M<sub>x</sub>, M<sub>y</sub>가 그 오정렬을 직접 측정한다.</b>
+      모서리가 눌리면 모멘트가 생기고, 나란하면 0에 수렴한다.
+    </p>
+
+    <figure>
+      <svg viewBox="0 0 720 290" role="img"
+           aria-label="프로브의 6개 자유도 중 z, rx, ry는 힘·모멘트 센서가 100 Hz로 구동하고, x, y, rz는 영상 policy가 5 Hz로 구동하는 축 분담도.">
+
+        <text class="hd-f" x="40" y="26">힘 · 모멘트 구동</text>
+        <text class="hd-i" x="680" y="26" text-anchor="end">영상 policy 구동</text>
+
+        <!-- left chips -->
+        <rect class="nd-f" x="40" y="44" width="200" height="42" rx="4"/>
+        <text class="lbl-f" x="140" y="70" text-anchor="middle">rx  ←  M_x  →  0</text>
+        <rect class="nd-f" x="40" y="98" width="200" height="42" rx="4"/>
+        <text class="lbl-f" x="140" y="124" text-anchor="middle">ry  ←  M_y  →  0</text>
+        <rect class="nd-f" x="40" y="152" width="200" height="42" rx="4"/>
+        <text class="lbl-f" x="140" y="178" text-anchor="middle">z  ←  F_z  →  F_n*</text>
+
+        <!-- right chips -->
+        <rect class="nd-i" x="480" y="44" width="200" height="42" rx="4"/>
+        <text class="lbl-i" x="580" y="70" text-anchor="middle">x   lateral</text>
+        <rect class="nd-i" x="480" y="98" width="200" height="42" rx="4"/>
+        <text class="lbl-i" x="580" y="124" text-anchor="middle">y   elevational</text>
+        <rect class="nd-i" x="480" y="152" width="200" height="42" rx="4"/>
+        <text class="lbl-i" x="580" y="178" text-anchor="middle">rz  영상면 회전</text>
+
+        <!-- leaders: 세 축이 하나의 스파인으로 모여 프로브에 들어간다 -->
+        <path class="ed-f" d="M240,65 L318,65"/>
+        <path class="ed-f" d="M240,119 L318,119"/>
+        <path class="ed-f" d="M240,173 L318,173"/>
+        <path class="ed-f" d="M318,65 L318,173"/>
+        <path class="ed-f" d="M318,119 L336,119"/>
+
+        <path class="ed-i" d="M480,65 L402,65"/>
+        <path class="ed-i" d="M480,119 L402,119"/>
+        <path class="ed-i" d="M480,173 L402,173"/>
+        <path class="ed-i" d="M402,65 L402,173"/>
+        <path class="ed-i" d="M402,119 L384,119"/>
+
+        <!-- tissue: 스파인 사이에만 그려 리더선과 교차하지 않게 한다 -->
+        <path d="M318,148 Q360,158 402,148 L402,198 L318,198 Z" fill="var(--surface-2)" stroke="none"/>
+        <path class="ed" d="M318,148 Q360,158 402,148"/>
+        <text class="lbl-d" x="410" y="146">조직 표면</text>
+
+        <!-- image fan -->
+        <path d="M340,153 L324,196 L396,196 L380,153 Z" fill="var(--image-bg)" stroke="var(--image-rule)" stroke-width="1"/>
+        <text class="lbl-i" x="360" y="216" text-anchor="middle">영상면</text>
+
+        <!-- probe -->
+        <rect class="nd" x="336" y="46" width="48" height="92" rx="5"/>
+        <rect class="nd" x="322" y="138" width="76" height="14" rx="3"/>
+        <text class="lbl-d" x="360" y="96" text-anchor="middle">probe</text>
+
+        <!-- bottom bands -->
+        <rect class="nd-f" x="40" y="220" width="300" height="52" rx="5"/>
+        <text class="lbl" x="60" y="243" style="fill: var(--force)">힘 루프 · 100 Hz</text>
+        <text class="lbl-d" x="60" y="261">아날리틱 · 학습 불필요</text>
+
+        <rect class="nd-i" x="380" y="220" width="300" height="52" rx="5"/>
+        <text class="lbl" x="400" y="243" style="fill: var(--image)">영상 policy · 5 Hz</text>
+        <text class="lbl-d" x="400" y="261">3-DoF · 학습 대상</text>
+      </svg>
+
+      <figcaption>
+        <b>자세 정렬이 30 Hz 영상 루프에서 100 Hz 힘 루프로 넘어간다.</b>
+        오정렬의 영상 신호(음영)는 다른 원인과 구별되지 않아 영상으로 배우기 특히 어려운 축이지만,
+        모멘트는 모호하지 않다. 단서: <span class="m">M_x, M_y → 0</span>은 접촉 패치가 대칭일 때만
+        법선 정렬과 등가이며, 곡면에서는 &ldquo;압력 중심이 프로브 중앙&rdquo;을 의미한다.
+      </figcaption>
+    </figure>
+
+    <h3>초안 대비 델타</h3>
+    <p>
+      원 초안의 hybrid controller는 힘 축 하나와 영상 5-DoF의 2분할이었다.
+      Mx/My 정렬이 들어오면서 <b>두 축이 영상에서 힘으로 넘어간다.</b>
+    </p>
+
+    <figure>
+      <svg viewBox="0 0 720 352" role="img"
+           aria-label="초안에서는 z만 힘 구동이고 나머지 5축이 영상 policy였으나, 수정본에서는 rx와 ry가 힘 루프로 이동해 policy가 3자유도로 줄어드는 비교도.">
+        <defs>
+          <marker id="aC" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,1 L9,5 L0,9 z" class="ah-f"/>
+          </marker>
+        </defs>
+
+        <text class="lbl" x="40" y="40">초안</text>
+        <text class="lbl-d" x="40" y="58">policy 5-DoF</text>
+        <text class="lbl" x="680" y="40" text-anchor="end">수정본</text>
+        <text class="lbl-d" x="680" y="58" text-anchor="end">policy 3-DoF</text>
+
+        <!-- left column -->
+        <rect class="nd-f" x="40" y="80" width="250" height="32" rx="3"/>
+        <text class="lbl-f" x="56" y="101">z</text>
+        <text class="lbl-d" x="274" y="101" text-anchor="end">힘</text>
+
+        <rect class="nd-i" x="40" y="120" width="250" height="32" rx="3"/>
+        <text class="lbl-i" x="56" y="141">x</text>
+        <text class="lbl-d" x="274" y="141" text-anchor="end">영상</text>
+
+        <rect class="nd-i" x="40" y="160" width="250" height="32" rx="3"/>
+        <text class="lbl-i" x="56" y="181">y</text>
+        <text class="lbl-d" x="274" y="181" text-anchor="end">영상</text>
+
+        <rect class="nd-i" x="40" y="200" width="250" height="32" rx="3"/>
+        <text class="lbl-i" x="56" y="221">rx</text>
+        <text class="lbl-d" x="274" y="221" text-anchor="end">영상</text>
+
+        <rect class="nd-i" x="40" y="240" width="250" height="32" rx="3"/>
+        <text class="lbl-i" x="56" y="261">ry</text>
+        <text class="lbl-d" x="274" y="261" text-anchor="end">영상</text>
+
+        <rect class="nd-i" x="40" y="280" width="250" height="32" rx="3"/>
+        <text class="lbl-i" x="56" y="301">rz</text>
+        <text class="lbl-d" x="274" y="301" text-anchor="end">영상</text>
+
+        <!-- transition bracket -->
+        <path class="ed-f" d="M300,204 L308,204 L308,268 L300,268"/>
+        <path class="ed-f" d="M308,236 L422,236" marker-end="url(#aC)"/>
+        <text class="lbl-f" x="365" y="228" text-anchor="middle">M_x, M_y</text>
+
+        <!-- right column -->
+        <rect class="nd-f" x="430" y="80" width="250" height="32" rx="3"/>
+        <text class="lbl-f" x="446" y="101">z</text>
+        <text class="lbl-d" x="664" y="101" text-anchor="end">힘</text>
+
+        <rect class="nd-i" x="430" y="120" width="250" height="32" rx="3"/>
+        <text class="lbl-i" x="446" y="141">x</text>
+        <text class="lbl-d" x="664" y="141" text-anchor="end">영상</text>
+
+        <rect class="nd-i" x="430" y="160" width="250" height="32" rx="3"/>
+        <text class="lbl-i" x="446" y="181">y</text>
+        <text class="lbl-d" x="664" y="181" text-anchor="end">영상</text>
+
+        <rect class="nd-f" x="430" y="200" width="250" height="32" rx="3"/>
+        <text class="lbl-f" x="446" y="221">rx</text>
+        <text class="lbl-d" x="664" y="221" text-anchor="end">힘</text>
+
+        <rect class="nd-f" x="430" y="240" width="250" height="32" rx="3"/>
+        <text class="lbl-f" x="446" y="261">ry</text>
+        <text class="lbl-d" x="664" y="261" text-anchor="end">힘</text>
+
+        <rect class="nd-i" x="430" y="280" width="250" height="32" rx="3"/>
+        <text class="lbl-i" x="446" y="301">rz</text>
+        <text class="lbl-d" x="664" y="301" text-anchor="end">영상</text>
+
+        <text class="lbl-f" x="360" y="338" text-anchor="middle">학습 대상 축  5 → 3</text>
+      </svg>
+
+      <figcaption>
+        <b>바뀐 것은 두 행뿐이지만 결과는 프로젝트 난이도를 가른다.</b>
+        학습 데이터 요구량이 줄고, 자세 정렬이 영상 지연에 묶이지 않는다.
+        비용은 중력·프로브 자중 보상과 wrench 기준점 이동을 제대로 해야 한다는 것 —
+        둘 다 현재 코드에 <b>전혀 없다</b>.
+      </figcaption>
+    </figure>
+
+    <div class="call call-w">
+      <h4>전제 조건 두 가지가 아직 코드에 없다</h4>
+      <p>
+        <b>페이로드 보상.</b> 전체 코드베이스에 <code>SetLoadWeight</code> / <code>SetForceSensorPayload</code>
+        호출이 하나도 없다. 프로브 자중 보상 없이는 Mx/My 정렬이 원리적으로 불가능하다.
+      </p>
+      <p>
+        <b>wrench 기준점 이동.</b> <span class="m">M_probe = M_sensor + r × F</span>.
+        <span class="m">r ≈ 0.1 m</span>, <span class="m">F_z ≈ 5 N</span>이면 오프셋 <b>0.5 N·m</b>로,
+        수십 mN·m 수준의 정렬 신호를 완전히 덮는다.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ 품질함수 ============ -->
+  <section id="quality">
+    <p class="eyebrow">품질함수</p>
+    <h2>최적화할 대상이 없는 상태로 시작할 수는 없다</h2>
+    <p class="lead">
+      <span class="m">ControlState</span>의 지표는 전부 방광을 찾은 것을 전제한다.
+      그런데 Stage 1 시작 시점에는 접촉이 나빠 방광이 안 보이고,
+      <span class="m">valid_for_control=False</span>가 뜨면서 Q 자체가 정의되지 않는다.
+    </p>
+
+    <div class="grid2">
+      <div class="card card-f">
+        <h4>Q_raw</h4>
+        <p class="sub">Stage 1 · 세그멘테이션 비의존 · 고전 영상처리</p>
+        <ul>
+          <li><b>contact_continuity</b> — 근거리가 어두운 A-line 비율의 여집합 <span class="m">w=1.5</span></li>
+          <li><b>near_field_echo</b> — 깊이 상위 15% 밴드 평균 강도 <span class="m">w=1.0</span></li>
+          <li><b>shadow_penalty</b> — 원거리 에너지가 붕괴한 A-line 비율의 여집합 <span class="m">w=1.0</span></li>
+          <li><b>total_echo_energy</b> — ROI 전체 평균 강도 plateau <span class="m">w=0.5</span></li>
+        </ul>
+      </div>
+      <div class="card card-i">
+        <h4>Q_seg</h4>
+        <p class="sub">Stage 2 · 기존 quality.py 재사용 · 코드 수정 불필요</p>
+        <ul>
+          <li><b>segmentation_confidence</b> <span class="m">w=1.0</span></li>
+          <li><b>mask_completeness</b> <span class="m">w=1.0</span></li>
+          <li><b>border_penalty</b> <span class="m">w=1.0</span></li>
+          <li><b>component_quality</b> <span class="m">w=1.0</span></li>
+          <li><b>lumen_contrast</b> <span class="m">w=0.5</span></li>
+          <li>시간축 3항 <span class="m">w=0</span> — 게이트로 이관</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="call call-w">
+      <h4>현행 Q를 그대로 쓰면 힘 탐색이 반대로 간다</h4>
+      <p>
+        <span class="m">Q</span>의 8개 항 중 3개가 시간축 안정성 항이다 —
+        <span class="m">temporal_iou</span>, <span class="m">centroid_stability</span>,
+        <span class="m">area_stability</span>. 가중치 합 <span class="m">2.0 / 6.0 = 1/3</span>.
+      </p>
+      <p>
+        힘을 바꾸면 영상이 <b>당연히</b> 변하고, 그러면 이 3개 항이 전부 떨어진다.
+        탐색기는 &ldquo;안 움직이는 게 최고&rdquo;라고 결론 내리고 힘을 올리지 않는다.
+      </p>
+      <p>
+        해법은 최적화 목적함수에서 시간축 가중치를 0으로 두고 판정을
+        <span class="m">valid_for_control</span> 게이트에만 남기는 것.
+        <span class="m">QualityConfig</span>가 가중치 주입을 이미 지원하므로
+        <b>설정만으로 끝난다</b>.
+      </p>
+    </div>
+
+    <h3>진단 분기 — 두 지표를 같이 읽는다</h3>
+    <p>
+      한쪽만 보면 &ldquo;품질이 나쁘다&rdquo;로 끝나지만, 둘을 같이 보면 원인이 갈린다.
+    </p>
+
+    <div class="tw">
+      <table class="mx">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Q_seg 정상</th>
+            <th>Q_seg 열화</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="rowlbl">Q_raw 정상</td>
+            <td><div class="cell good"><b>양호</b>유지</div></td>
+            <td><div class="cell mid"><b>면내 위치 문제</b>policy가 처리 · 상태 전이 없음</div></td>
+          </tr>
+          <tr>
+            <td class="rowlbl">Q_raw 열화</td>
+            <td><div class="cell odd"><b>과압 가능성</b>힘 감소 방향 탐색</div></td>
+            <td><div class="cell bad"><b>접촉 문제</b>힘 재탐색 · Stage 1b 재진입</div></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="call">
+      <h4>가장 큰 미검증 항목</h4>
+      <p>
+        <span class="m">Q_raw</span>의 4개 지표 자체가 검증되지 않았다.
+        이것들이 접촉력에 대해 단조 또는 단봉이 아니면 <b>Stage 1 전체가 무의미해진다.</b>
+        Phase 3의 통과 기준에 &ldquo;힘 응답 단조성 확인&rdquo;을 명시적으로 넣었다.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ 힘 탐색 ============ -->
+  <section id="search">
+    <p class="eyebrow">Stage 1 · 힘 탐색</p>
+    <h2>argmax가 아니라 동률 구간의 왼쪽 끝</h2>
+    <p class="lead">
+      위치 탐색이 아닌 힘 탐색이다. 탐색 변수는 스칼라 <span class="m">F_n</span> 하나이고,
+      각 레벨에서 홀드한 뒤 <b>구간 평균</b> <span class="m">Q̄(F)</span>로 판정한다.
+    </p>
+
+    <figure>
+      <svg viewBox="0 0 660 330" role="img"
+           aria-label="접촉력에 대한 구간 평균 품질 곡선. 최댓값은 5.0 뉴턴에서 나오지만, 최댓값의 97퍼센트 이상을 만족하는 가장 작은 힘인 4.0 뉴턴을 최적 힘으로 선택한다.">
+        <defs>
+          <marker id="aD" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+            <path d="M0,1 L9,5 L0,9 z" class="ah"/>
+          </marker>
+        </defs>
+
+        <!-- accepted band -->
+        <rect x="335" y="40" width="177" height="210" fill="var(--force-bg)" stroke="none"/>
+
+        <!-- axes -->
+        <path class="ed" d="M70,40 L70,250 L620,250"/>
+
+        <!-- threshold -->
+        <path class="ed-f dash" d="M70,68.7 L612,68.7"/>
+        <text class="lbl-f" x="78" y="62" text-anchor="start">(1−ε)·Q̄max   ε=0.03</text>
+
+        <!-- curve -->
+        <polyline class="ed-i" style="stroke-width:2.2"
+          points="70,203.8 114.2,178.6 158.3,149.2 202.5,117.7 246.7,92.5 290.8,75.7 335,67.3 379.2,64.2 423.3,63.1 467.5,64.2 511.7,67.3 555.8,73.6 600,84.1"/>
+
+        <!-- sample points -->
+        <circle cx="70"   cy="203.8" r="2.6" fill="var(--image)"/>
+        <circle cx="114.2" cy="178.6" r="2.6" fill="var(--image)"/>
+        <circle cx="158.3" cy="149.2" r="2.6" fill="var(--image)"/>
+        <circle cx="202.5" cy="117.7" r="2.6" fill="var(--image)"/>
+        <circle cx="246.7" cy="92.5" r="2.6" fill="var(--image)"/>
+        <circle cx="290.8" cy="75.7" r="2.6" fill="var(--image)"/>
+        <circle cx="379.2" cy="64.2" r="2.6" fill="var(--image)"/>
+        <circle cx="467.5" cy="64.2" r="2.6" fill="var(--image)"/>
+        <circle cx="511.7" cy="67.3" r="2.6" fill="var(--image)"/>
+        <circle cx="555.8" cy="73.6" r="2.6" fill="var(--image)"/>
+        <circle cx="600"   cy="84.1" r="2.6" fill="var(--image)"/>
+
+        <!-- argmax -->
+        <circle cx="423.3" cy="63.1" r="4" fill="none" stroke="var(--ink-3)" stroke-width="1.6"/>
+        <text class="lbl-d" x="423.3" y="52" text-anchor="middle">argmax  5.0 N</text>
+
+        <!-- F* -->
+        <path class="ed-f" d="M335,67.3 L335,250"/>
+        <circle cx="335" cy="67.3" r="5" fill="var(--force)"/>
+        <text class="lbl-f" x="326" y="112" text-anchor="end" style="font-size:12.5px">F* = 4.0 N</text>
+
+        <!-- safety -->
+        <path class="ed-w dash" d="M600,40 L600,250"/>
+        <text class="lbl-w" x="594" y="52" text-anchor="end">안전 한계 7 N</text>
+
+        <!-- ticks -->
+        <text class="lbl-d" x="70"  y="268" text-anchor="middle">1</text>
+        <text class="lbl-d" x="158.3" y="268" text-anchor="middle">2</text>
+        <text class="lbl-d" x="246.7" y="268" text-anchor="middle">3</text>
+        <text class="lbl-d" x="335" y="268" text-anchor="middle">4</text>
+        <text class="lbl-d" x="423.3" y="268" text-anchor="middle">5</text>
+        <text class="lbl-d" x="511.7" y="268" text-anchor="middle">6</text>
+        <text class="lbl-d" x="600" y="268" text-anchor="middle">7</text>
+        <text class="lbl-d" x="345" y="292" text-anchor="middle">접촉 법선력  F_n  [N]</text>
+        <text class="lbl-d" x="56" y="46" text-anchor="end">Q̄</text>
+
+        <text class="lbl-f" x="423" y="316" text-anchor="middle">최댓값과 구분되지 않는 가장 작은 힘 → 1.0 N 절약</text>
+      </svg>
+
+      <figcaption>
+        <b>선택 규칙은 <span class="m">F* = min{ F : Q̄(F) ≥ (1−ε)·max Q̄ }</span>이다.</b>
+        음영 구간이 최댓값과 통계적으로 구분되지 않는 영역이고, 그 <b>왼쪽 끝</b>을 고른다.
+        환자 부담을 줄이는 방향으로 의도적으로 편향된 규칙이다.
+      </figcaption>
+    </figure>
+
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th>파라미터</th><th class="num">값</th><th>근거</th><th class="num">상태</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>힘 격자</td><td class="num">1.0 → 7.0 N @ 0.5 N</td><td>하한은 접촉 확인 가능한 최소, 상한은 안전 한계</td><td><span class="chip chip-prop">제안</span></td></tr>
+          <tr><td>홀드 윈도우</td><td class="num">1.0 s (30 프레임)</td><td>조직 점탄성 완화 + 통계 안정</td><td><span class="chip chip-prop">제안</span></td></tr>
+          <tr><td>램프 속도</td><td class="num">≤ 2 N/s</td><td>안전</td><td><span class="chip chip-prop">제안</span></td></tr>
+          <tr><td>ε 동률 허용치</td><td class="num">0.03</td><td>잡음보다 크고 의미 있는 차이보다 작게</td><td><span class="chip chip-prop">제안</span></td></tr>
+          <tr><td>최소 유효 프레임 비율</td><td class="num">60 %</td><td>미달 시 그 레벨은 측정 실패 처리</td><td><span class="chip chip-prop">제안</span></td></tr>
+          <tr><td>안전 하드 한계</td><td class="num">7.0 N</td><td>추후 정밀 설정</td><td><span class="chip chip-fix">확정</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="call call-f">
+      <h4>FORCE LOCK은 완전히 잠그지 않는다</h4>
+      <p>
+        <span class="m">F_n*</span>를 고정한 채 움직이면 프로브가 곡률과 조직 특성이 다른 지점으로 이동한다.
+        그 지점의 최적 힘은 <span class="m">F_n*</span>가 아니다. 기울이면 접촉 패치 자체가 바뀐다.
+      </p>
+      <p>
+        따라서 Stage 1은 끝나지 않고 <b>0.2 Hz 배경 루프로 잔존</b>한다.
+        전체 재탐색이 아니라 <span class="m">±0.25 N</span> 디더로 경사를 추정해
+        <span class="m">F_n*</span>를 <span class="m">0.1 N</span>씩 옮긴다.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ 상태 머신 ============ -->
+  <section id="fsm">
+    <p class="eyebrow">감독 · 실패 복구</p>
+    <h2>실패마다 다른 곳으로 돌아간다</h2>
+    <p class="lead">
+      Slim U-Net이 machine-readable한 거부 사유를 주므로, 이유별로 다른 복구 동작을 매핑할 수 있다.
+      접촉 불량은 Stage 1a로, 방광 소실은 Stage 1b로 돌아간다.
+    </p>
+
+    <figure>
+      <svg viewBox="0 0 760 430" role="img"
+           aria-label="IDLE에서 시작해 원격조작 접근, Stage 1a 접촉, Stage 1b 초점, Stage 2 스캔으로 진행하고, 실패 시 이전 단계로 되돌아가거나 안전 위반 시 후퇴 상태로 빠지는 상태 전이도.">
+        <defs>
+          <marker id="aE" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,1 L9,5 L0,9 z" class="ah"/>
+          </marker>
+          <marker id="aEw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,1 L9,5 L0,9 z" class="ah-w"/>
+          </marker>
+          <marker id="aEf" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,1 L9,5 L0,9 z" class="ah-f"/>
+          </marker>
+        </defs>
+
+        <rect class="nd" x="40" y="30" width="170" height="46" rx="5"/>
+        <text class="lbl-s" x="125" y="58" text-anchor="middle">IDLE</text>
+
+        <rect class="nd" x="40" y="120" width="170" height="46" rx="5"/>
+        <text class="lbl-s" x="125" y="148" text-anchor="middle">TELEOP_APPROACH</text>
+
+        <rect class="nd-f" x="40" y="210" width="170" height="46" rx="5"/>
+        <text class="lbl-s" x="125" y="232" text-anchor="middle">STAGE1A_CONTACT</text>
+        <text class="lbl-d" x="125" y="247" text-anchor="middle">Q_raw 힘탐색</text>
+
+        <rect class="nd-f" x="290" y="210" width="170" height="46" rx="5"/>
+        <text class="lbl-s" x="375" y="232" text-anchor="middle">STAGE1B_FOCUS</text>
+        <text class="lbl-d" x="375" y="247" text-anchor="middle">Q_seg 미세탐색</text>
+
+        <rect class="nd-i" x="540" y="210" width="170" height="46" rx="5"/>
+        <text class="lbl-s" x="625" y="232" text-anchor="middle">STAGE2_SCAN</text>
+        <text class="lbl-d" x="625" y="247" text-anchor="middle">3-DoF 스캐닝</text>
+
+        <rect class="nd-w" x="290" y="340" width="170" height="46" rx="5"/>
+        <text class="lbl-s" x="375" y="362" text-anchor="middle">RETREAT</text>
+        <text class="lbl-d" x="375" y="377" text-anchor="middle">법선 후퇴 · 힘 → 0</text>
+
+        <!-- forward -->
+        <path class="ed" d="M125,76 L125,114" marker-end="url(#aE)"/>
+        <text class="lbl-d" x="136" y="100">engage</text>
+
+        <path class="ed" d="M125,166 L125,204" marker-end="url(#aE)"/>
+        <text class="lbl-d" x="136" y="190">F_n &gt; 0.5 N · 0.2 s</text>
+
+        <path class="ed" d="M210,226 L284,226" marker-end="url(#aE)"/>
+        <text class="lbl-d" x="247" y="219" text-anchor="middle">Q_raw ≥ 0.6</text>
+
+        <path class="ed" d="M460,226 L534,226" marker-end="url(#aE)"/>
+        <text class="lbl-d" x="497" y="219" text-anchor="middle">F* 수렴</text>
+
+        <!-- back edges -->
+        <path class="ed" d="M534,248 L460,248" marker-end="url(#aE)"/>
+        <text class="lbl-d" x="497" y="264" text-anchor="middle">valid=False ×15</text>
+
+        <path class="ed" d="M375,210 L375,143 L216,143" marker-end="url(#aE)"/>
+        <text class="lbl-d" x="300" y="136" text-anchor="middle">복구 2회 실패</text>
+
+        <!-- retreat in -->
+        <path class="ed-w" d="M125,256 L125,363 L284,363" marker-end="url(#aEw)"/>
+        <text class="lbl-w" x="200" y="356" text-anchor="middle">접촉 실패</text>
+
+        <path class="ed-w" d="M625,256 L625,363 L466,363" marker-end="url(#aEw)"/>
+        <text class="lbl-w" x="548" y="356" text-anchor="middle">안전 위반</text>
+
+        <!-- retreat out, far-left rail -->
+        <path class="ed" d="M330,386 L330,406 L20,406 L20,143 L34,143" marker-end="url(#aE)"/>
+        <text class="lbl-d" x="175" y="400" text-anchor="middle">후퇴 완료 + 확인</text>
+
+        <!-- background loop -->
+        <path class="ed-f" d="M660,210 L660,180 L700,180 L700,204" marker-end="url(#aEf)"/>
+        <text class="lbl-f" x="680" y="172" text-anchor="middle">배경 힘 적응 0.2 Hz</text>
+      </svg>
+
+      <figcaption>
+        <b>거부 사유 → 복구 동작 매핑.</b>
+        <span class="m">low_segmentation_confidence</span>는 접촉 불량 의심이므로 STAGE1A로,
+        <span class="m">empty_mask</span>는 방광 소실이므로 STAGE1B로 돌아간다.
+        <span class="m">excessive_border_contact</span>는 면내 위치 문제라 상태 전이 없이 policy 목표에 반영된다.
+        Stage 1a의 실패는 기존 13종 코드 밖이라 <span class="m">no_contact</span>,
+        <span class="m">poor_acoustic_coupling</span> 등 신규 코드가 필요하다.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ============ 타임스케일 ============ -->
+  <section id="rates">
+    <p class="eyebrow">타임스케일</p>
+    <h2>루프가 서로 싸우지 않으려면 대역이 벌어져야 한다</h2>
+
+    <figure>
+      <svg viewBox="0 0 720 250" role="img"
+           aria-label="0.1 헤르츠에서 200 헤르츠까지의 로그 축 위에 다섯 개 제어 루프를 배치한 그림. 힘 루프 100 헤르츠와 영상 policy 5 헤르츠 사이가 20배 벌어져 있다.">
+        <defs>
+          <marker id="aF" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+            <path d="M0,1 L9,5 L0,9 z" class="ah"/>
+          </marker>
+        </defs>
+
+        <!-- axis -->
+        <path class="ed" d="M60,150 L668,150"/>
+        <path class="ed" d="M60,145 L60,155"/>
+        <path class="ed" d="M241.8,145 L241.8,155"/>
+        <path class="ed" d="M423.6,145 L423.6,155"/>
+        <path class="ed" d="M605.5,145 L605.5,155"/>
+        <text class="lbl-d" x="60"   y="172" text-anchor="middle">0.1</text>
+        <text class="lbl-d" x="241.8" y="172" text-anchor="middle">1</text>
+        <text class="lbl-d" x="423.6" y="172" text-anchor="middle">10</text>
+        <text class="lbl-d" x="605.5" y="172" text-anchor="middle">100 Hz</text>
+
+        <!-- 0.2 Hz -->
+        <circle cx="114.7" cy="150" r="5" fill="var(--force)"/>
+        <path class="ed-f" d="M114.7,145 L114.7,110"/>
+        <text class="lbl-f" x="114.7" y="102" text-anchor="middle">F_n* 적응</text>
+        <text class="lbl-d" x="114.7" y="88" text-anchor="middle">0.2 Hz</text>
+
+        <!-- 5 Hz -->
+        <circle cx="368.9" cy="150" r="5" fill="var(--image)"/>
+        <path class="ed-i" d="M368.9,145 L368.9,72"/>
+        <text class="lbl-i" x="368.9" y="64" text-anchor="middle">영상 policy</text>
+        <text class="lbl-d" x="368.9" y="50" text-anchor="middle">5 Hz</text>
+
+        <!-- 30 Hz -->
+        <circle cx="510.4" cy="150" r="5" fill="var(--image)"/>
+        <path class="ed-i" d="M510.4,145 L510.4,110"/>
+        <text class="lbl-i" x="510.4" y="102" text-anchor="middle">US 인식</text>
+        <text class="lbl-d" x="510.4" y="88" text-anchor="middle">30 Hz</text>
+
+        <!-- 100 / 125 -->
+        <circle cx="605.5" cy="150" r="5" fill="var(--force)"/>
+        <circle cx="623.1" cy="150" r="5" fill="var(--ink-3)"/>
+        <path class="ed-f" d="M614,145 L614,72"/>
+        <text class="lbl-f" x="640" y="64" text-anchor="middle">admittance · IK · 서보</text>
+        <text class="lbl-d" x="640" y="50" text-anchor="middle">100 – 125 Hz</text>
+
+        <!-- 20x span -->
+        <path class="ed" d="M368.9,205 L605.5,205" marker-start="url(#aF)" marker-end="url(#aF)"/>
+        <text class="lbl-s" x="487" y="198" text-anchor="middle">20× 분리</text>
+        <text class="lbl-d" x="487" y="226" text-anchor="middle">힘 루프와 영상 루프가 간섭하지 않는 구간</text>
+      </svg>
+
+      <figcaption>
+        <b>US 프레임그래버 지연이 이 그림의 유일한 미지수다.</b>
+        50 ms를 넘으면 5 Hz policy 루프의 위상 여유가 위험해진다.
+        또 현재 <span class="m">diff_ik_node</span>의 기원 코드에는 고정 주기 루프가 없다 —
+        twist 콜백 구동이므로 100 Hz 타이머를 새로 세워야 한다.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ============ 인벤토리 ============ -->
+  <section id="migration">
+    <p class="eyebrow">전환 인벤토리</p>
+    <h2>RCM은 개조가 아니라 삭제다</h2>
+    <p class="lead">
+      RCM은 초음파에 대응물이 없다. 가상 구속이 필요하다면 그것은 표면 법선 정렬이고,
+      그건 Mx/My로 처리한다.
+    </p>
+
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th>대상</th><th>처리</th><th>비고</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="m">fairino/ SDK</td><td>유지</td><td>F/T API 전부 여기 — <span class="m">ft_sensor_data</span>는 RPC 없이 state pkg 직독</td></tr>
+          <tr><td class="m">fr5_servo_joint_control_node</td><td><b>개조 (핵심 재사용)</b></td><td>125 Hz 적분기 + 워치독이 자산. 단일팔화 · 그리퍼 제거 · wrench 발행 추가</td></tr>
+          <tr><td class="m">freespace_two_twist</td><td><b>개조 → diff_ik_node</b></td><td>단일팔 · 100 Hz 타이머 · <span class="m">solve()</span> 분리 · 추종 모니터</td></tr>
+          <tr><td class="m">rcm_* (6개)</td><td><b>폐기</b></td><td>RCM 구속 자체가 불필요</td></tr>
+          <tr><td class="m">camera_node</td><td>개조 → <span class="m">us_frame_node</span></td><td>타이머 콜백 내 <span class="m">imshow</span> + <span class="m">waitKey</span> 반드시 제거 — 캡처 경로에 GUI 지연</td></tr>
+          <tr><td>eye-to-hand 캘리브 일체</td><td><b>폐기</b></td><td>내시경용. US는 probe-to-image 캘리브로 절차 자체가 다름</td></tr>
+          <tr><td class="m">fr5_inference (suturing ×5)</td><td>폐기</td><td>chunk delta 발행 구조만 policy 노드 템플릿으로 참조</td></tr>
+          <tr><td class="m">dataset 수집기</td><td>개조</td><td>wrench · US · ControlState 추가 + 시간 동기 결함 수정</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>제거해야 하는 위험 잔재</h3>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th class="num">#</th><th>위치</th><th>문제</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="num">1</td><td class="m">gripper_callback</td><td><span class="m">ServoMoveEnd</span> → <span class="m">MoveGripper</span> → <span class="m">ServoMoveStart</span>. <b>접촉 중 서보 모드 중단</b></td></tr>
+          <tr><td class="num">2</td><td class="m">__init__ 그리퍼 테스트</td><td><span class="m">ActGripper</span> + <span class="m">MoveGripper</span> 2회 + <span class="m">sleep(4)</span></td></tr>
+          <tr><td class="num">3</td><td class="m">perform_homing</td><td>접촉 중이면 <b>프로브가 피부를 긁으며 이동</b>. 법선 후퇴 선행이 강제되어야 함</td></tr>
+          <tr><td class="num">4</td><td>툴 오프셋</td><td>5개 파일에 하드코딩 — <span class="m">0.64 / 0.615 / 0.22</span> 불일치. YAML 단일화</td></tr>
+          <tr><td class="num">5</td><td>페이로드 설정</td><td>호출 <b>부재</b>. Mx/My 정렬의 전제</td></tr>
+          <tr><td class="num">6</td><td class="m">max_joint_vel = 1.5</td><td>자유공간 기준. 접촉 중 과도 → 0.5 rad/s</td></tr>
+          <tr><td class="num">7</td><td>시간 동기</td><td>&ldquo;최신값 스냅샷&rdquo;에 <span class="m">time.time()</span>. 학습 데이터의 근본 품질 문제</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ 로드맵 ============ -->
+  <section id="roadmap">
+    <p class="eyebrow">구현 순서</p>
+    <h2>Phase 0–2는 초음파 없이 간다</h2>
+    <p class="lead">
+      각 Phase는 검증 기준을 통과해야 다음으로 넘어간다.
+      하드웨어 대기와 병렬로 진행할 수 있는 구간이 앞쪽에 몰려 있다.
+    </p>
+
+    <ul class="phases">
+      <li>
+        <span class="ph ph-done">0</span>
+        <span class="phbody">
+          <b>단일팔 골격</b>
+          <span>servo_node 개조(그리퍼 제거 · wrench 발행), 툴 변환 YAML, diff_ik 개조 + <span class="m">solve()</span> + 추종 모니터, RCM·듀얼암 정리</span><br>
+          <em>검증 — dummy 노드로 자유공간 twist 추종, 추종 오차 &lt; 임계</em>
+        </span>
+      </li>
+      <li>
+        <span class="ph ph-done">1</span>
+        <span class="phbody">
+          <b>F/T 통합</b>
+          <span>페이로드 식별, wrench 기준점 이동, z축 admittance만</span><br>
+          <em>검증 — 팬텀에 일정 힘 유지 · 부호 규약 검증</em>
+        </span>
+      </li>
+      <li>
+        <span class="ph ph-done">2</span>
+        <span class="phbody">
+          <b>rx/ry 정렬</b>
+          <span>Mx/My 기반 자세 정렬 추가</span><br>
+          <em>검증 — 경사면 15°에 프로브 자동 정렬</em>
+        </span>
+      </li>
+      <li>
+        <span class="ph">3</span>
+        <span class="phbody">
+          <b>US 파이프라인</b>
+          <span>us_frame_node, perception_node, Q_raw</span><br>
+          <em>검증 — 지연 실측 · Q_raw 지표의 힘 응답 단조성 확인</em>
+        </span>
+      </li>
+      <li>
+        <span class="ph">4</span>
+        <span class="phbody">
+          <b>Stage 1 힘 탐색</b>
+          <span>1a + 1b</span><br>
+          <em>검증 — F* 재현성, 동일 지점 반복 시 분산</em>
+        </span>
+      </li>
+      <li>
+        <span class="ph">5</span>
+        <span class="phbody">
+          <b>supervisor</b>
+          <span>상태머신 + 복구 매핑</span><br>
+          <em>검증 — 강제 실패 주입 시 정상 복구</em>
+        </span>
+      </li>
+      <li>
+        <span class="ph">6</span>
+        <span class="phbody">
+          <b>policy</b>
+          <span>3-DoF · 데이터 수집 + 학습</span><br>
+          <em>선행 조건 — 모델 형태 결정 <span class="chip chip-open">미결</span></em>
+        </span>
+      </li>
+    </ul>
+
+    <h3>남은 미지수</h3>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th>항목</th><th>영향</th><th class="num">상태</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>프로브 마운트 CAD</td><td>툴 변환 · wrench 기준점 <span class="m">r</span>. Phase 0의 전제</td><td><span class="chip chip-meas">곧 제공</span></td></tr>
+          <tr><td>F/T 모델 · 장착 · 레이트</td><td>100 Hz admittance 가능 여부. SDK 근거로는 낙관적</td><td><span class="chip chip-meas">실측</span></td></tr>
+          <tr><td>US 프레임그래버 지연</td><td>50 ms 초과 시 policy 대역 재설계</td><td><span class="chip chip-meas">실측</span></td></tr>
+          <tr><td>US 영상 기하</td><td>Q_raw의 ROI · 깊이 밴드 정의</td><td><span class="chip chip-meas">실측</span></td></tr>
+          <tr><td>왼팔 물리적 존재</td><td>정적 장애물 취급 필요성</td><td><span class="chip chip-open">미결</span></td></tr>
+          <tr><td>policy 모델 형태</td><td>world model / IBVS interaction matrix / behavior cloning</td><td><span class="chip chip-open">미결</span></td></tr>
+          <tr><td>Q_raw 4개 지표 타당성</td><td>단조성 불성립 시 Stage 1 전체 재설계</td><td><span class="chip chip-open">미검증</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="perception">
+    <div class="eyebrow">부록 A · 지각 절반의 내부</div>
+    <h2>두 품질함수의 정의 항목, 그리고 사이에 놓인 망</h2>
+
+    <p class="lead">
+      §6은 품질함수가 <em>왜</em> 두 개여야 하는지를 다룬다. 여기서는 그 둘이 <em>무엇으로
+      계산되는지</em>를 항 단위로 적는다. 정의처는 둘 다 <code>Unet_seg</code>
+      (<code>rus_perception/control/</code>)이고, ROS 노드는 이 함수들을 호출하는 얇은 래퍼다.
+    </p>
+
+    <p>
+      두 함수는 형태가 같다 &#8212; <code>[0,1]</code> 하위점수의 가중평균. 다른 것은
+      <b>무엇으로부터</b> 계산하느냐이고, 그래서 <b>언제부터 정의되느냐</b>가 갈린다.
+      <span class="fc">Q_raw</span>는 망을 통과하지 않으므로 접촉 첫 프레임부터 값이 나오고,
+      <span class="ic">Q_seg</span>는 세그멘테이션이 성립한 뒤에야 의미를 가진다.
+    </p>
+
+    <figure>
+      <svg viewBox="0 0 980 796" role="img"
+           aria-label="Q_raw와 Q_seg 두 품질함수의 전체 정의. 왼쪽 Q_raw는 원시 B-mode에서 계산하는 4개 하위점수 near_field_echo, contact_continuity, total_echo_energy, shadow_penalty로 가중치 합 4.0이다. 오른쪽 Q_seg는 세그멘테이션 출력에서 계산하는 8개 하위점수로 가중치 합 6.5이며, 시간축 3항은 힘 탐색 시 가중치 0으로 둔다. 각 함수의 판정 게이트와 이유 코드가 아래에 나열된다.">
+
+        <!-- ================= column headers ================= -->
+        <text class="hd-f" x="20" y="18">Q_raw &#8212; 원시 B-mode 접촉 품질</text>
+        <text class="lbl-d" x="20" y="36">망 이전 &#183; 마스크 없음 &#183; 이력 없음 &#183; 접촉 첫 프레임부터 정의</text>
+        <text class="lbl-d" x="470" y="18" text-anchor="end">control/raw_quality.py</text>
+
+        <text class="hd-i" x="530" y="18">Q_seg &#8212; 세그멘테이션 제어 품질</text>
+        <text class="lbl-d" x="530" y="36">망 이후 &#183; 방광을 찾은 뒤에만 정의</text>
+        <text class="lbl-d" x="960" y="18" text-anchor="end">control/quality.py</text>
+
+        <!-- column divider -->
+        <path class="ed dash" d="M500,8 L500,700"/>
+
+        <!-- ================= formulas ================= -->
+        <rect class="nd-o" x="20" y="50" width="450" height="34"/>
+        <text class="lbl-s" x="245" y="71" text-anchor="middle">Q_raw = &#931; w&#7522;s&#7522; / &#931; w&#7522; &#8712; [0,1]&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#931;w = 4.0&#160;&#183;&#160;4 항</text>
+
+        <rect class="nd-o" x="530" y="50" width="430" height="34"/>
+        <text class="lbl-s" x="745" y="71" text-anchor="middle">Q_seg = &#931; w&#7522;s&#7522; / &#931; w&#7522; &#8712; [0,1]&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#931;w = 6.5&#160;&#183;&#160;8 항</text>
+
+        <!-- ================= Q_raw sub-scores ================= -->
+        <rect class="nd-f" x="20" y="98" width="450" height="46"/>
+        <text class="lbl-s" x="32" y="118">near_field_echo</text>
+        <text class="lbl-f" x="458" y="118" text-anchor="end">w 1.0</text>
+        <text class="lbl-d" x="32" y="135">근거리 밴드(얕은 쪽 15%) 평균 &#247; 기준 0.45</text>
+
+        <rect class="nd-f" x="20" y="152" width="450" height="46"/>
+        <text class="lbl-s" x="32" y="172">contact_continuity</text>
+        <text class="lbl-f" x="458" y="172" text-anchor="end">w 1.5  &#8212; 최대</text>
+        <text class="lbl-d" x="32" y="189">1 &#8722; (근거리 평균 &lt; 0.10 인 A-line 비율)  &#183;  공기층은 광선을 통째로 죽인다</text>
+
+        <rect class="nd-f" x="20" y="206" width="450" height="46"/>
+        <text class="lbl-s" x="32" y="226">total_echo_energy</text>
+        <text class="lbl-f" x="458" y="226" text-anchor="end">w 0.5</text>
+        <text class="lbl-d" x="32" y="243">ROI 전체 평균 강도의 plateau  &#183;  0.30 &#177; 0.12 안이면 1.0</text>
+
+        <rect class="nd-f" x="20" y="260" width="450" height="46"/>
+        <text class="lbl-s" x="32" y="280">shadow_penalty</text>
+        <text class="lbl-f" x="458" y="280" text-anchor="end">w 1.0</text>
+        <text class="lbl-d" x="32" y="297">1 &#8722; (원거리 밴드(깊은 쪽 35%) 에너지가 붕괴한 A-line 비율)</text>
+
+        <!-- shadow criterion detail -->
+        <rect class="nd-o" x="34" y="316" width="436" height="38"/>
+        <text class="lbl-d" x="46" y="332">붕괴 판정 = 프레임 자신의 원거리 P90 &#215; 0.25 미만  <tspan class="lbl-f">또는</tspan>  절대 0.02 미만</text>
+        <text class="lbl-d" x="46" y="348">중앙값이 아닌 이유: 절반 이상이 음영이면 중앙값 자체가 음영 레벨이 된다</text>
+
+        <!-- ================= Q_seg sub-scores ================= -->
+        <rect class="nd-i" x="530" y="98" width="430" height="46"/>
+        <text class="lbl-s" x="542" y="118">segmentation_confidence</text>
+        <text class="lbl-i" x="948" y="118" text-anchor="end">w 1.0</text>
+        <text class="lbl-d" x="542" y="135">mean(|2p &#8722; 1|)  &#183;  프레임 평균 이진 확신도, 임계값 없음</text>
+
+        <rect class="nd-i" x="530" y="152" width="430" height="46"/>
+        <text class="lbl-s" x="542" y="172">mask_completeness</text>
+        <text class="lbl-i" x="948" y="172" text-anchor="end">w 1.0</text>
+        <text class="lbl-d" x="542" y="189">면적비 plateau  &#183;  target <tspan class="lbl-w">0.15 &#177; 0.10 &#8212; 미검증 임의값</tspan></text>
+
+        <rect class="nd-i" x="530" y="206" width="430" height="46"/>
+        <text class="lbl-s" x="542" y="226">border_penalty</text>
+        <text class="lbl-i" x="948" y="226" text-anchor="end">w 1.0</text>
+        <text class="lbl-d" x="542" y="243">exp(&#8722;border_contact_ratio / 0.15)  &#183;  시야에 잘린 정도</text>
+
+        <rect class="nd-i" x="530" y="260" width="430" height="46"/>
+        <text class="lbl-s" x="542" y="280">component_quality</text>
+        <text class="lbl-i" x="948" y="280" text-anchor="end">w 1.0</text>
+        <text class="lbl-d" x="542" y="297">최대 연결성분 면적 &#247; 원시 마스크 면적  &#183;  1.0 = 덩어리 하나</text>
+
+        <rect class="nd-i" x="530" y="314" width="430" height="46"/>
+        <text class="lbl-s" x="542" y="334">lumen_contrast</text>
+        <text class="lbl-i" x="948" y="334" text-anchor="end">w 0.5  &#183; 선택</text>
+        <text class="lbl-d" x="542" y="351">내강/주변 정규화 대비 &#247; 0.35  &#183;  원본 영상이 있을 때만</text>
+
+        <rect class="nd-i" x="530" y="368" width="430" height="46"/>
+        <text class="lbl-s" x="542" y="388">temporal_iou</text>
+        <text class="lbl-w" x="948" y="388" text-anchor="end">w 1.0 &#8594; 0</text>
+        <text class="lbl-d" x="542" y="405">움직임 정렬된 이전 마스크와의 IoU  &#183;  옵티컬 플로우 필요</text>
+
+        <rect class="nd-i" x="530" y="422" width="430" height="46"/>
+        <text class="lbl-s" x="542" y="442">centroid_stability</text>
+        <text class="lbl-w" x="948" y="442" text-anchor="end">w 0.5 &#8594; 0</text>
+        <text class="lbl-d" x="542" y="459">exp(&#8722;normalized_centroid_jump / 0.05)</text>
+
+        <rect class="nd-i" x="530" y="476" width="430" height="46"/>
+        <text class="lbl-s" x="542" y="496">area_stability</text>
+        <text class="lbl-w" x="948" y="496" text-anchor="end">w 0.5 &#8594; 0</text>
+        <text class="lbl-d" x="542" y="513">exp(&#8722;|relative_area_change| / 0.25)</text>
+
+        <!-- temporal bracket -->
+        <path class="ed-w" d="M524,368 L516,368 L516,522 L524,522"/>
+        <path class="ed-w" d="M516,445 L506,445"/>
+        <text class="lbl-w" x="530" y="538">시간축 3항 &#8212; 힘 탐색 시 가중치 0. 힘을 바꾸면 영상은 당연히 변하므로,</text>
+        <text class="lbl-w" x="530" y="553">그대로 두면 탐색기가 &#8220;안 움직이는 게 최고&#8221;라 결론 내린다. 비중 2.0/6.5 &#8776; 31%</text>
+
+        <!-- ================= gates ================= -->
+        <text class="lbl" x="20" y="382">판정 게이트 &#8212; 접촉 실패 4종</text>
+        <rect class="nd-o" x="20" y="392" width="450" height="96"/>
+        <text class="lbl-s" x="32" y="412">no_contact</text>
+        <text class="lbl-d" x="240" y="412">ROI 평균 &lt; 0.05</text>
+        <text class="lbl-s" x="32" y="432">poor_acoustic_coupling</text>
+        <text class="lbl-d" x="240" y="432">어두운 A-line &gt; 35%</text>
+        <text class="lbl-s" x="32" y="452">excessive_shadowing</text>
+        <text class="lbl-d" x="240" y="452">음영 A-line &gt; 50%</text>
+        <text class="lbl-s" x="32" y="472">low_near_field_echo</text>
+        <text class="lbl-d" x="240" y="472">near_field_echo &lt; 0.25</text>
+
+        <text class="lbl-w" x="20" y="506">excessive_shadowing 만이 힘 축으로 해결되지 않는다 &#8212; 눌러도 나아지지 않는다</text>
+
+        <text class="lbl" x="20" y="540">측정 불가 = <tspan class="lbl-f">None</tspan>, 0.0 이 아니다</text>
+        <text class="lbl-d" x="20" y="558">ROI 지지를 가진 A-line이 16개 미만이면 점수를 만들지 않는다. 0.0을 돌려주면</text>
+        <text class="lbl-d" x="20" y="574">&#8220;정말 나쁜 프레임&#8221;과 구별되지 않고, 힘 레벨의 구간 평균을 힘과</text>
+        <text class="lbl-d" x="20" y="590">무관한 이유로 끌어내린다.</text>
+
+        <text class="lbl" x="20" y="622">부가 진단</text>
+        <text class="lbl-s" x="20" y="640">dark_a_line_ratio &#183; shadowed_a_line_ratio &#183; near_field_mean</text>
+        <text class="lbl-s" x="20" y="656">far_field_mean &#183; roi_mean &#183; a_line_count</text>
+
+        <!-- Q_seg gate -->
+        <text class="lbl" x="530" y="574">판정 게이트 &#8212; 이유 코드 13종 (활성 9 / 비활성 4)</text>
+        <rect class="nd-o" x="530" y="584" width="430" height="122"/>
+        <text class="lbl-i" x="542" y="603">활성</text>
+        <text class="lbl-s" x="586" y="603">empty_mask &#183; mask_area_too_small</text>
+        <text class="lbl-s" x="586" y="619">mask_area_too_large &#183; low_segmentation_confidence</text>
+        <text class="lbl-s" x="586" y="635">excessive_border_contact &#183; fragmented_mask</text>
+        <text class="lbl-s" x="586" y="651">low_temporal_warped_iou &#183; excessive_centroid_jump</text>
+        <text class="lbl-s" x="586" y="667">excessive_area_change</text>
+        <text class="lbl-d" x="542" y="685">기본 비활성 (null) &#8212; low_lumen_contrast &#183; high_boundary_entropy</text>
+        <text class="lbl-d" x="586" y="699">low_temporal_stability &#183; low_control_quality</text>
+
+        <!-- ================= shared footer ================= -->
+        <path class="ed" d="M20,716 L960,716"/>
+
+        <text class="lbl-d" x="20" y="736">두 이유 코드 집합은 <tspan class="lbl">교집합이 없고</tspan>, 그것을 테스트가 강제한다 &#8212; supervisor는 합집합을 소비하므로 코드가 겹치면 하나의 관측이 두 복구 동작으로 매핑된다.</text>
+        <text class="lbl-d" x="20" y="754">입력 없는 항은 <tspan class="lbl">0점이 아니라 평균에서 제외</tspan>된다. 첫 프레임은 Q_seg 분모가 6.5가 아니라 4.5다 &#8212; 선행 프레임이 없다는 이유로 감점되지 않는다.</text>
+        <text class="lbl-w" x="20" y="772">Q_raw 의 수치 상수는 <tspan class="lbl-w">전부 PROVISIONAL</tspan>이다. US 영상 기하(프로브 종류 &#183; 깊이 스케일 &#183; 부채꼴 ROI)가 확정되기 전에는 하나도 정할 수 없다.</text>
+      </svg>
+
+      <div class="figlegend">
+        <span><i class="sw" style="border-color: var(--force);"></i> Q_raw &#183; 힘 축을 움직인다</span>
+        <span><i class="sw" style="border-color: var(--image);"></i> Q_seg &#183; 면내 축을 움직인다</span>
+        <span><i class="sw" style="border-color: var(--warn);"></i> 미검증 &#183; 탐색 시 무력화</span>
+      </div>
+
+      <figcaption>
+        <b>같은 프레임에 걸리는 두 점수의 전체 명세.</b> 좌우 색 구분은 §2의 축 분담과 같은 부호다 &#8212;
+        따뜻한 쪽이 힘, 차가운 쪽이 영상. 두 점수가 서로 다른 액추에이터를 맡기 때문에 두 최적화가
+        같은 축을 두고 다투지 않는다. <code>Q_raw</code>가 A-line 단위로 계산되는 이유는 음향 결합이
+        광선 단위로 실패하기 때문이다 &#8212; 공기가 끼면 화면 전체가 흐려지는 게 아니라 그 한 줄이 죽는다.
+      </figcaption>
+    </figure>
+
+    <h3>Slim U-Net &#8212; 해상도마다 합성곱 하나</h3>
+
+    <p>
+      <span class="ic">Q_seg</span> 갈래의 첫 단계다. 아래는 production 프리셋(입력 256&#215;256)에서
+      실제로 흐르는 텐서 모양이고, 파라미터 수는 이번에 직접 실행해 확인한 값이다.
+    </p>
+
+    <figure>
+      <svg viewBox="0 0 900 636" role="img"
+           aria-label="Slim U-Net의 U자 구조. 왼쪽 수축 경로는 4개 인코더 스테이지로 32, 64, 128, 256 채널이며 매 단계 2배2배 최대 풀링으로 해상도가 절반이 된다. 바닥의 병목은 512채널 16곱하기16이다. 오른쪽 확장 경로는 전치 합성곱으로 해상도를 2배 늘리고 채널을 절반으로 줄인 뒤 인코더 스킵 연결과 결합하고 합성곱을 한 번 적용한다. 마지막 1곱하기1 합성곱이 1채널 256곱하기256 원시 로짓을 낸다.">
+        <defs>
+          <marker id="aG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,1 L9,5 L0,9 z" class="ah"/>
+          </marker>
+          <marker id="aGi" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,1 L9,5 L0,9 z" class="ah-i"/>
+          </marker>
+        </defs>
+
+        <text class="lbl-d" x="150" y="14" text-anchor="middle">수축 경로 &#183; encoder</text>
+        <text class="lbl-d" x="690" y="14" text-anchor="middle">확장 경로 &#183; decoder</text>
+
+        <!-- input / output -->
+        <rect class="nd-o" x="60" y="30" width="180" height="42"/>
+        <text class="lbl-d" x="150" y="48" text-anchor="middle">입력</text>
+        <text class="lbl-s" x="150" y="64" text-anchor="middle">1 ch &#183; 256&#215;256</text>
+
+        <rect class="nd-i" x="600" y="30" width="180" height="42"/>
+        <text class="lbl-s" x="690" y="48" text-anchor="middle">conv 1&#215;1</text>
+        <text class="lbl-s" x="690" y="64" text-anchor="middle">1 ch &#183; 256&#215;256</text>
+
+        <!-- encoder stages -->
+        <rect class="nd" x="60" y="86" width="180" height="42"/>
+        <text class="lbl-s" x="150" y="104" text-anchor="middle">conv 3&#215;3 &#215;1</text>
+        <text class="lbl-d" x="150" y="120" text-anchor="middle">32 ch &#183; 256&#215;256</text>
+
+        <rect class="nd" x="60" y="171" width="180" height="42"/>
+        <text class="lbl-s" x="150" y="189" text-anchor="middle">conv 3&#215;3 &#215;1</text>
+        <text class="lbl-d" x="150" y="205" text-anchor="middle">64 ch &#183; 128&#215;128</text>
+
+        <rect class="nd" x="60" y="256" width="180" height="42"/>
+        <text class="lbl-s" x="150" y="274" text-anchor="middle">conv 3&#215;3 &#215;1</text>
+        <text class="lbl-d" x="150" y="290" text-anchor="middle">128 ch &#183; 64&#215;64</text>
+
+        <rect class="nd" x="60" y="341" width="180" height="42"/>
+        <text class="lbl-s" x="150" y="359" text-anchor="middle">conv 3&#215;3 &#215;1</text>
+        <text class="lbl-d" x="150" y="375" text-anchor="middle">256 ch &#183; 32&#215;32</text>
+
+        <!-- decoder stages -->
+        <rect class="nd" x="600" y="86" width="180" height="42"/>
+        <text class="lbl-s" x="690" y="104" text-anchor="middle">concat + conv 3&#215;3 &#215;1</text>
+        <text class="lbl-d" x="690" y="120" text-anchor="middle">32 ch &#183; 256&#215;256</text>
+
+        <rect class="nd" x="600" y="171" width="180" height="42"/>
+        <text class="lbl-s" x="690" y="189" text-anchor="middle">concat + conv 3&#215;3 &#215;1</text>
+        <text class="lbl-d" x="690" y="205" text-anchor="middle">64 ch &#183; 128&#215;128</text>
+
+        <rect class="nd" x="600" y="256" width="180" height="42"/>
+        <text class="lbl-s" x="690" y="274" text-anchor="middle">concat + conv 3&#215;3 &#215;1</text>
+        <text class="lbl-d" x="690" y="290" text-anchor="middle">128 ch &#183; 64&#215;64</text>
+
+        <rect class="nd" x="600" y="341" width="180" height="42"/>
+        <text class="lbl-s" x="690" y="359" text-anchor="middle">concat + conv 3&#215;3 &#215;1</text>
+        <text class="lbl-d" x="690" y="375" text-anchor="middle">256 ch &#183; 32&#215;32</text>
+
+        <!-- bottleneck -->
+        <rect class="nd" x="330" y="466" width="180" height="46"/>
+        <text class="lbl-s" x="420" y="485" text-anchor="middle">bottleneck &#183; conv 3&#215;3 &#215;1</text>
+        <text class="lbl-d" x="420" y="501" text-anchor="middle">512 ch &#183; 16&#215;16</text>
+
+        <!-- encoder flow -->
+        <path class="ed" d="M150,72 L150,82" marker-end="url(#aG)"/>
+        <path class="ed" d="M150,128 L150,167" marker-end="url(#aG)"/>
+        <text class="lbl-d" x="142" y="152" text-anchor="end">maxpool 2&#215;2</text>
+        <path class="ed" d="M150,213 L150,252" marker-end="url(#aG)"/>
+        <text class="lbl-d" x="142" y="237" text-anchor="end">maxpool 2&#215;2</text>
+        <path class="ed" d="M150,298 L150,337" marker-end="url(#aG)"/>
+        <text class="lbl-d" x="142" y="322" text-anchor="end">maxpool 2&#215;2</text>
+        <path class="ed" d="M150,383 L150,428 L420,428 L420,462" marker-end="url(#aG)"/>
+        <text class="lbl-d" x="158" y="422">maxpool 2&#215;2 &#8594; 16&#215;16</text>
+
+        <!-- decoder flow -->
+        <path class="ed" d="M510,489 L690,489 L690,387" marker-end="url(#aG)"/>
+        <text class="lbl-d" x="700" y="448">ConvT s2 &#183; 512&#8594;256 ch</text>
+        <path class="ed" d="M690,341 L690,302" marker-end="url(#aG)"/>
+        <text class="lbl-d" x="700" y="325">ConvT s2 &#183; 256&#8594;128 ch</text>
+        <path class="ed" d="M690,256 L690,217" marker-end="url(#aG)"/>
+        <text class="lbl-d" x="700" y="240">ConvT s2 &#183; 128&#8594;64 ch</text>
+        <path class="ed" d="M690,171 L690,132" marker-end="url(#aG)"/>
+        <text class="lbl-d" x="700" y="155">ConvT s2 &#183; 64&#8594;32 ch</text>
+        <path class="ed-i" d="M690,86 L690,76" marker-end="url(#aGi)"/>
+
+        <!-- skips -->
+        <path class="ed dash" d="M240,107 L594,107" marker-end="url(#aG)"/>
+        <text class="lbl-d" x="417" y="101" text-anchor="middle">skip &#8594; concat   32 + 32 = 64 ch</text>
+        <path class="ed dash" d="M240,192 L594,192" marker-end="url(#aG)"/>
+        <text class="lbl-d" x="417" y="186" text-anchor="middle">skip &#8594; concat   64 + 64 = 128 ch</text>
+        <path class="ed dash" d="M240,277 L594,277" marker-end="url(#aG)"/>
+        <text class="lbl-d" x="417" y="271" text-anchor="middle">skip &#8594; concat   128 + 128 = 256 ch</text>
+        <path class="ed dash" d="M240,362 L594,362" marker-end="url(#aG)"/>
+        <text class="lbl-d" x="417" y="356" text-anchor="middle">skip &#8594; concat   256 + 256 = 512 ch</text>
+
+        <!-- sigmoid outside -->
+        <path class="ed-i dash" d="M780,51 L816,51" marker-end="url(#aGi)"/>
+        <text class="lbl-i" x="824" y="48">&#963;</text>
+        <text class="lbl-d" x="824" y="64">망 바깥</text>
+
+        <!-- footer facts -->
+        <path class="ed" d="M60,556 L840,556"/>
+        <text class="lbl-d" x="60" y="576">입력 H, W 는 16의 배수여야 한다 (2^depth, depth = 4) &#183; 업샘플링은 ConvTranspose2d(kernel 3, stride 2, padding 1, output_padding 1)</text>
+        <text class="lbl-d" x="60" y="594">스킵 결합 순서는 torch.cat([skip, x]) &#183; 전치 합성곱이 채널을 절반으로 줄이므로 결합 폭은 항상 스킵의 2배</text>
+        <text class="lbl-i" x="60" y="612">출력은 raw logits &#8212; forward 안에서 sigmoid 를 적용하지 않는다. BCEWithLogitsLoss 안정성과 ONNX 그래프 동일성 때문이다.</text>
+      </svg>
+
+      <figcaption>
+        <b>깊이 4단, 채널 32 &#8594; 64 &#8594; 128 &#8594; 256 &#8594; 512.</b>
+        인코더가 스테이지마다 특징을 남기고 절반으로 줄인 뒤, 디코더가 전치 합성곱으로 해상도를 되돌리며
+        같은 해상도의 인코더 특징과 결합한다. 결합 직후 합성곱 하나가 폭을 스킵과 같게 되돌린다.
+        학습 파라미터 <span class="m">4,705,377</span> &#8212; 논문 보고치와 정확히 일치한다.
+      </figcaption>
+    </figure>
+
+    <h3>표준 U-Net과의 차이는 한 쌍의 부재다</h3>
+
+    <p>
+      채널 폭도, 깊이도, 스킵 연결도 표준 U-Net과 같다. 다른 것은 해상도당
+      <code>conv &#8594; BN &#8594; ReLU</code>가 두 번이 아니라 한 번이라는 것뿐이다.
+    </p>
+
+    <figure>
+      <svg viewBox="0 0 900 218" role="img"
+           aria-label="표준 U-Net 스테이지와 슬림 U-Net 스테이지의 비교. 표준은 3곱하기3 합성곱, 배치정규화, ReLU를 두 번 반복한 뒤 최대 풀링한다. 슬림은 같은 순서를 한 번만 수행하고 드롭아웃을 거쳐 최대 풀링한다. 차이는 해상도당 합성곱 한 쌍이 빠진 것이다.">
+        <defs>
+          <marker id="aH" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+            <path d="M0,1 L9,5 L0,9 z" class="ah"/>
+          </marker>
+          <marker id="aHi" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+            <path d="M0,1 L9,5 L0,9 z" class="ah-i"/>
+          </marker>
+        </defs>
+
+        <!-- Standard -->
+        <text class="lbl" x="16" y="42">Standard U-Net</text>
+        <text class="lbl-s" x="16" y="60">8,635,809 params</text>
+
+        <rect class="nd" x="180" y="26" width="74" height="34"/>
+        <text class="lbl-s" x="217" y="47" text-anchor="middle">conv 3&#215;3</text>
+        <path class="ed" d="M254,43 L268,43" marker-end="url(#aH)"/>
+        <rect class="nd" x="272" y="26" width="50" height="34"/>
+        <text class="lbl-s" x="297" y="47" text-anchor="middle">BN</text>
+        <path class="ed" d="M322,43 L336,43" marker-end="url(#aH)"/>
+        <rect class="nd" x="340" y="26" width="58" height="34"/>
+        <text class="lbl-s" x="369" y="47" text-anchor="middle">ReLU</text>
+        <path class="ed" d="M398,43 L412,43" marker-end="url(#aH)"/>
+
+        <rect class="nd-f" x="416" y="26" width="192" height="34"/>
+        <text class="lbl-f" x="512" y="47" text-anchor="middle">conv 3&#215;3 &#8594; BN &#8594; ReLU</text>
+        <path class="ed" d="M608,43 L622,43" marker-end="url(#aH)"/>
+
+        <rect class="nd" x="626" y="26" width="104" height="34"/>
+        <text class="lbl-s" x="678" y="47" text-anchor="middle">maxpool 2&#215;2</text>
+
+        <path class="ed-f" d="M512,60 L512,90 L764,90"/>
+        <text class="lbl-f" x="772" y="94">이 한 쌍이 빠진다</text>
+
+        <!-- Slim -->
+        <text class="lbl" x="16" y="152">Slim U-Net</text>
+        <text class="lbl-s" x="16" y="170">4,705,377 params</text>
+
+        <rect class="nd-i" x="180" y="136" width="74" height="34"/>
+        <text class="lbl-s" x="217" y="157" text-anchor="middle">conv 3&#215;3</text>
+        <path class="ed-i" d="M254,153 L268,153" marker-end="url(#aHi)"/>
+        <rect class="nd-i" x="272" y="136" width="50" height="34"/>
+        <text class="lbl-s" x="297" y="157" text-anchor="middle">BN</text>
+        <path class="ed-i" d="M322,153 L336,153" marker-end="url(#aHi)"/>
+        <rect class="nd-i" x="340" y="136" width="58" height="34"/>
+        <text class="lbl-s" x="369" y="157" text-anchor="middle">ReLU</text>
+        <path class="ed-i" d="M398,153 L412,153" marker-end="url(#aHi)"/>
+        <rect class="nd-i" x="416" y="136" width="100" height="34"/>
+        <text class="lbl-s" x="466" y="157" text-anchor="middle">Drop .125</text>
+        <path class="ed-i" d="M516,153 L622,153" marker-end="url(#aHi)"/>
+        <rect class="nd-i" x="626" y="136" width="104" height="34"/>
+        <text class="lbl-s" x="678" y="157" text-anchor="middle">maxpool 2&#215;2</text>
+
+        <text class="lbl-d" x="16" y="204">같은 규칙이 <tspan class="lbl">디코더에도 대칭으로</tspan> 적용된다 &#8212; 그것이 보고된 4,705,377 에 정확히 맞는 유일한 조합이다. 디코더만 이중 합성곱으로 두면 5,490,177 이 되어 맞지 않는다.</text>
+      </svg>
+
+      <figcaption>
+        <b>논문의 기여는 이 한 쌍의 부재다.</b> 파라미터 수가 절반 가까이 줄어드는 것이
+        전부이고, 그 대가로 무엇을 잃는지는 <span class="wc">방광 초음파에서 아직 측정된 적이 없다</span> &#8212;
+        학습된 체크포인트가 없고 <code>data/</code>가 비어 있다.
+      </figcaption>
+    </figure>
+
+    <div class="call call-w">
+      <h4>이 그림들이 아직 확정이 아닌 부분</h4>
+      <p>
+        <b>Q_raw 의 모든 수치 상수.</b> 깊이 밴드 비율, 어두움 임계, 기준 강도, 게이트 임계 &#8212;
+        전부 <code>PROVISIONAL</code>이다. <code>scan_geometry: sector</code>(convex/phased)는 아직
+        예외를 던진다. 스캔 변환 후 A-line 은 이미지 컬럼이 아니라 apex 에서 뻗는 광선이라,
+        컬럼을 A-line 으로 취급하면 서로 다른 깊이를 조용히 평균낸다.
+      </p>
+      <p>
+        <b>Q_raw 4개 지표가 접촉력에 대해 단조/단봉인가.</b> 이것이 아니면 Stage 1 힘 탐색 전체가
+        무의미해진다. 가정이 아니라 실험이다.
+      </p>
+      <p>
+        <b><code>target_area_ratio = 0.15</code>.</b> Q_seg 에서 힘에 가장 민감한 항인데 검증된 적 없는
+        임의값이고, 최적 힘을 직접 좌우한다.
+      </p>
+    </div>
+  </section>
+
+  <footer>
+    FR5-for-RUS · DESIGN_NOTES.md 기반 도식<br>
+    확정 쟁점 1–10 · 오른팔 단일 · DLS 우선 검증 · 2026-08-14
+  </footer>
+
+</div>
+
+<style>
+  #themeToggle {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+    color: var(--ink-2);
+    font-size: 17px;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: 0 2px 10px rgba(0,0,0,.12);
+  }
+  #themeToggle:hover { color: var(--ink); border-color: var(--ink-3); }
+  @media print { #themeToggle { display: none; } }
+</style>
+
+<button id="themeToggle" type="button" title="라이트 / 다크 전환" aria-label="테마 전환">◐</button>
+
+<script>
+  (function () {
+    var root = document.documentElement;
+    var btn = document.getElementById('themeToggle');
+    try {
+      var saved = localStorage.getItem('rus-theme');
+      if (saved === 'dark' || saved === 'light') root.setAttribute('data-theme', saved);
+    } catch (e) { /* file:// 에서 localStorage 차단될 수 있음 */ }
+
+    btn.addEventListener('click', function () {
+      var cur = root.getAttribute('data-theme');
+      var next;
+      if (cur === 'dark') next = 'light';
+      else if (cur === 'light') next = 'dark';
+      else next = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('rus-theme', next); } catch (e) {}
+    });
+  })();
+</script>
+
+</body>
+</html>

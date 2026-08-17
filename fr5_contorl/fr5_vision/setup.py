@@ -24,12 +24,9 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            # eye-to-hand 내시경 캘리브레이션 계열은 legacy_laparoscopic/ 으로 분리됨.
+            # 초음파는 probe-to-image 캘리브레이션(N-wire/cross-wire 팬텀)으로 절차가 다르다.
             'camera_node = fr5_vision.camera_node:main',
-            'save_calibration_data = fr5_vision.save_calibration_data:main',
-            'calculate_calibration = fr5_vision.calculate_calibration:main',
-            'calibrate_intrinsics = fr5_vision.calibrate_intrinsics:main',
-            'display_3d_to_2d = fr5_vision.display_3d_to_2d_node:main',
-            'gt_sparse_depth = fr5_vision.gt_sparse_depth_node:main',
         ],
     },
 )

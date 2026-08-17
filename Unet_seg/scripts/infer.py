@@ -20,13 +20,13 @@ import numpy as np
 
 from _common import parse_overrides, prepare_manifest  # noqa: E402  (path setup)
 
-from src.control.features import FeatureExtractionConfig
-from src.data.io import load_grayscale
-from src.inference.predictor import Predictor, PredictorConfig
-from src.inference.sources import IMAGE_EXTENSIONS
-from src.utils.config import load_config
-from src.utils.logging_utils import CsvWriter, JsonlWriter, setup_logging
-from src.utils.seeding import seed_everything
+from rus_perception.control.features import FeatureExtractionConfig
+from rus_perception.data.io import load_grayscale
+from rus_perception.inference.predictor import Predictor, PredictorConfig
+from rus_perception.inference.sources import IMAGE_EXTENSIONS
+from rus_perception.utils.config import load_config
+from rus_perception.utils.logging_utils import CsvWriter, JsonlWriter, setup_logging
+from rus_perception.utils.seeding import seed_everything
 
 logger = logging.getLogger("infer")
 

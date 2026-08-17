@@ -15,8 +15,13 @@
 #include <vector>
 #include <string>
 
+// 그리퍼 지령 값. 기동 로그가 "GRIP (30)" 이라 말하면서 실제로는 5.0 을 발행하고
+// 있었다. 상수 하나로 묶어 로그와 동작이 갈라지지 않게 한다.
+static constexpr double GRIPPER_CLOSED = 5.0;
+static constexpr double GRIPPER_OPEN = 100.0;
+
 class TouchTeleopNode : public rclcpp::Node {
-public: 
+public:
     struct TouchState {
         EIGEN_MAKE_ALIGNED_OPERATOR_NEW
         Eigen::Vector3d position; 
@@ -52,12 +57,36 @@ public:
         std::string prefix; // "touch/left" or "touch/right"
     };
 
+    // 프로파일 하나가 스케일·필터·데드존을 통째로 묶는다. 복강경 자유공간 조작과
+    // 초음파 접근 조작은 요구 분해능이 자릿수로 다르므로 값 하나만 바꿔서는 안 된다.
+    struct Profile {
+        double linear_scale;
+        double angular_scale;
+        double filter_alpha;
+        double linear_deadzone;   // m/s, 필터 후 body 속도에 적용
+        double angular_deadzone;  // rad/s, 위와 같음
+    };
+
     TouchTeleopNode() : Node("touch_teleop_node") {
-        // --- Parameters ---
-        this->declare_parameter<double>("linear_scale", 0.6);
-        this->declare_parameter<double>("angular_scale", 0.6);
-        this->declare_parameter<double>("filter_alpha", 0.4); 
-        this->declare_parameter<double>("deadzone", 0.001); 
+        // --- 프로파일 선택 (런타임 변경 가능) ---
+        // 매 주기 읽으므로 `ros2 param set` 으로 조작 중에도 바꿀 수 있다.
+        this->declare_parameter<std::string>("teleop.profile", "laparoscopic");
+
+        // 복강경 자유공간 조작. 기존 값 그대로.
+        this->declare_parameter<double>("teleop.laparoscopic.linear_scale", 0.6);
+        this->declare_parameter<double>("teleop.laparoscopic.angular_scale", 0.6);
+        this->declare_parameter<double>("teleop.laparoscopic.filter_alpha", 0.4);
+        this->declare_parameter<double>("teleop.laparoscopic.linear_deadzone", 0.001);
+        this->declare_parameter<double>("teleop.laparoscopic.angular_deadzone", 0.1);
+
+        // 초음파 접근 조작 (DESIGN_NOTES §12.2 TELEOP_APPROACH).
+        // 회전 데드존이 핵심이다. 0.1 rad/s 로는 RUS 각속도 상한 0.2 rad/s 에 대해
+        // 사용 가능 구간이 3:1 밖에 안 나와 프로브를 미세하게 기울일 수 없다.
+        this->declare_parameter<double>("teleop.us_approach.linear_scale", 0.08);
+        this->declare_parameter<double>("teleop.us_approach.angular_scale", 0.15);
+        this->declare_parameter<double>("teleop.us_approach.filter_alpha", 0.25);
+        this->declare_parameter<double>("teleop.us_approach.linear_deadzone", 0.002);
+        this->declare_parameter<double>("teleop.us_approach.angular_deadzone", 0.02);
 
         this->declare_parameter<std::string>("left_dev_name", "touch_left");
         this->declare_parameter<std::string>("right_dev_name", "Touch_Right");
@@ -82,10 +111,16 @@ public:
             
             timer_ = this->create_wall_timer(std::chrono::milliseconds(20), std::bind(&TouchTeleopNode::timerCallback, this));
             
+            const Profile p = loadProfile();
             RCLCPP_INFO(this->get_logger(), "Touch Teleop Ready.");
             RCLCPP_INFO(this->get_logger(), " - Button 1 (Gray): Hold to PAUSE (Clutch)");
-            RCLCPP_INFO(this->get_logger(), " - Button 2 (White): Hold to GRIP (30), Release to OPEN (100)");
+            RCLCPP_INFO(this->get_logger(), " - Button 2 (White): Hold to GRIP (%.0f), Release to OPEN (%.0f)",
+                        GRIPPER_CLOSED, GRIPPER_OPEN);
             RCLCPP_INFO(this->get_logger(), "Active Devices: %zu", devices_.size());
+            RCLCPP_INFO(this->get_logger(),
+                "Profile '%s': lin x%.3f (deadzone %.4f m/s), ang x%.3f (deadzone %.4f rad/s), alpha %.2f",
+                this->get_parameter("teleop.profile").as_string().c_str(),
+                p.linear_scale, p.linear_deadzone, p.angular_scale, p.angular_deadzone, p.filter_alpha);
     }
 
     ~TouchTeleopNode() {
@@ -164,27 +199,51 @@ private:
         return HD_CALLBACK_CONTINUE;
     }
 
+    // 알 수 없는 프로파일 이름은 조용히 넘기지 않는다. 접근 프로파일을 의도했는데
+    // 오타로 복강경 스케일(7배 빠름)이 도는 것이 가장 위험하다.
+    Profile loadProfile() {
+        const std::string name = this->get_parameter("teleop.profile").as_string();
+        std::string key;
+        if (name == "laparoscopic" || name == "us_approach") {
+            key = name;
+        } else {
+            RCLCPP_ERROR(this->get_logger(),
+                "알 수 없는 teleop.profile '%s'. 가장 보수적인 us_approach 로 대체한다. "
+                "'laparoscopic' 또는 'us_approach' 여야 한다.", name.c_str());
+            key = "us_approach";
+        }
+        const std::string p = "teleop." + key + ".";
+        return Profile{
+            this->get_parameter(p + "linear_scale").as_double(),
+            this->get_parameter(p + "angular_scale").as_double(),
+            this->get_parameter(p + "filter_alpha").as_double(),
+            this->get_parameter(p + "linear_deadzone").as_double(),
+            this->get_parameter(p + "angular_deadzone").as_double(),
+        };
+    }
+
     // --- ROS Loop (50Hz) ---
     void timerCallback() {
         rclcpp::Time now = this->now();
 
-        double l_scale = this->get_parameter("linear_scale").as_double();
-        double angular_scale_param = this->get_parameter("angular_scale").as_double();
-        double alpha   = this->get_parameter("filter_alpha").as_double();
-        double deadzone = this->get_parameter("deadzone").as_double();
+        // 매 주기 읽는다 — 조작 중 `ros2 param set` 으로 즉시 반영되게.
+        const Profile profile = loadProfile();
 
         std::lock_guard<std::mutex> lock(state_mutex_);
 
         for (auto &ctx : devices_) {
             if (!ctx->state.valid) continue;
 
-            processDevice(ctx, now, l_scale, angular_scale_param, alpha, deadzone);
+            processDevice(ctx, now, profile);
         }
     }
 
-    void processDevice(std::shared_ptr<DeviceContext> ctx, rclcpp::Time now, 
-                       double l_scale, double a_scale, double alpha, double deadzone) 
+    void processDevice(std::shared_ptr<DeviceContext> ctx, rclcpp::Time now,
+                       const Profile &profile)
     {
+        const double l_scale = profile.linear_scale;
+        const double a_scale = profile.angular_scale;
+        const double alpha   = profile.filter_alpha;
         TouchState &s = ctx->state;
 
         if (s.first_run) {
@@ -201,11 +260,7 @@ private:
         bool is_btn2_pressed = (s.buttons & HD_DEVICE_BUTTON_2) != 0;
         
         std_msgs::msg::Float32 gripper_msg;
-        if (is_btn2_pressed) {
-            gripper_msg.data = 5.0;  // Pressed -> Close/Grip
-        } else {
-            gripper_msg.data = 100.0; // Released -> Open
-        }
+        gripper_msg.data = is_btn2_pressed ? GRIPPER_CLOSED : GRIPPER_OPEN;
         ctx->gripper_pub->publish(gripper_msg);
 
         if (is_btn2_pressed != s.was_btn2_pressed) {
@@ -250,9 +305,11 @@ private:
         s.filtered_lin_vel = alpha * vel_body + (1.0 - alpha) * s.filtered_lin_vel;
         s.filtered_ang_vel = alpha * ang_vel_body + (1.0 - alpha) * s.filtered_ang_vel;
 
-        // Deadzone
-        if (s.filtered_lin_vel.norm() < deadzone) s.filtered_lin_vel.setZero();
-        if (s.filtered_ang_vel.norm() < 0.1) s.filtered_ang_vel.setZero();
+        // Deadzone — 병진·회전 모두 프로파일 값을 쓴다.
+        // 회전 쪽은 예전에 0.1 rad/s 로 코드에 박혀 있었다. 그 값이면 RUS 각속도
+        // 상한 0.2 rad/s 에 대해 최소 지령이 0.06 rad/s 라 사용 구간이 3:1 뿐이었다.
+        if (s.filtered_lin_vel.norm() < profile.linear_deadzone) s.filtered_lin_vel.setZero();
+        if (s.filtered_ang_vel.norm() < profile.angular_deadzone) s.filtered_ang_vel.setZero();
 
         // Mapping & Publish
         geometry_msgs::msg::Twist twist;

@@ -16,13 +16,13 @@ if str(REPO_ROOT) not in sys.path:
 import logging  # noqa: E402
 from typing import Any, Optional  # noqa: E402
 
-from src.data.manifest import Manifest, load_manifest  # noqa: E402
-from src.data.splits import (  # noqa: E402
+from rus_perception.data.manifest import Manifest, load_manifest  # noqa: E402
+from rus_perception.data.splits import (  # noqa: E402
     apply_split,
     assert_no_patient_leakage,
     split_by_patient,
 )
-from src.utils.config import Config  # noqa: E402
+from rus_perception.utils.config import Config  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

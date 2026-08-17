@@ -18,10 +18,10 @@ import logging
 
 from _common import REPO_ROOT  # noqa: F401  (path setup)
 
-from src.data.splits import apply_split, split_by_patient, split_report
-from src.data.synthetic import SyntheticSequenceConfig, generate_dataset
-from src.data.manifest import write_manifest
-from src.utils.logging_utils import setup_logging
+from rus_perception.data.splits import apply_split, split_by_patient, split_report
+from rus_perception.data.synthetic import SyntheticSequenceConfig, generate_dataset
+from rus_perception.data.manifest import write_manifest
+from rus_perception.utils.logging_utils import setup_logging
 
 logger = logging.getLogger("make_synthetic_dataset")
 

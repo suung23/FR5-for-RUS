@@ -21,13 +21,13 @@ import numpy as np
 
 from _common import REPO_ROOT  # noqa: F401  (path setup)
 
-from src.control.features import FeatureExtractionConfig
-from src.inference.predictor import Predictor, PredictorConfig
-from src.metrics.latency import benchmark_callable, device_report, synchronize
-from src.models.registry import build_model
-from src.models.report import build_architecture_report
-from src.utils.checkpoint import load_checkpoint
-from src.utils.logging_utils import setup_logging
+from rus_perception.control.features import FeatureExtractionConfig
+from rus_perception.inference.predictor import Predictor, PredictorConfig
+from rus_perception.metrics.latency import benchmark_callable, device_report, synchronize
+from rus_perception.models.registry import build_model
+from rus_perception.models.report import build_architecture_report
+from rus_perception.utils.checkpoint import load_checkpoint
+from rus_perception.utils.logging_utils import setup_logging
 
 logger = logging.getLogger("benchmark")
 
@@ -59,7 +59,7 @@ def main() -> int:
 
     model_config = {"name": args.model, "preset": args.preset}
     if args.config:
-        from src.utils.config import load_config
+        from rus_perception.utils.config import load_config
 
         model_config = load_config(args.config).section("model")
     if args.checkpoint:

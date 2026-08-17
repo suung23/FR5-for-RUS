@@ -17,10 +17,10 @@ import json
 
 from _common import REPO_ROOT  # noqa: F401  (path setup)
 
-from src.models.registry import build_model
-from src.models.report import build_architecture_report
-from src.models.slim_unet import INFERRED_DETAILS, PAPER_PARAMETER_COUNTS
-from src.utils.config import load_config
+from rus_perception.models.registry import build_model
+from rus_perception.models.report import build_architecture_report
+from rus_perception.models.slim_unet import INFERRED_DETAILS, PAPER_PARAMETER_COUNTS
+from rus_perception.utils.config import load_config
 
 REFERENCE_CONFIGS: dict[str, dict] = {
     "StandardUNet (paper preset)": {

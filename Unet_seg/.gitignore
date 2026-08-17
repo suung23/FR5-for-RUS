@@ -5,7 +5,7 @@ __pycache__/
 .ruff_cache/
 
 # Datasets and generated artefacts.
-# Leading slash matters: a bare "data/" would also exclude the src/data/ package.
+# Leading slash matters: a bare "data/" would also exclude the rus_perception/data/ package.
 /data/
 /checkpoints/
 /runs/

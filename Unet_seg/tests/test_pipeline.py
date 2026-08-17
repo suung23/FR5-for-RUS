@@ -15,18 +15,18 @@ import numpy as np
 import pytest
 import torch
 
-from src.control.features import FeatureExtractionConfig
-from src.data.manifest import load_manifest
-from src.inference.predictor import Predictor, PredictorConfig
-from src.inference.realtime import FrameGrabber, RealtimeConfig, RealtimePipeline
-from src.inference.sources import Frame, FrameSource, ImageDirectorySource, open_source
-from src.inference.visualization import MonitorRenderer, RollingHistory
-from src.models.registry import build_model
-from src.training.trainer import Trainer, build_optimizer, build_scheduler, resolve_device
-from src.utils.checkpoint import CheckpointMetadata, load_checkpoint, save_checkpoint
-from src.utils.config import Config, ConfigError, load_config, merge_dicts
-from src.utils.logging_utils import CsvWriter, JsonlWriter
-from src.utils.seeding import seed_everything
+from rus_perception.control.features import FeatureExtractionConfig
+from rus_perception.data.manifest import load_manifest
+from rus_perception.inference.predictor import Predictor, PredictorConfig
+from rus_perception.inference.realtime import FrameGrabber, RealtimeConfig, RealtimePipeline
+from rus_perception.inference.sources import Frame, FrameSource, ImageDirectorySource, open_source
+from rus_perception.inference.visualization import MonitorRenderer, RollingHistory
+from rus_perception.models.registry import build_model
+from rus_perception.training.trainer import Trainer, build_optimizer, build_scheduler, resolve_device
+from rus_perception.utils.checkpoint import CheckpointMetadata, load_checkpoint, save_checkpoint
+from rus_perception.utils.config import Config, ConfigError, load_config, merge_dicts
+from rus_perception.utils.logging_utils import CsvWriter, JsonlWriter
+from rus_perception.utils.seeding import seed_everything
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_DIR = REPO_ROOT / "configs"
@@ -382,7 +382,7 @@ def test_predictor_can_be_rebuilt_from_a_checkpoint(synthetic_dataset, tmp_path)
 
 # -- sequential evaluation -------------------------------------------------
 def test_short_sequential_evaluation_preserves_order(synthetic_dataset) -> None:
-    from src.metrics.temporal import TemporalFrameRecord, compute_sequence_temporal_metrics
+    from rus_perception.metrics.temporal import TemporalFrameRecord, compute_sequence_temporal_metrics
 
     _, manifest = synthetic_dataset
     predictor = Predictor(
@@ -392,7 +392,7 @@ def test_short_sequential_evaluation_preserves_order(synthetic_dataset) -> None:
     (_, records) = sorted(manifest.filter(split="test").sequences().items())[0]
     assert [r.frame_index for r in records] == sorted(r.frame_index for r in records)
 
-    from src.data.io import load_grayscale
+    from rus_perception.data.io import load_grayscale
 
     states = []
     previous = None
@@ -532,7 +532,7 @@ def test_open_source_dispatch_and_errors(synthetic_dataset, tmp_path) -> None:
 
 
 def test_monitor_renderer_produces_a_canvas(disc_probability, disc_image) -> None:
-    from src.control.features import extract_control_state
+    from rus_perception.control.features import extract_control_state
 
     renderer = MonitorRenderer(history=RollingHistory(maxlen=10))
     state = extract_control_state(disc_probability, disc_image, metadata={"frame_id": "f"})
@@ -544,7 +544,7 @@ def test_monitor_renderer_produces_a_canvas(disc_probability, disc_image) -> Non
 
 
 def test_rolling_history_is_bounded(disc_probability) -> None:
-    from src.control.features import extract_control_state
+    from rus_perception.control.features import extract_control_state
 
     history = RollingHistory(maxlen=5)
     state = extract_control_state(disc_probability)
@@ -556,7 +556,7 @@ def test_rolling_history_is_bounded(disc_probability) -> None:
 
 # -- logging ---------------------------------------------------------------
 def test_jsonl_and_csv_writers_produce_readable_files(tmp_path, disc_probability) -> None:
-    from src.control.features import extract_control_state
+    from rus_perception.control.features import extract_control_state
 
     state = extract_control_state(disc_probability, metadata={"frame_id": "f0"})
     jsonl_path = tmp_path / "log.jsonl"

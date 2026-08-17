@@ -1,0 +1,631 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 980 796" role="img"
+           aria-label="Q_raw와 Q_seg 두 품질함수의 전체 정의. 왼쪽 Q_raw는 원시 B-mode에서 계산하는 4개 하위점수 near_field_echo, contact_continuity, total_echo_energy, shadow_penalty로 가중치 합 4.0이다. 오른쪽 Q_seg는 세그멘테이션 출력에서 계산하는 8개 하위점수로 가중치 합 6.5이며, 시간축 3항은 힘 탐색 시 가중치 0으로 둔다. 각 함수의 판정 게이트와 이유 코드가 아래에 나열된다." xmlns="http://www.w3.org/2000/svg">
+<style>
+  /* 팔레트는 학술 도판 관례를 따른다: 흰 바탕, 저채도, 색은 기능적으로만.
+     힘/영상 두 도메인은 색상만이 아니라 **명도**로도 갈라 둔다 (L* 약 42 vs 27).
+     저널이 흑백으로 인쇄해도 두 계열이 회색조에서 구분되어야 하기 때문이다.
+     배경 톤도 따뜻함/차가움으로 한 번 더 갈라 이중으로 부호화한다. */
+  :root {
+    --bg:        #FFFFFF;
+    --surface:   #FFFFFF;
+    --surface-2: #F1F0ED;
+    --ink:       #111111;
+    --ink-2:     #3D3D3B;
+    --ink-3:     #6E6E6B;
+    --rule:      #BFBFBC;
+    --rule-2:    #E2E2DF;
+
+    --force:     #8A5A00;   /* 따뜻함 · 선 L*42 */
+    --force-bg:  #E8E1CE;   /*            면 L*90 — 음영 상자 */
+    --force-rule:#BFA269;
+
+    --image:     #17455C;   /* 차가움 · 선 L*27 */
+    --image-bg:  #FFFFFF;   /*            면 L*100 — 흰 상자 */
+    --image-rule:#93AAB8;
+
+    --warn:      #8C1D1D;
+    --warn-bg:   #F7EDED;
+    --warn-rule: #C9A2A2;
+
+    --ok:        #1F5130;
+
+    /* 논문 관례: 본문은 명조/Times, 도판 라벨은 Helvetica 계열.
+       작은 크기에서 산세리프가 더 잘 읽히기 때문이다. */
+    --serif: 'Times New Roman', 'Nimbus Roman', 'Liberation Serif',
+             'Noto Serif KR', Batang, '바탕', serif;
+    --sans: 'Helvetica Neue', Helvetica, Arial, 'Malgun Gothic',
+            'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+    --mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas,
+            'Liberation Mono', monospace;
+
+    --measure: 68ch;
+    --pad: clamp(20px, 4vw, 56px);
+  }
+
+  /* 다크는 화면 판독용이다. 인쇄본은 항상 위의 라이트 팔레트다. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:        #14140F;
+      --surface:   #1B1B17;
+      --surface-2: #24241F;
+      --ink:       #EDEBE4;
+      --ink-2:     #A8A69D;
+      --ink-3:     #77756D;
+      --rule:      #35352F;
+      --rule-2:    #26261F;
+
+      --force:     #D2A85C;
+      --force-bg:  #2A2214;
+      --force-rule:#5F5030;
+
+      --image:     #8FB6CC;
+      --image-bg:  #171F26;
+      --image-rule:#3A4C58;
+
+      --warn:      #D08C8C;
+      --warn-bg:   #2A1A1A;
+      --warn-rule: #5A3838;
+
+      --ok:        #7FB394;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg:        #14140F;
+    --surface:   #1B1B17;
+    --surface-2: #24241F;
+    --ink:       #EDEBE4;
+    --ink-2:     #A8A69D;
+    --ink-3:     #77756D;
+    --rule:      #35352F;
+    --rule-2:    #26261F;
+
+    --force:     #D2A85C;
+    --force-bg:  #2A2214;
+    --force-rule:#5F5030;
+
+    --image:     #8FB6CC;
+    --image-bg:  #171F26;
+    --image-rule:#3A4C58;
+
+    --warn:      #D08C8C;
+    --warn-bg:   #2A1A1A;
+    --warn-rule: #5A3838;
+
+    --ok:        #7FB394;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 0 var(--pad) 96px;
+  }
+
+  /* ---------- header ---------- */
+
+  .masthead {
+    padding: clamp(48px, 9vw, 104px) 0 40px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .kicker {
+    font-family: var(--sans);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0 0 20px;
+  }
+  h1 {
+    font-size: clamp(30px, 5vw, 46px);
+    line-height: 1.12;
+    letter-spacing: -0.012em;
+    font-weight: 700;
+    margin: 0 0 22px;
+    text-wrap: balance;
+    max-width: 18ch;
+  }
+  .standfirst {
+    font-size: clamp(16px, 1.8vw, 19px);
+    color: var(--ink-2);
+    max-width: 56ch;
+    margin: 0 0 34px;
+    line-height: 1.6;
+  }
+  .metastrip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 10px;
+  }
+  .meta {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.02em;
+    color: var(--ink-2);
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 5px 10px;
+    white-space: nowrap;
+  }
+  .meta b { color: var(--ink); font-weight: 600; }
+
+  /* ---------- sections ---------- */
+
+  section { padding-top: 72px; }
+
+  .eyebrow {
+    font-family: var(--sans);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin: 0 0 18px;
+  }
+  .eyebrow::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--rule);
+  }
+
+  h2 {
+    font-size: clamp(22px, 2.9vw, 28px);
+    line-height: 1.24;
+    letter-spacing: -0.008em;
+    font-weight: 700;
+    margin: 0 0 14px;
+    text-wrap: balance;
+    max-width: 26ch;
+  }
+  h3 {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0;
+    margin: 40px 0 12px;
+  }
+  p { max-width: var(--measure); margin: 0 0 16px; }
+  p.lead { font-size: 18px; color: var(--ink-2); }
+
+  a { color: var(--image); }
+
+  code, .m {
+    font-family: var(--mono);
+    font-size: 0.885em;
+    letter-spacing: -0.01em;
+  }
+  code {
+    background: var(--surface-2);
+    border-radius: 3px;
+    padding: 1px 5px;
+  }
+
+  strong { font-weight: 700; }
+  .fc { color: var(--force); }
+  .ic { color: var(--image); }
+  .wc { color: var(--warn); }
+
+  /* ---------- status chips ---------- */
+
+  .chip {
+    display: inline-block;
+    font-family: var(--sans);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 2px;
+    border: 1px solid;
+    vertical-align: 2px;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+  .chip-fix  { color: var(--ok);     border-color: var(--ok);     background: transparent; }
+  .chip-prop { color: var(--force);  border-color: var(--force-rule); background: var(--force-bg); }
+  .chip-meas { color: var(--image);  border-color: var(--image-rule); background: var(--image-bg); }
+  .chip-open { color: var(--warn);   border-color: var(--warn-rule);  background: var(--warn-bg); }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 22px;
+    padding: 16px 18px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    margin: 28px 0 0;
+  }
+  .legend div { font-size: 13.5px; color: var(--ink-2); }
+
+  /* ---------- figures ---------- */
+
+  figure {
+    margin: 30px 0 0;
+    padding: 24px 22px 18px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    overflow-x: auto;
+  }
+  figure svg {
+    display: block;
+    width: 100%;
+    min-width: 560px;
+    max-width: 100%;
+    height: auto;
+    color: var(--ink-2);
+  }
+  figcaption {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--rule-2);
+    font-size: 14px;
+    line-height: 1.58;
+    color: var(--ink-2);
+    max-width: 78ch;
+    min-width: 0;
+  }
+  figcaption b { color: var(--ink); font-weight: 700; }
+
+  /* ---- svg primitives ----
+     학술 도판 관례: 가는 선(0.9–1.1), 각진 모서리, 옅은 면.
+     라벨은 Helvetica 계열 — 작은 크기에서 세리프보다 잘 읽힌다.
+     ROS 노드·토픽 이름만 고정폭으로 두어 식별자임을 드러낸다. */
+  .nd   { fill: var(--surface-2); stroke: var(--ink-3); stroke-width: 0.9; }
+  .nd-f { fill: var(--force-bg);  stroke: var(--force); stroke-width: 1.1; }
+  .nd-i { fill: var(--image-bg);  stroke: var(--image); stroke-width: 1.1; }
+  .nd-w { fill: var(--warn-bg);   stroke: var(--warn);  stroke-width: 1.1; }
+  .nd-o { fill: none;             stroke: var(--rule);  stroke-width: 0.9; }
+  /* SVG2 기하 속성. 마크업의 rx="5" 를 한 줄로 덮어 모두 각지게 만든다. */
+  .nd, .nd-f, .nd-i, .nd-w, .nd-o { rx: 1.5px; ry: 1.5px; }
+
+  .ed   { fill: none; stroke: var(--ink-3); stroke-width: 0.9; }
+  .ed-f { fill: none; stroke: var(--force); stroke-width: 1.1; }
+  .ed-i { fill: none; stroke: var(--image); stroke-width: 1.1; }
+  .ed-w { fill: none; stroke: var(--warn);  stroke-width: 1.0; }
+  .dash { stroke-dasharray: 4 3; }
+
+  .lbl   { fill: var(--ink);   font-family: var(--sans); font-size: 12px; font-weight: 700; }
+  .lbl-s { fill: var(--ink);   font-family: var(--mono); font-size: 10.5px; font-weight: 500; }
+  .lbl-d { fill: var(--ink-3); font-family: var(--sans); font-size: 10.5px; letter-spacing: 0.01em; }
+  .lbl-f { fill: var(--force); font-family: var(--sans); font-size: 10.5px; font-weight: 600; }
+  .lbl-i { fill: var(--image); font-family: var(--sans); font-size: 10.5px; font-weight: 600; }
+  .lbl-w { fill: var(--warn);  font-family: var(--sans); font-size: 10.5px; font-weight: 600; }
+  .hd-f  { fill: var(--force); font-family: var(--sans); font-size: 12px; font-weight: 700; }
+  .hd-i  { fill: var(--image); font-family: var(--sans); font-size: 12px; font-weight: 700; }
+
+  .ah   { fill: var(--ink-3); }
+  .ah-f { fill: var(--force); }
+  .ah-i { fill: var(--image); }
+  .ah-w { fill: var(--warn); }
+
+  .figlegend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    margin-top: 14px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-3);
+    letter-spacing: 0.02em;
+  }
+  .figlegend span { display: inline-flex; align-items: center; gap: 7px; }
+  .sw { width: 22px; height: 0; border-top-width: 2px; border-top-style: solid; display: inline-block; }
+
+  /* ---------- tables ---------- */
+
+  .tw { overflow-x: auto; margin: 24px 0 0; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 520px;
+    font-size: 14px;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 14px 10px 0;
+    border-bottom: 1px solid var(--rule-2);
+    vertical-align: top;
+  }
+  th {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    font-weight: 500;
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+  td.num, th.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: none; }
+
+  /* ---------- callouts ---------- */
+
+  .call {
+    margin: 28px 0 0;
+    padding: 20px 22px;
+    border-radius: 5px;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+  }
+  .call-w { border-color: var(--warn-rule); background: var(--warn-bg); }
+  .call-f { border-color: var(--force-rule); background: var(--force-bg); }
+  .call h4 {
+    margin: 0 0 8px;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: -0.008em;
+  }
+  .call-w h4 { color: var(--warn); }
+  .call-f h4 { color: var(--force); }
+  .call p { margin: 0 0 10px; font-size: 14.5px; max-width: 72ch; }
+  .call p:last-child { margin-bottom: 0; }
+
+  .eq {
+    font-family: var(--mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink);
+    padding: 14px 16px;
+    background: var(--bg);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    margin: 14px 0;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  /* ---------- cards ---------- */
+
+  .grid2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 18px;
+    margin: 28px 0 0;
+  }
+  .card {
+    padding: 22px;
+    border-radius: 6px;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+  }
+  .card-f { border-color: var(--force-rule); }
+  .card-i { border-color: var(--image-rule); }
+  .card h4 {
+    margin: 0 0 4px;
+    font-family: var(--mono);
+    font-size: 15px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+  }
+  .card-f h4 { color: var(--force); }
+  .card-i h4 { color: var(--image); }
+  .card .sub {
+    font-size: 12.5px;
+    color: var(--ink-3);
+    margin: 0 0 16px;
+    font-family: var(--mono);
+  }
+  .card ul { margin: 0; padding-left: 17px; font-size: 14px; color: var(--ink-2); }
+  .card li { margin-bottom: 6px; }
+  .card li b { color: var(--ink); font-weight: 650; }
+
+  /* diagnostic matrix */
+  .mx { width: 100%; min-width: 480px; border-collapse: separate; border-spacing: 6px; }
+  .mx td, .mx th { border: none; padding: 0; }
+  .mx th {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--ink-3); padding: 0 0 4px 4px;
+  }
+  .cell {
+    padding: 14px 16px;
+    border-radius: 5px;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+    font-size: 13.5px;
+    line-height: 1.5;
+    height: 100%;
+  }
+  .cell b { display: block; font-size: 14px; margin-bottom: 3px; }
+  .cell.bad  { border-color: var(--warn-rule);  background: var(--warn-bg); }
+  .cell.bad b { color: var(--warn); }
+  .cell.mid  { border-color: var(--image-rule); background: var(--image-bg); }
+  .cell.mid b { color: var(--image); }
+  .cell.good b { color: var(--ok); }
+  .cell.odd  { border-color: var(--force-rule); background: var(--force-bg); }
+  .cell.odd b { color: var(--force); }
+  .rowlbl {
+    font-family: var(--mono); font-size: 12px; color: var(--ink-2);
+    white-space: nowrap; padding-right: 8px; vertical-align: middle;
+  }
+
+  /* phase list */
+  .phases { list-style: none; margin: 26px 0 0; padding: 0; }
+  .phases li {
+    display: grid;
+    grid-template-columns: 60px 1fr;
+    gap: 18px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--rule-2);
+    align-items: start;
+  }
+  .phases li:last-child { border-bottom: none; }
+  .ph {
+    font-family: var(--mono); font-size: 12px; font-weight: 650;
+    color: var(--ink); background: var(--surface-2);
+    border-radius: 3px; padding: 4px 0; text-align: center;
+  }
+  .ph-done { color: var(--force); background: var(--force-bg); }
+  .phbody b { display: block; font-size: 15px; margin-bottom: 3px; }
+  .phbody span { font-size: 13.5px; color: var(--ink-2); }
+  .phbody em { font-style: normal; color: var(--ink-3); font-family: var(--mono); font-size: 12px; }
+
+  footer {
+    margin-top: 84px;
+    padding-top: 26px;
+    border-top: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-3);
+    line-height: 1.8;
+  }
+
+  :focus-visible { outline: 2px solid var(--image); outline-offset: 2px; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    html { scroll-behavior: smooth; }
+  }
+
+  :root { color: var(--ink-2); }
+</style>
+
+        <!-- ================= column headers ================= -->
+        <text class="hd-f" x="20" y="18">Q_raw &#8212; 원시 B-mode 접촉 품질</text>
+        <text class="lbl-d" x="20" y="36">망 이전 &#183; 마스크 없음 &#183; 이력 없음 &#183; 접촉 첫 프레임부터 정의</text>
+        <text class="lbl-d" x="470" y="18" text-anchor="end">control/raw_quality.py</text>
+
+        <text class="hd-i" x="530" y="18">Q_seg &#8212; 세그멘테이션 제어 품질</text>
+        <text class="lbl-d" x="530" y="36">망 이후 &#183; 방광을 찾은 뒤에만 정의</text>
+        <text class="lbl-d" x="960" y="18" text-anchor="end">control/quality.py</text>
+
+        <!-- column divider -->
+        <path class="ed dash" d="M500,8 L500,700"/>
+
+        <!-- ================= formulas ================= -->
+        <rect class="nd-o" x="20" y="50" width="450" height="34"/>
+        <text class="lbl-s" x="245" y="71" text-anchor="middle">Q_raw = &#931; w&#7522;s&#7522; / &#931; w&#7522; &#8712; [0,1]&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#931;w = 4.0&#160;&#183;&#160;4 항</text>
+
+        <rect class="nd-o" x="530" y="50" width="430" height="34"/>
+        <text class="lbl-s" x="745" y="71" text-anchor="middle">Q_seg = &#931; w&#7522;s&#7522; / &#931; w&#7522; &#8712; [0,1]&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#931;w = 6.5&#160;&#183;&#160;8 항</text>
+
+        <!-- ================= Q_raw sub-scores ================= -->
+        <rect class="nd-f" x="20" y="98" width="450" height="46"/>
+        <text class="lbl-s" x="32" y="118">near_field_echo</text>
+        <text class="lbl-f" x="458" y="118" text-anchor="end">w 1.0</text>
+        <text class="lbl-d" x="32" y="135">근거리 밴드(얕은 쪽 15%) 평균 &#247; 기준 0.45</text>
+
+        <rect class="nd-f" x="20" y="152" width="450" height="46"/>
+        <text class="lbl-s" x="32" y="172">contact_continuity</text>
+        <text class="lbl-f" x="458" y="172" text-anchor="end">w 1.5  &#8212; 최대</text>
+        <text class="lbl-d" x="32" y="189">1 &#8722; (근거리 평균 &lt; 0.10 인 A-line 비율)  &#183;  공기층은 광선을 통째로 죽인다</text>
+
+        <rect class="nd-f" x="20" y="206" width="450" height="46"/>
+        <text class="lbl-s" x="32" y="226">total_echo_energy</text>
+        <text class="lbl-f" x="458" y="226" text-anchor="end">w 0.5</text>
+        <text class="lbl-d" x="32" y="243">ROI 전체 평균 강도의 plateau  &#183;  0.30 &#177; 0.12 안이면 1.0</text>
+
+        <rect class="nd-f" x="20" y="260" width="450" height="46"/>
+        <text class="lbl-s" x="32" y="280">shadow_penalty</text>
+        <text class="lbl-f" x="458" y="280" text-anchor="end">w 1.0</text>
+        <text class="lbl-d" x="32" y="297">1 &#8722; (원거리 밴드(깊은 쪽 35%) 에너지가 붕괴한 A-line 비율)</text>
+
+        <!-- shadow criterion detail -->
+        <rect class="nd-o" x="34" y="316" width="436" height="38"/>
+        <text class="lbl-d" x="46" y="332">붕괴 판정 = 프레임 자신의 원거리 P90 &#215; 0.25 미만  <tspan class="lbl-f">또는</tspan>  절대 0.02 미만</text>
+        <text class="lbl-d" x="46" y="348">중앙값이 아닌 이유: 절반 이상이 음영이면 중앙값 자체가 음영 레벨이 된다</text>
+
+        <!-- ================= Q_seg sub-scores ================= -->
+        <rect class="nd-i" x="530" y="98" width="430" height="46"/>
+        <text class="lbl-s" x="542" y="118">segmentation_confidence</text>
+        <text class="lbl-i" x="948" y="118" text-anchor="end">w 1.0</text>
+        <text class="lbl-d" x="542" y="135">mean(|2p &#8722; 1|)  &#183;  프레임 평균 이진 확신도, 임계값 없음</text>
+
+        <rect class="nd-i" x="530" y="152" width="430" height="46"/>
+        <text class="lbl-s" x="542" y="172">mask_completeness</text>
+        <text class="lbl-i" x="948" y="172" text-anchor="end">w 1.0</text>
+        <text class="lbl-d" x="542" y="189">면적비 plateau  &#183;  target <tspan class="lbl-w">0.15 &#177; 0.10 &#8212; 미검증 임의값</tspan></text>
+
+        <rect class="nd-i" x="530" y="206" width="430" height="46"/>
+        <text class="lbl-s" x="542" y="226">border_penalty</text>
+        <text class="lbl-i" x="948" y="226" text-anchor="end">w 1.0</text>
+        <text class="lbl-d" x="542" y="243">exp(&#8722;border_contact_ratio / 0.15)  &#183;  시야에 잘린 정도</text>
+
+        <rect class="nd-i" x="530" y="260" width="430" height="46"/>
+        <text class="lbl-s" x="542" y="280">component_quality</text>
+        <text class="lbl-i" x="948" y="280" text-anchor="end">w 1.0</text>
+        <text class="lbl-d" x="542" y="297">최대 연결성분 면적 &#247; 원시 마스크 면적  &#183;  1.0 = 덩어리 하나</text>
+
+        <rect class="nd-i" x="530" y="314" width="430" height="46"/>
+        <text class="lbl-s" x="542" y="334">lumen_contrast</text>
+        <text class="lbl-i" x="948" y="334" text-anchor="end">w 0.5  &#183; 선택</text>
+        <text class="lbl-d" x="542" y="351">내강/주변 정규화 대비 &#247; 0.35  &#183;  원본 영상이 있을 때만</text>
+
+        <rect class="nd-i" x="530" y="368" width="430" height="46"/>
+        <text class="lbl-s" x="542" y="388">temporal_iou</text>
+        <text class="lbl-w" x="948" y="388" text-anchor="end">w 1.0 &#8594; 0</text>
+        <text class="lbl-d" x="542" y="405">움직임 정렬된 이전 마스크와의 IoU  &#183;  옵티컬 플로우 필요</text>
+
+        <rect class="nd-i" x="530" y="422" width="430" height="46"/>
+        <text class="lbl-s" x="542" y="442">centroid_stability</text>
+        <text class="lbl-w" x="948" y="442" text-anchor="end">w 0.5 &#8594; 0</text>
+        <text class="lbl-d" x="542" y="459">exp(&#8722;normalized_centroid_jump / 0.05)</text>
+
+        <rect class="nd-i" x="530" y="476" width="430" height="46"/>
+        <text class="lbl-s" x="542" y="496">area_stability</text>
+        <text class="lbl-w" x="948" y="496" text-anchor="end">w 0.5 &#8594; 0</text>
+        <text class="lbl-d" x="542" y="513">exp(&#8722;|relative_area_change| / 0.25)</text>
+
+        <!-- temporal bracket -->
+        <path class="ed-w" d="M524,368 L516,368 L516,522 L524,522"/>
+        <path class="ed-w" d="M516,445 L506,445"/>
+        <text class="lbl-w" x="530" y="538">시간축 3항 &#8212; 힘 탐색 시 가중치 0. 힘을 바꾸면 영상은 당연히 변하므로,</text>
+        <text class="lbl-w" x="530" y="553">그대로 두면 탐색기가 &#8220;안 움직이는 게 최고&#8221;라 결론 내린다. 비중 2.0/6.5 &#8776; 31%</text>
+
+        <!-- ================= gates ================= -->
+        <text class="lbl" x="20" y="382">판정 게이트 &#8212; 접촉 실패 4종</text>
+        <rect class="nd-o" x="20" y="392" width="450" height="96"/>
+        <text class="lbl-s" x="32" y="412">no_contact</text>
+        <text class="lbl-d" x="240" y="412">ROI 평균 &lt; 0.05</text>
+        <text class="lbl-s" x="32" y="432">poor_acoustic_coupling</text>
+        <text class="lbl-d" x="240" y="432">어두운 A-line &gt; 35%</text>
+        <text class="lbl-s" x="32" y="452">excessive_shadowing</text>
+        <text class="lbl-d" x="240" y="452">음영 A-line &gt; 50%</text>
+        <text class="lbl-s" x="32" y="472">low_near_field_echo</text>
+        <text class="lbl-d" x="240" y="472">near_field_echo &lt; 0.25</text>
+
+        <text class="lbl-w" x="20" y="506">excessive_shadowing 만이 힘 축으로 해결되지 않는다 &#8212; 눌러도 나아지지 않는다</text>
+
+        <text class="lbl" x="20" y="540">측정 불가 = <tspan class="lbl-f">None</tspan>, 0.0 이 아니다</text>
+        <text class="lbl-d" x="20" y="558">ROI 지지를 가진 A-line이 16개 미만이면 점수를 만들지 않는다. 0.0을 돌려주면</text>
+        <text class="lbl-d" x="20" y="574">&#8220;정말 나쁜 프레임&#8221;과 구별되지 않고, 힘 레벨의 구간 평균을 힘과</text>
+        <text class="lbl-d" x="20" y="590">무관한 이유로 끌어내린다.</text>
+
+        <text class="lbl" x="20" y="622">부가 진단</text>
+        <text class="lbl-s" x="20" y="640">dark_a_line_ratio &#183; shadowed_a_line_ratio &#183; near_field_mean</text>
+        <text class="lbl-s" x="20" y="656">far_field_mean &#183; roi_mean &#183; a_line_count</text>
+
+        <!-- Q_seg gate -->
+        <text class="lbl" x="530" y="574">판정 게이트 &#8212; 이유 코드 13종 (활성 9 / 비활성 4)</text>
+        <rect class="nd-o" x="530" y="584" width="430" height="122"/>
+        <text class="lbl-i" x="542" y="603">활성</text>
+        <text class="lbl-s" x="586" y="603">empty_mask &#183; mask_area_too_small</text>
+        <text class="lbl-s" x="586" y="619">mask_area_too_large &#183; low_segmentation_confidence</text>
+        <text class="lbl-s" x="586" y="635">excessive_border_contact &#183; fragmented_mask</text>
+        <text class="lbl-s" x="586" y="651">low_temporal_warped_iou &#183; excessive_centroid_jump</text>
+        <text class="lbl-s" x="586" y="667">excessive_area_change</text>
+        <text class="lbl-d" x="542" y="685">기본 비활성 (null) &#8212; low_lumen_contrast &#183; high_boundary_entropy</text>
+        <text class="lbl-d" x="586" y="699">low_temporal_stability &#183; low_control_quality</text>
+
+        <!-- ================= shared footer ================= -->
+        <path class="ed" d="M20,716 L960,716"/>
+
+        <text class="lbl-d" x="20" y="736">두 이유 코드 집합은 <tspan class="lbl">교집합이 없고</tspan>, 그것을 테스트가 강제한다 &#8212; supervisor는 합집합을 소비하므로 코드가 겹치면 하나의 관측이 두 복구 동작으로 매핑된다.</text>
+        <text class="lbl-d" x="20" y="754">입력 없는 항은 <tspan class="lbl">0점이 아니라 평균에서 제외</tspan>된다. 첫 프레임은 Q_seg 분모가 6.5가 아니라 4.5다 &#8212; 선행 프레임이 없다는 이유로 감점되지 않는다.</text>
+        <text class="lbl-w" x="20" y="772">Q_raw 의 수치 상수는 <tspan class="lbl-w">전부 PROVISIONAL</tspan>이다. US 영상 기하(프로브 종류 &#183; 깊이 스케일 &#183; 부채꼴 ROI)가 확정되기 전에는 하나도 정할 수 없다.</text>
+      </svg>

@@ -1,0 +1,599 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 900 636" role="img"
+           aria-label="Slim U-Net의 U자 구조. 왼쪽 수축 경로는 4개 인코더 스테이지로 32, 64, 128, 256 채널이며 매 단계 2배2배 최대 풀링으로 해상도가 절반이 된다. 바닥의 병목은 512채널 16곱하기16이다. 오른쪽 확장 경로는 전치 합성곱으로 해상도를 2배 늘리고 채널을 절반으로 줄인 뒤 인코더 스킵 연결과 결합하고 합성곱을 한 번 적용한다. 마지막 1곱하기1 합성곱이 1채널 256곱하기256 원시 로짓을 낸다." xmlns="http://www.w3.org/2000/svg">
+<style>
+  /* 팔레트는 학술 도판 관례를 따른다: 흰 바탕, 저채도, 색은 기능적으로만.
+     힘/영상 두 도메인은 색상만이 아니라 **명도**로도 갈라 둔다 (L* 약 42 vs 27).
+     저널이 흑백으로 인쇄해도 두 계열이 회색조에서 구분되어야 하기 때문이다.
+     배경 톤도 따뜻함/차가움으로 한 번 더 갈라 이중으로 부호화한다. */
+  :root {
+    --bg:        #FFFFFF;
+    --surface:   #FFFFFF;
+    --surface-2: #F1F0ED;
+    --ink:       #111111;
+    --ink-2:     #3D3D3B;
+    --ink-3:     #6E6E6B;
+    --rule:      #BFBFBC;
+    --rule-2:    #E2E2DF;
+
+    --force:     #8A5A00;   /* 따뜻함 · 선 L*42 */
+    --force-bg:  #E8E1CE;   /*            면 L*90 — 음영 상자 */
+    --force-rule:#BFA269;
+
+    --image:     #17455C;   /* 차가움 · 선 L*27 */
+    --image-bg:  #FFFFFF;   /*            면 L*100 — 흰 상자 */
+    --image-rule:#93AAB8;
+
+    --warn:      #8C1D1D;
+    --warn-bg:   #F7EDED;
+    --warn-rule: #C9A2A2;
+
+    --ok:        #1F5130;
+
+    /* 논문 관례: 본문은 명조/Times, 도판 라벨은 Helvetica 계열.
+       작은 크기에서 산세리프가 더 잘 읽히기 때문이다. */
+    --serif: 'Times New Roman', 'Nimbus Roman', 'Liberation Serif',
+             'Noto Serif KR', Batang, '바탕', serif;
+    --sans: 'Helvetica Neue', Helvetica, Arial, 'Malgun Gothic',
+            'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+    --mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas,
+            'Liberation Mono', monospace;
+
+    --measure: 68ch;
+    --pad: clamp(20px, 4vw, 56px);
+  }
+
+  /* 다크는 화면 판독용이다. 인쇄본은 항상 위의 라이트 팔레트다. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:        #14140F;
+      --surface:   #1B1B17;
+      --surface-2: #24241F;
+      --ink:       #EDEBE4;
+      --ink-2:     #A8A69D;
+      --ink-3:     #77756D;
+      --rule:      #35352F;
+      --rule-2:    #26261F;
+
+      --force:     #D2A85C;
+      --force-bg:  #2A2214;
+      --force-rule:#5F5030;
+
+      --image:     #8FB6CC;
+      --image-bg:  #171F26;
+      --image-rule:#3A4C58;
+
+      --warn:      #D08C8C;
+      --warn-bg:   #2A1A1A;
+      --warn-rule: #5A3838;
+
+      --ok:        #7FB394;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg:        #14140F;
+    --surface:   #1B1B17;
+    --surface-2: #24241F;
+    --ink:       #EDEBE4;
+    --ink-2:     #A8A69D;
+    --ink-3:     #77756D;
+    --rule:      #35352F;
+    --rule-2:    #26261F;
+
+    --force:     #D2A85C;
+    --force-bg:  #2A2214;
+    --force-rule:#5F5030;
+
+    --image:     #8FB6CC;
+    --image-bg:  #171F26;
+    --image-rule:#3A4C58;
+
+    --warn:      #D08C8C;
+    --warn-bg:   #2A1A1A;
+    --warn-rule: #5A3838;
+
+    --ok:        #7FB394;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 0 var(--pad) 96px;
+  }
+
+  /* ---------- header ---------- */
+
+  .masthead {
+    padding: clamp(48px, 9vw, 104px) 0 40px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .kicker {
+    font-family: var(--sans);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0 0 20px;
+  }
+  h1 {
+    font-size: clamp(30px, 5vw, 46px);
+    line-height: 1.12;
+    letter-spacing: -0.012em;
+    font-weight: 700;
+    margin: 0 0 22px;
+    text-wrap: balance;
+    max-width: 18ch;
+  }
+  .standfirst {
+    font-size: clamp(16px, 1.8vw, 19px);
+    color: var(--ink-2);
+    max-width: 56ch;
+    margin: 0 0 34px;
+    line-height: 1.6;
+  }
+  .metastrip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 10px;
+  }
+  .meta {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.02em;
+    color: var(--ink-2);
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 5px 10px;
+    white-space: nowrap;
+  }
+  .meta b { color: var(--ink); font-weight: 600; }
+
+  /* ---------- sections ---------- */
+
+  section { padding-top: 72px; }
+
+  .eyebrow {
+    font-family: var(--sans);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin: 0 0 18px;
+  }
+  .eyebrow::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--rule);
+  }
+
+  h2 {
+    font-size: clamp(22px, 2.9vw, 28px);
+    line-height: 1.24;
+    letter-spacing: -0.008em;
+    font-weight: 700;
+    margin: 0 0 14px;
+    text-wrap: balance;
+    max-width: 26ch;
+  }
+  h3 {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0;
+    margin: 40px 0 12px;
+  }
+  p { max-width: var(--measure); margin: 0 0 16px; }
+  p.lead { font-size: 18px; color: var(--ink-2); }
+
+  a { color: var(--image); }
+
+  code, .m {
+    font-family: var(--mono);
+    font-size: 0.885em;
+    letter-spacing: -0.01em;
+  }
+  code {
+    background: var(--surface-2);
+    border-radius: 3px;
+    padding: 1px 5px;
+  }
+
+  strong { font-weight: 700; }
+  .fc { color: var(--force); }
+  .ic { color: var(--image); }
+  .wc { color: var(--warn); }
+
+  /* ---------- status chips ---------- */
+
+  .chip {
+    display: inline-block;
+    font-family: var(--sans);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 2px;
+    border: 1px solid;
+    vertical-align: 2px;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+  .chip-fix  { color: var(--ok);     border-color: var(--ok);     background: transparent; }
+  .chip-prop { color: var(--force);  border-color: var(--force-rule); background: var(--force-bg); }
+  .chip-meas { color: var(--image);  border-color: var(--image-rule); background: var(--image-bg); }
+  .chip-open { color: var(--warn);   border-color: var(--warn-rule);  background: var(--warn-bg); }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 22px;
+    padding: 16px 18px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    margin: 28px 0 0;
+  }
+  .legend div { font-size: 13.5px; color: var(--ink-2); }
+
+  /* ---------- figures ---------- */
+
+  figure {
+    margin: 30px 0 0;
+    padding: 24px 22px 18px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    overflow-x: auto;
+  }
+  figure svg {
+    display: block;
+    width: 100%;
+    min-width: 560px;
+    max-width: 100%;
+    height: auto;
+    color: var(--ink-2);
+  }
+  figcaption {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--rule-2);
+    font-size: 14px;
+    line-height: 1.58;
+    color: var(--ink-2);
+    max-width: 78ch;
+    min-width: 0;
+  }
+  figcaption b { color: var(--ink); font-weight: 700; }
+
+  /* ---- svg primitives ----
+     학술 도판 관례: 가는 선(0.9–1.1), 각진 모서리, 옅은 면.
+     라벨은 Helvetica 계열 — 작은 크기에서 세리프보다 잘 읽힌다.
+     ROS 노드·토픽 이름만 고정폭으로 두어 식별자임을 드러낸다. */
+  .nd   { fill: var(--surface-2); stroke: var(--ink-3); stroke-width: 0.9; }
+  .nd-f { fill: var(--force-bg);  stroke: var(--force); stroke-width: 1.1; }
+  .nd-i { fill: var(--image-bg);  stroke: var(--image); stroke-width: 1.1; }
+  .nd-w { fill: var(--warn-bg);   stroke: var(--warn);  stroke-width: 1.1; }
+  .nd-o { fill: none;             stroke: var(--rule);  stroke-width: 0.9; }
+  /* SVG2 기하 속성. 마크업의 rx="5" 를 한 줄로 덮어 모두 각지게 만든다. */
+  .nd, .nd-f, .nd-i, .nd-w, .nd-o { rx: 1.5px; ry: 1.5px; }
+
+  .ed   { fill: none; stroke: var(--ink-3); stroke-width: 0.9; }
+  .ed-f { fill: none; stroke: var(--force); stroke-width: 1.1; }
+  .ed-i { fill: none; stroke: var(--image); stroke-width: 1.1; }
+  .ed-w { fill: none; stroke: var(--warn);  stroke-width: 1.0; }
+  .dash { stroke-dasharray: 4 3; }
+
+  .lbl   { fill: var(--ink);   font-family: var(--sans); font-size: 12px; font-weight: 700; }
+  .lbl-s { fill: var(--ink);   font-family: var(--mono); font-size: 10.5px; font-weight: 500; }
+  .lbl-d { fill: var(--ink-3); font-family: var(--sans); font-size: 10.5px; letter-spacing: 0.01em; }
+  .lbl-f { fill: var(--force); font-family: var(--sans); font-size: 10.5px; font-weight: 600; }
+  .lbl-i { fill: var(--image); font-family: var(--sans); font-size: 10.5px; font-weight: 600; }
+  .lbl-w { fill: var(--warn);  font-family: var(--sans); font-size: 10.5px; font-weight: 600; }
+  .hd-f  { fill: var(--force); font-family: var(--sans); font-size: 12px; font-weight: 700; }
+  .hd-i  { fill: var(--image); font-family: var(--sans); font-size: 12px; font-weight: 700; }
+
+  .ah   { fill: var(--ink-3); }
+  .ah-f { fill: var(--force); }
+  .ah-i { fill: var(--image); }
+  .ah-w { fill: var(--warn); }
+
+  .figlegend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    margin-top: 14px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-3);
+    letter-spacing: 0.02em;
+  }
+  .figlegend span { display: inline-flex; align-items: center; gap: 7px; }
+  .sw { width: 22px; height: 0; border-top-width: 2px; border-top-style: solid; display: inline-block; }
+
+  /* ---------- tables ---------- */
+
+  .tw { overflow-x: auto; margin: 24px 0 0; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 520px;
+    font-size: 14px;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 14px 10px 0;
+    border-bottom: 1px solid var(--rule-2);
+    vertical-align: top;
+  }
+  th {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    font-weight: 500;
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+  td.num, th.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: none; }
+
+  /* ---------- callouts ---------- */
+
+  .call {
+    margin: 28px 0 0;
+    padding: 20px 22px;
+    border-radius: 5px;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+  }
+  .call-w { border-color: var(--warn-rule); background: var(--warn-bg); }
+  .call-f { border-color: var(--force-rule); background: var(--force-bg); }
+  .call h4 {
+    margin: 0 0 8px;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: -0.008em;
+  }
+  .call-w h4 { color: var(--warn); }
+  .call-f h4 { color: var(--force); }
+  .call p { margin: 0 0 10px; font-size: 14.5px; max-width: 72ch; }
+  .call p:last-child { margin-bottom: 0; }
+
+  .eq {
+    font-family: var(--mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink);
+    padding: 14px 16px;
+    background: var(--bg);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    margin: 14px 0;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  /* ---------- cards ---------- */
+
+  .grid2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 18px;
+    margin: 28px 0 0;
+  }
+  .card {
+    padding: 22px;
+    border-radius: 6px;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+  }
+  .card-f { border-color: var(--force-rule); }
+  .card-i { border-color: var(--image-rule); }
+  .card h4 {
+    margin: 0 0 4px;
+    font-family: var(--mono);
+    font-size: 15px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+  }
+  .card-f h4 { color: var(--force); }
+  .card-i h4 { color: var(--image); }
+  .card .sub {
+    font-size: 12.5px;
+    color: var(--ink-3);
+    margin: 0 0 16px;
+    font-family: var(--mono);
+  }
+  .card ul { margin: 0; padding-left: 17px; font-size: 14px; color: var(--ink-2); }
+  .card li { margin-bottom: 6px; }
+  .card li b { color: var(--ink); font-weight: 650; }
+
+  /* diagnostic matrix */
+  .mx { width: 100%; min-width: 480px; border-collapse: separate; border-spacing: 6px; }
+  .mx td, .mx th { border: none; padding: 0; }
+  .mx th {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--ink-3); padding: 0 0 4px 4px;
+  }
+  .cell {
+    padding: 14px 16px;
+    border-radius: 5px;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+    font-size: 13.5px;
+    line-height: 1.5;
+    height: 100%;
+  }
+  .cell b { display: block; font-size: 14px; margin-bottom: 3px; }
+  .cell.bad  { border-color: var(--warn-rule);  background: var(--warn-bg); }
+  .cell.bad b { color: var(--warn); }
+  .cell.mid  { border-color: var(--image-rule); background: var(--image-bg); }
+  .cell.mid b { color: var(--image); }
+  .cell.good b { color: var(--ok); }
+  .cell.odd  { border-color: var(--force-rule); background: var(--force-bg); }
+  .cell.odd b { color: var(--force); }
+  .rowlbl {
+    font-family: var(--mono); font-size: 12px; color: var(--ink-2);
+    white-space: nowrap; padding-right: 8px; vertical-align: middle;
+  }
+
+  /* phase list */
+  .phases { list-style: none; margin: 26px 0 0; padding: 0; }
+  .phases li {
+    display: grid;
+    grid-template-columns: 60px 1fr;
+    gap: 18px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--rule-2);
+    align-items: start;
+  }
+  .phases li:last-child { border-bottom: none; }
+  .ph {
+    font-family: var(--mono); font-size: 12px; font-weight: 650;
+    color: var(--ink); background: var(--surface-2);
+    border-radius: 3px; padding: 4px 0; text-align: center;
+  }
+  .ph-done { color: var(--force); background: var(--force-bg); }
+  .phbody b { display: block; font-size: 15px; margin-bottom: 3px; }
+  .phbody span { font-size: 13.5px; color: var(--ink-2); }
+  .phbody em { font-style: normal; color: var(--ink-3); font-family: var(--mono); font-size: 12px; }
+
+  footer {
+    margin-top: 84px;
+    padding-top: 26px;
+    border-top: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-3);
+    line-height: 1.8;
+  }
+
+  :focus-visible { outline: 2px solid var(--image); outline-offset: 2px; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    html { scroll-behavior: smooth; }
+  }
+
+  :root { color: var(--ink-2); }
+</style>
+        <defs>
+          <marker id="aG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,1 L9,5 L0,9 z" class="ah"/>
+          </marker>
+          <marker id="aGi" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,1 L9,5 L0,9 z" class="ah-i"/>
+          </marker>
+        </defs>
+
+        <text class="lbl-d" x="150" y="14" text-anchor="middle">수축 경로 &#183; encoder</text>
+        <text class="lbl-d" x="690" y="14" text-anchor="middle">확장 경로 &#183; decoder</text>
+
+        <!-- input / output -->
+        <rect class="nd-o" x="60" y="30" width="180" height="42"/>
+        <text class="lbl-d" x="150" y="48" text-anchor="middle">입력</text>
+        <text class="lbl-s" x="150" y="64" text-anchor="middle">1 ch &#183; 256&#215;256</text>
+
+        <rect class="nd-i" x="600" y="30" width="180" height="42"/>
+        <text class="lbl-s" x="690" y="48" text-anchor="middle">conv 1&#215;1</text>
+        <text class="lbl-s" x="690" y="64" text-anchor="middle">1 ch &#183; 256&#215;256</text>
+
+        <!-- encoder stages -->
+        <rect class="nd" x="60" y="86" width="180" height="42"/>
+        <text class="lbl-s" x="150" y="104" text-anchor="middle">conv 3&#215;3 &#215;1</text>
+        <text class="lbl-d" x="150" y="120" text-anchor="middle">32 ch &#183; 256&#215;256</text>
+
+        <rect class="nd" x="60" y="171" width="180" height="42"/>
+        <text class="lbl-s" x="150" y="189" text-anchor="middle">conv 3&#215;3 &#215;1</text>
+        <text class="lbl-d" x="150" y="205" text-anchor="middle">64 ch &#183; 128&#215;128</text>
+
+        <rect class="nd" x="60" y="256" width="180" height="42"/>
+        <text class="lbl-s" x="150" y="274" text-anchor="middle">conv 3&#215;3 &#215;1</text>
+        <text class="lbl-d" x="150" y="290" text-anchor="middle">128 ch &#183; 64&#215;64</text>
+
+        <rect class="nd" x="60" y="341" width="180" height="42"/>
+        <text class="lbl-s" x="150" y="359" text-anchor="middle">conv 3&#215;3 &#215;1</text>
+        <text class="lbl-d" x="150" y="375" text-anchor="middle">256 ch &#183; 32&#215;32</text>
+
+        <!-- decoder stages -->
+        <rect class="nd" x="600" y="86" width="180" height="42"/>
+        <text class="lbl-s" x="690" y="104" text-anchor="middle">concat + conv 3&#215;3 &#215;1</text>
+        <text class="lbl-d" x="690" y="120" text-anchor="middle">32 ch &#183; 256&#215;256</text>
+
+        <rect class="nd" x="600" y="171" width="180" height="42"/>
+        <text class="lbl-s" x="690" y="189" text-anchor="middle">concat + conv 3&#215;3 &#215;1</text>
+        <text class="lbl-d" x="690" y="205" text-anchor="middle">64 ch &#183; 128&#215;128</text>
+
+        <rect class="nd" x="600" y="256" width="180" height="42"/>
+        <text class="lbl-s" x="690" y="274" text-anchor="middle">concat + conv 3&#215;3 &#215;1</text>
+        <text class="lbl-d" x="690" y="290" text-anchor="middle">128 ch &#183; 64&#215;64</text>
+
+        <rect class="nd" x="600" y="341" width="180" height="42"/>
+        <text class="lbl-s" x="690" y="359" text-anchor="middle">concat + conv 3&#215;3 &#215;1</text>
+        <text class="lbl-d" x="690" y="375" text-anchor="middle">256 ch &#183; 32&#215;32</text>
+
+        <!-- bottleneck -->
+        <rect class="nd" x="330" y="466" width="180" height="46"/>
+        <text class="lbl-s" x="420" y="485" text-anchor="middle">bottleneck &#183; conv 3&#215;3 &#215;1</text>
+        <text class="lbl-d" x="420" y="501" text-anchor="middle">512 ch &#183; 16&#215;16</text>
+
+        <!-- encoder flow -->
+        <path class="ed" d="M150,72 L150,82" marker-end="url(#aG)"/>
+        <path class="ed" d="M150,128 L150,167" marker-end="url(#aG)"/>
+        <text class="lbl-d" x="142" y="152" text-anchor="end">maxpool 2&#215;2</text>
+        <path class="ed" d="M150,213 L150,252" marker-end="url(#aG)"/>
+        <text class="lbl-d" x="142" y="237" text-anchor="end">maxpool 2&#215;2</text>
+        <path class="ed" d="M150,298 L150,337" marker-end="url(#aG)"/>
+        <text class="lbl-d" x="142" y="322" text-anchor="end">maxpool 2&#215;2</text>
+        <path class="ed" d="M150,383 L150,428 L420,428 L420,462" marker-end="url(#aG)"/>
+        <text class="lbl-d" x="158" y="422">maxpool 2&#215;2 &#8594; 16&#215;16</text>
+
+        <!-- decoder flow -->
+        <path class="ed" d="M510,489 L690,489 L690,387" marker-end="url(#aG)"/>
+        <text class="lbl-d" x="700" y="448">ConvT s2 &#183; 512&#8594;256 ch</text>
+        <path class="ed" d="M690,341 L690,302" marker-end="url(#aG)"/>
+        <text class="lbl-d" x="700" y="325">ConvT s2 &#183; 256&#8594;128 ch</text>
+        <path class="ed" d="M690,256 L690,217" marker-end="url(#aG)"/>
+        <text class="lbl-d" x="700" y="240">ConvT s2 &#183; 128&#8594;64 ch</text>
+        <path class="ed" d="M690,171 L690,132" marker-end="url(#aG)"/>
+        <text class="lbl-d" x="700" y="155">ConvT s2 &#183; 64&#8594;32 ch</text>
+        <path class="ed-i" d="M690,86 L690,76" marker-end="url(#aGi)"/>
+
+        <!-- skips -->
+        <path class="ed dash" d="M240,107 L594,107" marker-end="url(#aG)"/>
+        <text class="lbl-d" x="417" y="101" text-anchor="middle">skip &#8594; concat   32 + 32 = 64 ch</text>
+        <path class="ed dash" d="M240,192 L594,192" marker-end="url(#aG)"/>
+        <text class="lbl-d" x="417" y="186" text-anchor="middle">skip &#8594; concat   64 + 64 = 128 ch</text>
+        <path class="ed dash" d="M240,277 L594,277" marker-end="url(#aG)"/>
+        <text class="lbl-d" x="417" y="271" text-anchor="middle">skip &#8594; concat   128 + 128 = 256 ch</text>
+        <path class="ed dash" d="M240,362 L594,362" marker-end="url(#aG)"/>
+        <text class="lbl-d" x="417" y="356" text-anchor="middle">skip &#8594; concat   256 + 256 = 512 ch</text>
+
+        <!-- sigmoid outside -->
+        <path class="ed-i dash" d="M780,51 L816,51" marker-end="url(#aGi)"/>
+        <text class="lbl-i" x="824" y="48">&#963;</text>
+        <text class="lbl-d" x="824" y="64">망 바깥</text>
+
+        <!-- footer facts -->
+        <path class="ed" d="M60,556 L840,556"/>
+        <text class="lbl-d" x="60" y="576">입력 H, W 는 16의 배수여야 한다 (2^depth, depth = 4) &#183; 업샘플링은 ConvTranspose2d(kernel 3, stride 2, padding 1, output_padding 1)</text>
+        <text class="lbl-d" x="60" y="594">스킵 결합 순서는 torch.cat([skip, x]) &#183; 전치 합성곱이 채널을 절반으로 줄이므로 결합 폭은 항상 스킵의 2배</text>
+        <text class="lbl-i" x="60" y="612">출력은 raw logits &#8212; forward 안에서 sigmoid 를 적용하지 않는다. BCEWithLogitsLoss 안정성과 ONNX 그래프 동일성 때문이다.</text>
+      </svg>

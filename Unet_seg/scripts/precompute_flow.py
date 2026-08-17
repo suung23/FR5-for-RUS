@@ -24,12 +24,12 @@ import numpy as np
 
 from _common import REPO_ROOT  # noqa: F401  (path setup)
 
-from src.data.io import load_grayscale
-from src.data.manifest import ManifestRecord, load_manifest, write_manifest
-from src.flow.backends import build_flow_backend
-from src.flow.precomputed import is_valid_flow_file, save_flow_pair
-from src.flow.reliability import ReliabilityConfig, compute_reliability
-from src.utils.logging_utils import setup_logging
+from rus_perception.data.io import load_grayscale
+from rus_perception.data.manifest import ManifestRecord, load_manifest, write_manifest
+from rus_perception.flow.backends import build_flow_backend
+from rus_perception.flow.precomputed import is_valid_flow_file, save_flow_pair
+from rus_perception.flow.reliability import ReliabilityConfig, compute_reliability
+from rus_perception.utils.logging_utils import setup_logging
 
 logger = logging.getLogger("precompute_flow")
 

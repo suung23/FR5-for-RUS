@@ -8,7 +8,7 @@ import math
 import numpy as np
 import pytest
 
-from src.control.features import (
+from rus_perception.control.features import (
     FeatureExtractionConfig,
     binary_mask_geometry,
     border_contact_ratio,
@@ -18,10 +18,10 @@ from src.control.features import (
     segmentation_confidence_from_probability,
     warp_mask_with_flow,
 )
-from src.control.postprocess import PostprocessConfig, postprocess_probability
-from src.control.quality import QUALITY_COMPONENT_NAMES, QualityConfig, compute_control_quality
-from src.control.state import COORDINATE_CONVENTION, BoundingBox, ControlState
-from src.control.validity import REJECTION_REASONS, ValidityConfig, evaluate_validity
+from rus_perception.control.postprocess import PostprocessConfig, postprocess_probability
+from rus_perception.control.quality import QUALITY_COMPONENT_NAMES, QualityConfig, compute_control_quality
+from rus_perception.control.state import COORDINATE_CONVENTION, BoundingBox, ControlState
+from rus_perception.control.validity import REJECTION_REASONS, ValidityConfig, evaluate_validity
 
 
 def square_mask(size: int = 64, x: int = 20, y: int = 24, width: int = 16) -> np.ndarray:

@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rus-perception"
+version = "0.1.0"
+description = "Perception half of the FR5 robotic-ultrasound loop: Slim U-Net bladder segmentation, control-oriented features, quality functions and validity gating."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+keywords = ["ultrasound", "segmentation", "u-net", "robotic ultrasound", "bladder"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+]
+
+# Core runtime. Kept in sync with requirements.txt, which stays the
+# pinned/annotated file for a plain `pip install -r` workflow.
+dependencies = [
+    "torch>=2.0",
+    "torchvision>=0.15",
+    "numpy>=1.23",
+    "Pillow>=9.3",
+    "PyYAML>=6.0",
+    "opencv-python-headless>=4.7",
+    "tqdm>=4.64",
+]
+
+[project.optional-dependencies]
+onnx = ["onnx>=1.15", "onnxruntime>=1.16", "onnxscript>=0.1"]
+viz = ["matplotlib>=3.6"]
+dev = ["pytest>=7.2"]
+
+[project.urls]
+Upstream = "https://github.com/milesial/Pytorch-UNet"
+Paper = "https://arxiv.org/abs/2302.11524"
+
+# ---------------------------------------------------------------------------
+# Packaging scope
+#
+# ONLY `rus_perception` is installed. The repository root also contains
+# `unet/`, `utils/`, `train.py`, `predict.py`, `evaluate.py` and `hubconf.py`,
+# which are the UNMODIFIED upstream milesial/Pytorch-UNet entry points. Those
+# are preserved for provenance and for the baseline-parity test; installing
+# them would put the extremely generic top-level names `unet` and `utils` on
+# every consumer's import path. They stay importable when running from a clone
+# (which is all `tests/test_models.py` needs) and are never installed.
+#
+# `scripts/` is likewise not packaged: those are `python scripts/x.py` entry
+# points that bootstrap their own sys.path via `scripts/_common.py`.
+# ---------------------------------------------------------------------------
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["rus_perception*"]
+namespaces = false
+
+[tool.setuptools.package-data]
+rus_perception = ["py.typed"]

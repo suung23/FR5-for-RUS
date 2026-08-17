@@ -29,15 +29,15 @@ from pathlib import Path
 
 from _common import parse_overrides  # noqa: E402  (path setup)
 
-from src.control.features import FeatureExtractionConfig
-from src.flow.backends import build_flow_backend
-from src.inference.predictor import Predictor, PredictorConfig
-from src.inference.realtime import PipelineResult, RealtimeConfig, RealtimePipeline
-from src.inference.sources import open_source
-from src.inference.visualization import MonitorRenderer, RollingHistory, StatusColors
-from src.utils.config import load_config
-from src.utils.logging_utils import CsvWriter, JsonlWriter, setup_logging
-from src.utils.seeding import seed_everything
+from rus_perception.control.features import FeatureExtractionConfig
+from rus_perception.flow.backends import build_flow_backend
+from rus_perception.inference.predictor import Predictor, PredictorConfig
+from rus_perception.inference.realtime import PipelineResult, RealtimeConfig, RealtimePipeline
+from rus_perception.inference.sources import open_source
+from rus_perception.inference.visualization import MonitorRenderer, RollingHistory, StatusColors
+from rus_perception.utils.config import load_config
+from rus_perception.utils.logging_utils import CsvWriter, JsonlWriter, setup_logging
+from rus_perception.utils.seeding import seed_everything
 
 logger = logging.getLogger("live_monitor")
 

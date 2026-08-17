@@ -5,13 +5,13 @@ from __future__ import annotations
 import pytest
 import torch
 
-from src.flow.warp import warp_backward
-from src.losses.segmentation import (
+from rus_perception.flow.warp import warp_backward
+from rus_perception.losses.segmentation import (
     SpatialSegmentationLoss,
     soft_dice_loss,
     soft_jaccard_loss,
 )
-from src.losses.temporal import (
+from rus_perception.losses.temporal import (
     ControlFeatureTemporalLoss,
     PixelTemporalLoss,
     TemporalConsistencyLoss,
@@ -21,7 +21,7 @@ from src.losses.temporal import (
     soft_centroid,
     temporal_weight_factor,
 )
-from src.models.slim_unet import SlimUNet
+from rus_perception.models.slim_unet import SlimUNet
 
 SHAPE = (2, 1, 16, 16)
 

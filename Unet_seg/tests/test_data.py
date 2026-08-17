@@ -6,19 +6,19 @@ import numpy as np
 import pytest
 import torch
 
-from src.data.augment import AugmentationConfig, PairedAugmentation, transform_flow_field
-from src.data.image_dataset import UltrasoundFrameDataset
-from src.data.manifest import Manifest, ManifestRecord, load_manifest, write_manifest
-from src.data.splits import (
+from rus_perception.data.augment import AugmentationConfig, PairedAugmentation, transform_flow_field
+from rus_perception.data.image_dataset import UltrasoundFrameDataset
+from rus_perception.data.manifest import Manifest, ManifestRecord, load_manifest, write_manifest
+from rus_perception.data.splits import (
     PatientLeakageError,
     SplitAssignment,
     apply_split,
     assert_no_patient_leakage,
     split_by_patient,
 )
-from src.data.video_dataset import SequentialUltrasoundDataset, resize_flow
-from src.flow.base import FlowPair
-from src.flow.precomputed import save_flow_pair
+from rus_perception.data.video_dataset import SequentialUltrasoundDataset, resize_flow
+from rus_perception.flow.base import FlowPair
+from rus_perception.flow.precomputed import save_flow_pair
 
 
 def record(patient: str, sequence: str, index: int, split=None, labeled=True) -> ManifestRecord:

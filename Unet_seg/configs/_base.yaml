@@ -93,6 +93,35 @@ control:
   surrounding_ring_px: 6
   keep_binary_mask: true
   keep_probability_map: true
+
+  # The imaged sector. Defined ONCE here and consumed by BOTH quality functions
+  # (Q_seg's denominators and Q_raw's A-line support), because it is a property
+  # of the ultrasound machine, not of either score.
+  #
+  # `full` reproduces the whole-frame behaviour exactly and is the default.
+  # Setting a real ROI changes four things, all of which are currently wrong for
+  # a probe whose image does not fill the frame:
+  #   - mask_area_ratio's denominator      (crop currently moves the optimal force)
+  #   - segmentation_confidence's support  (dead region currently dominates)
+  #   - mean_boundary_entropy's band
+  #   - lumen_surrounding_contrast's ring  (currently samples black outside the beam)
+  #   - which edge border_contact_ratio counts (currently the rectangle, which a
+  #     fan never reaches -- so the criterion silently never fires)
+  #
+  # ⏳ EVERY GEOMETRIC VALUE BELOW IS A PLACEHOLDER. They come from the ultrasound
+  # image geometry (probe type, depth scale, sector angles), which is not known.
+  roi:
+    mode: full                   # full | rect | fan | file
+    erode_px: 0                  # drop the interpolated edge of a scan-converted sector
+    min_area_ratio: 0.02         # refuse a sliver ROI rather than emit odd scores
+    # mode: rect  -- linear probe, image inset in a larger frame
+    rect: null                   # [x0, y0, x1, y1] as fractions
+    # mode: fan   -- curvilinear / phased, after scan conversion
+    apex_xy: null                # [x, y] fractions; y may be negative (apex above image)
+    radius_range: null           # [r_min, r_max] fractions of frame height
+    half_angle_deg: null         # half the sector opening angle
+    # mode: file  -- hand-drawn mask for a geometry none of the above describes
+    path: null
   validity:
     min_area_ratio: 0.005
     max_area_ratio: 0.80
@@ -129,6 +158,40 @@ control:
     area_weight: 0.5
     centroid_jump_scale: 0.05
     area_change_scale: 0.25
+
+  # Q_raw -- segmentation-independent raw B-mode quality. Scores the same frame
+  # as `quality:` above but from the raw image alone, so it is defined before
+  # the bladder has been found. Consumed by the contact search, not by the
+  # in-plane policy.
+  #
+  # EVERY VALUE HERE IS PROVISIONAL. The depth bands, the darkness threshold and
+  # the reference intensity all depend on the ultrasound machine's depth scale,
+  # gain, TGC and dynamic range, none of which is known yet. `scan_geometry`
+  # must be set to the real probe type before any of this means anything;
+  # `sector` is not implemented and raises rather than silently mis-sampling.
+  raw_quality:
+    scan_geometry: linear          # linear | sector (sector: NOT IMPLEMENTED)
+    near_field_fraction: 0.15
+    far_field_fraction: 0.35
+    near_field_reference: 0.45
+    dark_intensity_threshold: 0.10
+    shadow_relative_threshold: 0.25
+    shadow_reference_percentile: 90.0   # NOT the median: with >50% of A-lines
+                                        # shadowed the median IS the shadow level
+    shadow_absolute_floor: 0.02         # backstop for uniform shadowing, where
+                                        # no unshadowed reference survives
+    target_mean_intensity: 0.30
+    intensity_tolerance: 0.12
+    min_valid_a_lines: 16
+    max_dark_a_line_ratio: 0.35
+    max_shadowed_a_line_ratio: 0.50
+    min_near_field_echo: 0.25
+    no_contact_intensity: 0.05
+    weights:
+      near_field_echo: 1.0
+      contact_continuity: 1.5      # highest: a dead A-line is the least
+      total_echo_energy: 0.5       # ambiguous evidence of an air gap
+      shadow_penalty: 1.0
 
 evaluation:
   split: test

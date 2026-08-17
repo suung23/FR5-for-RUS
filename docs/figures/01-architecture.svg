@@ -1,0 +1,602 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 1020 836" role="img"
+           aria-label="US 프레임그래버에서 시작해 원시 품질과 세그멘테이션 두 경로로 갈라진 뒤, 힘 탐색과 영상 policy를 거쳐 admittance, DLS 역기구학, 125 Hz 서보로 내려가는 제어 아키텍처. 서보에서 wrench가 admittance로 되먹임된다." xmlns="http://www.w3.org/2000/svg">
+<style>
+  /* 팔레트는 학술 도판 관례를 따른다: 흰 바탕, 저채도, 색은 기능적으로만.
+     힘/영상 두 도메인은 색상만이 아니라 **명도**로도 갈라 둔다 (L* 약 42 vs 27).
+     저널이 흑백으로 인쇄해도 두 계열이 회색조에서 구분되어야 하기 때문이다.
+     배경 톤도 따뜻함/차가움으로 한 번 더 갈라 이중으로 부호화한다. */
+  :root {
+    --bg:        #FFFFFF;
+    --surface:   #FFFFFF;
+    --surface-2: #F1F0ED;
+    --ink:       #111111;
+    --ink-2:     #3D3D3B;
+    --ink-3:     #6E6E6B;
+    --rule:      #BFBFBC;
+    --rule-2:    #E2E2DF;
+
+    --force:     #8A5A00;   /* 따뜻함 · 선 L*42 */
+    --force-bg:  #E8E1CE;   /*            면 L*90 — 음영 상자 */
+    --force-rule:#BFA269;
+
+    --image:     #17455C;   /* 차가움 · 선 L*27 */
+    --image-bg:  #FFFFFF;   /*            면 L*100 — 흰 상자 */
+    --image-rule:#93AAB8;
+
+    --warn:      #8C1D1D;
+    --warn-bg:   #F7EDED;
+    --warn-rule: #C9A2A2;
+
+    --ok:        #1F5130;
+
+    /* 논문 관례: 본문은 명조/Times, 도판 라벨은 Helvetica 계열.
+       작은 크기에서 산세리프가 더 잘 읽히기 때문이다. */
+    --serif: 'Times New Roman', 'Nimbus Roman', 'Liberation Serif',
+             'Noto Serif KR', Batang, '바탕', serif;
+    --sans: 'Helvetica Neue', Helvetica, Arial, 'Malgun Gothic',
+            'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+    --mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas,
+            'Liberation Mono', monospace;
+
+    --measure: 68ch;
+    --pad: clamp(20px, 4vw, 56px);
+  }
+
+  /* 다크는 화면 판독용이다. 인쇄본은 항상 위의 라이트 팔레트다. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:        #14140F;
+      --surface:   #1B1B17;
+      --surface-2: #24241F;
+      --ink:       #EDEBE4;
+      --ink-2:     #A8A69D;
+      --ink-3:     #77756D;
+      --rule:      #35352F;
+      --rule-2:    #26261F;
+
+      --force:     #D2A85C;
+      --force-bg:  #2A2214;
+      --force-rule:#5F5030;
+
+      --image:     #8FB6CC;
+      --image-bg:  #171F26;
+      --image-rule:#3A4C58;
+
+      --warn:      #D08C8C;
+      --warn-bg:   #2A1A1A;
+      --warn-rule: #5A3838;
+
+      --ok:        #7FB394;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg:        #14140F;
+    --surface:   #1B1B17;
+    --surface-2: #24241F;
+    --ink:       #EDEBE4;
+    --ink-2:     #A8A69D;
+    --ink-3:     #77756D;
+    --rule:      #35352F;
+    --rule-2:    #26261F;
+
+    --force:     #D2A85C;
+    --force-bg:  #2A2214;
+    --force-rule:#5F5030;
+
+    --image:     #8FB6CC;
+    --image-bg:  #171F26;
+    --image-rule:#3A4C58;
+
+    --warn:      #D08C8C;
+    --warn-bg:   #2A1A1A;
+    --warn-rule: #5A3838;
+
+    --ok:        #7FB394;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 0 var(--pad) 96px;
+  }
+
+  /* ---------- header ---------- */
+
+  .masthead {
+    padding: clamp(48px, 9vw, 104px) 0 40px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .kicker {
+    font-family: var(--sans);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0 0 20px;
+  }
+  h1 {
+    font-size: clamp(30px, 5vw, 46px);
+    line-height: 1.12;
+    letter-spacing: -0.012em;
+    font-weight: 700;
+    margin: 0 0 22px;
+    text-wrap: balance;
+    max-width: 18ch;
+  }
+  .standfirst {
+    font-size: clamp(16px, 1.8vw, 19px);
+    color: var(--ink-2);
+    max-width: 56ch;
+    margin: 0 0 34px;
+    line-height: 1.6;
+  }
+  .metastrip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 10px;
+  }
+  .meta {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.02em;
+    color: var(--ink-2);
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 5px 10px;
+    white-space: nowrap;
+  }
+  .meta b { color: var(--ink); font-weight: 600; }
+
+  /* ---------- sections ---------- */
+
+  section { padding-top: 72px; }
+
+  .eyebrow {
+    font-family: var(--sans);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin: 0 0 18px;
+  }
+  .eyebrow::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--rule);
+  }
+
+  h2 {
+    font-size: clamp(22px, 2.9vw, 28px);
+    line-height: 1.24;
+    letter-spacing: -0.008em;
+    font-weight: 700;
+    margin: 0 0 14px;
+    text-wrap: balance;
+    max-width: 26ch;
+  }
+  h3 {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0;
+    margin: 40px 0 12px;
+  }
+  p { max-width: var(--measure); margin: 0 0 16px; }
+  p.lead { font-size: 18px; color: var(--ink-2); }
+
+  a { color: var(--image); }
+
+  code, .m {
+    font-family: var(--mono);
+    font-size: 0.885em;
+    letter-spacing: -0.01em;
+  }
+  code {
+    background: var(--surface-2);
+    border-radius: 3px;
+    padding: 1px 5px;
+  }
+
+  strong { font-weight: 700; }
+  .fc { color: var(--force); }
+  .ic { color: var(--image); }
+  .wc { color: var(--warn); }
+
+  /* ---------- status chips ---------- */
+
+  .chip {
+    display: inline-block;
+    font-family: var(--sans);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 2px;
+    border: 1px solid;
+    vertical-align: 2px;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+  .chip-fix  { color: var(--ok);     border-color: var(--ok);     background: transparent; }
+  .chip-prop { color: var(--force);  border-color: var(--force-rule); background: var(--force-bg); }
+  .chip-meas { color: var(--image);  border-color: var(--image-rule); background: var(--image-bg); }
+  .chip-open { color: var(--warn);   border-color: var(--warn-rule);  background: var(--warn-bg); }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 22px;
+    padding: 16px 18px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    margin: 28px 0 0;
+  }
+  .legend div { font-size: 13.5px; color: var(--ink-2); }
+
+  /* ---------- figures ---------- */
+
+  figure {
+    margin: 30px 0 0;
+    padding: 24px 22px 18px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    overflow-x: auto;
+  }
+  figure svg {
+    display: block;
+    width: 100%;
+    min-width: 560px;
+    max-width: 100%;
+    height: auto;
+    color: var(--ink-2);
+  }
+  figcaption {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--rule-2);
+    font-size: 14px;
+    line-height: 1.58;
+    color: var(--ink-2);
+    max-width: 78ch;
+    min-width: 0;
+  }
+  figcaption b { color: var(--ink); font-weight: 700; }
+
+  /* ---- svg primitives ----
+     학술 도판 관례: 가는 선(0.9–1.1), 각진 모서리, 옅은 면.
+     라벨은 Helvetica 계열 — 작은 크기에서 세리프보다 잘 읽힌다.
+     ROS 노드·토픽 이름만 고정폭으로 두어 식별자임을 드러낸다. */
+  .nd   { fill: var(--surface-2); stroke: var(--ink-3); stroke-width: 0.9; }
+  .nd-f { fill: var(--force-bg);  stroke: var(--force); stroke-width: 1.1; }
+  .nd-i { fill: var(--image-bg);  stroke: var(--image); stroke-width: 1.1; }
+  .nd-w { fill: var(--warn-bg);   stroke: var(--warn);  stroke-width: 1.1; }
+  .nd-o { fill: none;             stroke: var(--rule);  stroke-width: 0.9; }
+  /* SVG2 기하 속성. 마크업의 rx="5" 를 한 줄로 덮어 모두 각지게 만든다. */
+  .nd, .nd-f, .nd-i, .nd-w, .nd-o { rx: 1.5px; ry: 1.5px; }
+
+  .ed   { fill: none; stroke: var(--ink-3); stroke-width: 0.9; }
+  .ed-f { fill: none; stroke: var(--force); stroke-width: 1.1; }
+  .ed-i { fill: none; stroke: var(--image); stroke-width: 1.1; }
+  .ed-w { fill: none; stroke: var(--warn);  stroke-width: 1.0; }
+  .dash { stroke-dasharray: 4 3; }
+
+  .lbl   { fill: var(--ink);   font-family: var(--sans); font-size: 12px; font-weight: 700; }
+  .lbl-s { fill: var(--ink);   font-family: var(--mono); font-size: 10.5px; font-weight: 500; }
+  .lbl-d { fill: var(--ink-3); font-family: var(--sans); font-size: 10.5px; letter-spacing: 0.01em; }
+  .lbl-f { fill: var(--force); font-family: var(--sans); font-size: 10.5px; font-weight: 600; }
+  .lbl-i { fill: var(--image); font-family: var(--sans); font-size: 10.5px; font-weight: 600; }
+  .lbl-w { fill: var(--warn);  font-family: var(--sans); font-size: 10.5px; font-weight: 600; }
+  .hd-f  { fill: var(--force); font-family: var(--sans); font-size: 12px; font-weight: 700; }
+  .hd-i  { fill: var(--image); font-family: var(--sans); font-size: 12px; font-weight: 700; }
+
+  .ah   { fill: var(--ink-3); }
+  .ah-f { fill: var(--force); }
+  .ah-i { fill: var(--image); }
+  .ah-w { fill: var(--warn); }
+
+  .figlegend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    margin-top: 14px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-3);
+    letter-spacing: 0.02em;
+  }
+  .figlegend span { display: inline-flex; align-items: center; gap: 7px; }
+  .sw { width: 22px; height: 0; border-top-width: 2px; border-top-style: solid; display: inline-block; }
+
+  /* ---------- tables ---------- */
+
+  .tw { overflow-x: auto; margin: 24px 0 0; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 520px;
+    font-size: 14px;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 14px 10px 0;
+    border-bottom: 1px solid var(--rule-2);
+    vertical-align: top;
+  }
+  th {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    font-weight: 500;
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+  td.num, th.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: none; }
+
+  /* ---------- callouts ---------- */
+
+  .call {
+    margin: 28px 0 0;
+    padding: 20px 22px;
+    border-radius: 5px;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+  }
+  .call-w { border-color: var(--warn-rule); background: var(--warn-bg); }
+  .call-f { border-color: var(--force-rule); background: var(--force-bg); }
+  .call h4 {
+    margin: 0 0 8px;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: -0.008em;
+  }
+  .call-w h4 { color: var(--warn); }
+  .call-f h4 { color: var(--force); }
+  .call p { margin: 0 0 10px; font-size: 14.5px; max-width: 72ch; }
+  .call p:last-child { margin-bottom: 0; }
+
+  .eq {
+    font-family: var(--mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink);
+    padding: 14px 16px;
+    background: var(--bg);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    margin: 14px 0;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  /* ---------- cards ---------- */
+
+  .grid2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 18px;
+    margin: 28px 0 0;
+  }
+  .card {
+    padding: 22px;
+    border-radius: 6px;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+  }
+  .card-f { border-color: var(--force-rule); }
+  .card-i { border-color: var(--image-rule); }
+  .card h4 {
+    margin: 0 0 4px;
+    font-family: var(--mono);
+    font-size: 15px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+  }
+  .card-f h4 { color: var(--force); }
+  .card-i h4 { color: var(--image); }
+  .card .sub {
+    font-size: 12.5px;
+    color: var(--ink-3);
+    margin: 0 0 16px;
+    font-family: var(--mono);
+  }
+  .card ul { margin: 0; padding-left: 17px; font-size: 14px; color: var(--ink-2); }
+  .card li { margin-bottom: 6px; }
+  .card li b { color: var(--ink); font-weight: 650; }
+
+  /* diagnostic matrix */
+  .mx { width: 100%; min-width: 480px; border-collapse: separate; border-spacing: 6px; }
+  .mx td, .mx th { border: none; padding: 0; }
+  .mx th {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--ink-3); padding: 0 0 4px 4px;
+  }
+  .cell {
+    padding: 14px 16px;
+    border-radius: 5px;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+    font-size: 13.5px;
+    line-height: 1.5;
+    height: 100%;
+  }
+  .cell b { display: block; font-size: 14px; margin-bottom: 3px; }
+  .cell.bad  { border-color: var(--warn-rule);  background: var(--warn-bg); }
+  .cell.bad b { color: var(--warn); }
+  .cell.mid  { border-color: var(--image-rule); background: var(--image-bg); }
+  .cell.mid b { color: var(--image); }
+  .cell.good b { color: var(--ok); }
+  .cell.odd  { border-color: var(--force-rule); background: var(--force-bg); }
+  .cell.odd b { color: var(--force); }
+  .rowlbl {
+    font-family: var(--mono); font-size: 12px; color: var(--ink-2);
+    white-space: nowrap; padding-right: 8px; vertical-align: middle;
+  }
+
+  /* phase list */
+  .phases { list-style: none; margin: 26px 0 0; padding: 0; }
+  .phases li {
+    display: grid;
+    grid-template-columns: 60px 1fr;
+    gap: 18px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--rule-2);
+    align-items: start;
+  }
+  .phases li:last-child { border-bottom: none; }
+  .ph {
+    font-family: var(--mono); font-size: 12px; font-weight: 650;
+    color: var(--ink); background: var(--surface-2);
+    border-radius: 3px; padding: 4px 0; text-align: center;
+  }
+  .ph-done { color: var(--force); background: var(--force-bg); }
+  .phbody b { display: block; font-size: 15px; margin-bottom: 3px; }
+  .phbody span { font-size: 13.5px; color: var(--ink-2); }
+  .phbody em { font-style: normal; color: var(--ink-3); font-family: var(--mono); font-size: 12px; }
+
+  footer {
+    margin-top: 84px;
+    padding-top: 26px;
+    border-top: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-3);
+    line-height: 1.8;
+  }
+
+  :focus-visible { outline: 2px solid var(--image); outline-offset: 2px; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    html { scroll-behavior: smooth; }
+  }
+
+  :root { color: var(--ink-2); }
+</style>
+        <defs>
+          <marker id="aA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,1 L9,5 L0,9 z" class="ah"/>
+          </marker>
+          <marker id="aAf" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,1 L9,5 L0,9 z" class="ah-f"/>
+          </marker>
+          <marker id="aAi" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,1 L9,5 L0,9 z" class="ah-i"/>
+          </marker>
+        </defs>
+
+        <!-- R1 -->
+        <rect class="nd" x="400" y="24" width="220" height="48" rx="5"/>
+        <text class="lbl-s" x="510" y="44" text-anchor="middle">us_frame_node</text>
+        <text class="lbl-d" x="510" y="60" text-anchor="middle">프레임그래버 · 30 Hz</text>
+
+        <path class="ed" d="M510,72 L510,98 L265,98 L265,120" marker-end="url(#aA)"/>
+        <path class="ed" d="M510,98 L755,98 L755,120" marker-end="url(#aA)"/>
+        <text class="lbl-d" x="524" y="92">/us/image</text>
+
+        <!-- R2 -->
+        <rect class="nd-f" x="150" y="120" width="230" height="58" rx="5"/>
+        <text class="lbl-s" x="265" y="142" text-anchor="middle">quality_raw_node</text>
+        <text class="lbl-d" x="265" y="159" text-anchor="middle">고전 영상처리 · 세그 비의존</text>
+
+        <rect class="nd-i" x="640" y="120" width="230" height="58" rx="5"/>
+        <text class="lbl-s" x="755" y="142" text-anchor="middle">perception_node</text>
+        <text class="lbl-d" x="755" y="159" text-anchor="middle">Slim U-Net → ControlState</text>
+
+        <path class="ed-f" d="M265,178 L265,212 L130,212 L130,242" marker-end="url(#aAf)"/>
+        <path class="ed" d="M265,212 L460,212 L460,242" marker-end="url(#aA)"/>
+        <path class="ed-i" d="M755,178 L755,212 L890,212 L890,242" marker-end="url(#aAi)"/>
+        <path class="ed" d="M755,212 L560,212 L560,242" marker-end="url(#aA)"/>
+        <text class="lbl-f" x="188" y="205" text-anchor="middle">Q_raw</text>
+        <text class="lbl-i" x="836" y="205" text-anchor="middle">Q_seg · center_error</text>
+
+        <!-- R3 -->
+        <rect class="nd-f" x="30" y="242" width="200" height="58" rx="5"/>
+        <text class="lbl-s" x="130" y="264" text-anchor="middle">force_search_node</text>
+        <text class="lbl-d" x="130" y="281" text-anchor="middle">0.2 Hz</text>
+
+        <rect class="nd" x="410" y="242" width="200" height="58" rx="5"/>
+        <text class="lbl-s" x="510" y="264" text-anchor="middle">supervisor</text>
+        <text class="lbl-d" x="510" y="281" text-anchor="middle">상태머신 · 복구</text>
+
+        <rect class="nd-i" x="790" y="242" width="200" height="58" rx="5"/>
+        <text class="lbl-s" x="890" y="264" text-anchor="middle">policy_node</text>
+        <text class="lbl-d" x="890" y="281" text-anchor="middle">3-DoF · 5 Hz</text>
+
+        <path class="ed-f" d="M130,300 L130,360 L250,360 L250,418" marker-end="url(#aAf)"/>
+        <text class="lbl-f" x="196" y="353" text-anchor="middle">F_n*</text>
+
+        <path class="ed-i" d="M890,300 L890,360 L700,360 L700,418" marker-end="url(#aAi)"/>
+        <text class="lbl-i" x="796" y="353" text-anchor="middle">x, y, rz</text>
+
+        <path class="ed dash" d="M510,300 L510,384" marker-end="url(#aA)"/>
+        <text class="lbl-d" x="522" y="348">mode</text>
+
+        <!-- R4 admittance -->
+        <rect class="nd-o" x="170" y="386" width="680" height="132" rx="6"/>
+        <text class="lbl-s" x="192" y="408">admittance_node</text>
+        <text class="lbl-d" x="828" y="408" text-anchor="end">100 Hz</text>
+
+        <rect class="nd-f" x="192" y="418" width="286" height="82" rx="4"/>
+        <text class="lbl-f" x="335" y="441" text-anchor="middle">z  ←  F_z  →  F_n*</text>
+        <text class="lbl-f" x="335" y="461" text-anchor="middle">rx ←  M_x  →  0</text>
+        <text class="lbl-f" x="335" y="481" text-anchor="middle">ry ←  M_y  →  0</text>
+
+        <rect class="nd" x="560" y="418" width="268" height="82" rx="4"/>
+        <text class="lbl-s" x="694" y="447" text-anchor="middle">twist arbiter</text>
+        <text class="lbl-d" x="694" y="466" text-anchor="middle">힘축 3 + 영상축 3</text>
+        <text class="lbl-d" x="694" y="483" text-anchor="middle">QP 전환 지점</text>
+
+        <path class="ed" d="M478,459 L554,459" marker-end="url(#aA)"/>
+
+        <!-- R5 diff ik -->
+        <path class="ed" d="M510,518 L510,574" marker-end="url(#aA)"/>
+        <text class="lbl-d" x="522" y="550">/desired_twist · 100 Hz</text>
+
+        <rect class="nd" x="310" y="576" width="400" height="62" rx="5"/>
+        <text class="lbl-s" x="510" y="600" text-anchor="middle">diff_ik_node</text>
+        <text class="lbl-d" x="510" y="618" text-anchor="middle">solve(V, q) → q̇  ·  DLS λ=0.02</text>
+
+        <path class="ed dash" d="M710,607 L796,607" marker-end="url(#aA)"/>
+        <text class="lbl-d" x="802" y="604">추종오차 → supervisor</text>
+
+        <!-- R6 servo -->
+        <path class="ed" d="M510,638 L510,684" marker-end="url(#aA)"/>
+        <text class="lbl-d" x="522" y="666">q̇ · 100 Hz</text>
+
+        <rect class="nd" x="310" y="686" width="400" height="62" rx="5"/>
+        <text class="lbl-s" x="510" y="710" text-anchor="middle">servo_node</text>
+        <text class="lbl-d" x="510" y="728" text-anchor="middle">q += q̇·dt → ServoJ  ·  워치독 0.1 s</text>
+
+        <path class="ed" d="M510,748 L510,770" marker-end="url(#aA)"/>
+        <text class="lbl-d" x="522" y="765">125 Hz</text>
+
+        <rect class="nd" x="430" y="772" width="160" height="42" rx="5"/>
+        <text class="lbl-s" x="510" y="798" text-anchor="middle">FR5 오른팔</text>
+
+        <!-- wrench feedback, left rail -->
+        <path class="ed-f" d="M310,717 L110,717 L110,459 L186,459" marker-end="url(#aAf)"/>
+        <text class="lbl-f" x="120" y="620">wrench</text>
+        <text class="lbl-f" x="120" y="636">100 Hz</text>
+      </svg>

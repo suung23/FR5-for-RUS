@@ -5,11 +5,11 @@ from __future__ import annotations
 import pytest
 import torch
 
-from src.models.blocks import transposed_conv_padding
-from src.models.registry import available_models, build_model
-from src.models.report import build_architecture_report
-from src.models.slim_unet import PAPER_PARAMETER_COUNTS, SlimUNet
-from src.models.standard_unet import StandardUNet, remap_legacy_unet_state_dict
+from rus_perception.models.blocks import transposed_conv_padding
+from rus_perception.models.registry import available_models, build_model
+from rus_perception.models.report import build_architecture_report
+from rus_perception.models.slim_unet import PAPER_PARAMETER_COUNTS, SlimUNet
+from rus_perception.models.standard_unet import StandardUNet, remap_legacy_unet_state_dict
 from unet import UNet as LegacyUNet
 
 
@@ -182,7 +182,7 @@ def test_configurable_fields_change_the_model() -> None:
 
 
 def test_normalization_and_dropout_validation() -> None:
-    from src.models.blocks import build_dropout, build_normalization
+    from rus_perception.models.blocks import build_dropout, build_normalization
 
     with pytest.raises(ValueError, match="Unsupported normalization"):
         build_normalization("layer_norm", 8)  # type: ignore[arg-type]

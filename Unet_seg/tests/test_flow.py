@@ -6,15 +6,15 @@ import numpy as np
 import pytest
 import torch
 
-from src.flow.backends import FarnebackFlow, IdentityFlow, build_flow_backend
-from src.flow.base import FlowPair
-from src.flow.precomputed import (
+from rus_perception.flow.backends import FarnebackFlow, IdentityFlow, build_flow_backend
+from rus_perception.flow.base import FlowPair
+from rus_perception.flow.precomputed import (
     is_valid_flow_file,
     load_flow_pair,
     save_flow_pair,
 )
-from src.flow.reliability import ReliabilityConfig, compute_reliability, soft_score
-from src.flow.warp import (
+from rus_perception.flow.reliability import ReliabilityConfig, compute_reliability, soft_score
+from rus_perception.flow.warp import (
     flow_to_sampling_grid,
     forward_backward_residual,
     warp_backward,

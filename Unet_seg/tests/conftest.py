@@ -16,9 +16,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.data.manifest import Manifest, load_manifest  # noqa: E402
-from src.data.splits import apply_split, split_by_patient  # noqa: E402
-from src.data.synthetic import SyntheticSequenceConfig, generate_dataset  # noqa: E402
+from rus_perception.data.manifest import Manifest, load_manifest  # noqa: E402
+from rus_perception.data.splits import apply_split, split_by_patient  # noqa: E402
+from rus_perception.data.synthetic import SyntheticSequenceConfig, generate_dataset  # noqa: E402
 
 
 @pytest.fixture(scope="session")
@@ -36,7 +36,7 @@ def synthetic_dataset(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, M
     manifest_path, manifest = generate_dataset(directory, config, seed=0)
     assignment = split_by_patient(manifest.patients, (0.5, 0.25, 0.25), seed=0)
     manifest = apply_split(manifest, assignment)
-    from src.data.manifest import write_manifest
+    from rus_perception.data.manifest import write_manifest
 
     write_manifest(manifest_path, manifest.records)
     return manifest_path, manifest
@@ -75,6 +75,6 @@ def disc_image(disc_probability: np.ndarray) -> np.ndarray:
 @pytest.fixture
 def slim_model():
     """A paper-preset :class:`SlimUNet` in eval mode."""
-    from src.models.slim_unet import SlimUNet
+    from rus_perception.models.slim_unet import SlimUNet
 
     return SlimUNet.from_preset("paper").eval()

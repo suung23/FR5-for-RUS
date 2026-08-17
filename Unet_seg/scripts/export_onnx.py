@@ -18,9 +18,9 @@ from pathlib import Path
 
 from _common import REPO_ROOT  # noqa: F401  (path setup)
 
-from src.models.registry import build_model
-from src.utils.checkpoint import load_checkpoint
-from src.utils.logging_utils import setup_logging
+from rus_perception.models.registry import build_model
+from rus_perception.utils.checkpoint import load_checkpoint
+from rus_perception.utils.logging_utils import setup_logging
 
 logger = logging.getLogger("export_onnx")
 
@@ -67,7 +67,7 @@ def main() -> int:
 
     model_config = stored.get("model")
     if args.config:
-        from src.utils.config import load_config
+        from rus_perception.utils.config import load_config
 
         model_config = load_config(args.config).section("model")
     if not model_config:

@@ -90,6 +90,102 @@
       # 시간으로 상한을 둔다: 3 s x 5 mm/s = 15 mm.
       max_retreat_s: 3.0
 
+    # ---- Admittance (DESIGN_NOTES §8) --------------------------------------
+    # 감쇠 지배형. 질량항은 생략한다 — 접촉 안정성에 가장 견고하고 튜닝할 값이 하나다.
+    #   v = clamp( (목표 − 측정) / B , ±상한 )
+    admittance:
+      damping_linear_ns_m: 1000.0      # B_z: 1 N 오차 → 1 mm/s
+      damping_angular_nms_rad: 0.5     # B_r: 0.05 N·m → 0.1 rad/s (≈5.7 °/s)
+
+      # 모멘트 → 회전 방향 부호. ⏳ 실기 검증 대상.
+      # 틀리면 정렬 루프가 오정렬을 **키우는** 방향으로 돈다. F_n 부호와 함께 확인한다.
+      moment_sign: 1.0
+
+      # supervisor 없이 단독 기동할 때 쓰는 모드 (idle|teleop|contact|retreat).
+      # 한 번이라도 /supervisor/mode 를 받으면 그 뒤부터는 두절 시 발행을 멈춘다 —
+      # 감독자가 죽었는데 마지막 모드로 계속 도는 것이 가장 위험하다.
+      default_mode: contact
+      mode_timeout_s: 0.5
+
+    # ---- 프레임 취득 (DESIGN_NOTES §3.1) ------------------------------------
+    # source 가 숫자면 장치 인덱스, 아니면 파일 경로. 녹화 영상으로 Stage 1 전 구간을
+    # 하드웨어 없이 돌릴 수 있어야 한다.
+    frame:
+      source: "0"
+      fps: 30.0
+      loop: true                     # 파일 소스일 때만 의미가 있다
+      width: 0                       # 0 이면 장치 기본값
+      height: 0
+      frame_id: us_probe
+
+    # ---- 지각 (DESIGN_NOTES §13.3) ------------------------------------------
+    # 계산은 전부 rus_perception 이 한다. 노드는 얇은 래퍼다.
+    perception:
+      checkpoint: ""                 # 필수. 없으면 노드가 기동을 거부한다
+      reset_gap_s: 0.5               # 프레임이 이만큼 끊기면 시간축 상태를 버린다
+
+    # ---- 원시 품질 Q_raw (DESIGN_NOTES §6.2) ---------------------------------
+    # ⏳ US 영상 기하 확정 후 갱신. 지금은 라이브러리 기본값이다.
+    raw_quality:
+      scan_geometry: linear
+      near_field_fraction: 0.15
+      far_field_fraction: 0.35
+      dark_intensity_threshold: 0.10
+      shadow_relative_threshold: 0.25
+
+    # ---- Stage 1 힘 탐색 (DESIGN_NOTES §7) ----------------------------------
+    # 램프는 여기서 하지 않는다 — admittance 의 setpoint.force_slew_n_s 가 수행한다.
+    search:
+      rate_hz: 50.0
+      force_step_n: 0.5              # 1a 격자. 1.0→7.0 N 이면 13점
+      refine_span_n: 1.0             # 1b 는 1a 결과 ±이 값만
+      refine_step_n: 0.25
+
+      # ⚠️ 정착과 측정을 분리한다.
+      # τ = B_z/k = 1000/2000 = 0.5 s, 95% 정착에 1.5 s. 홀드 1.0 s 전체를 평균하면
+      # 아직 도달하지 않은 힘에서 품질을 재게 된다.
+      settle_tolerance_n: 0.05
+      settle_hold_s: 0.2             # 허용 오차 안에 머물러야 하는 시간
+      settle_timeout_s: 3.0          # 초과하면 그 레벨은 측정 실패
+      measure_window_s: 1.0          # 정착 후 품질 수집
+
+      min_valid_fraction: 0.6        # 유효 프레임 비율 미달 시 측정 실패 (§6.3)
+      epsilon: 0.03                  # 품질 동률 허용치 — 최소 힘 선택의 핵심
+      early_stop_drop: 0.15          # 진행 최댓값 대비 이만큼 낮으면 열화
+      early_stop_count: 3            # 열화 연속 횟수 → 상승 중단
+
+    # ---- 감독기 (DESIGN_NOTES §10) -----------------------------------------
+    supervisor:
+      rate_hz: 20.0
+      contact_force_n: 0.5           # 접촉으로 인정할 최소 힘
+      contact_hold_s: 0.2
+      q_raw_enter_focus: 0.6         # STAGE1A → 1B
+      valid_frames_enter_focus: 10
+      invalid_frames_leave_scan: 15  # ≈0.5 s @ 30 Hz
+      q_raw_degrade_ratio: 0.25      # 재탐색 트리거
+      q_raw_degrade_hold_s: 3.0
+      max_recovery_attempts: 2       # 초과하면 TELEOP 로 반환
+
+    # ---- 접촉 setpoint (DESIGN_NOTES §5.4) ---------------------------------
+    # policy 는 힘 축을 속도로 지령하지 않고 setpoint 만 옮긴다. 100 Hz 힘 루프가 추종한다.
+    #   Stage 1  : force_search_node 의 명시적 격자 탐색이 F_n* 를 정함
+    #   Stage 2  : policy 가 (F_n*, M*_x, M*_y) 를 5 Hz 로 냄
+    setpoint:
+      f_normal_min_n: 1.0
+      f_normal_max_n: 7.0              # safety.max_normal_force_n 과 일치해야 한다
+
+      # 모멘트 편향 상한. safety.max_moment_nm(0.3)에 과도응답 여유를 남긴다.
+      max_moment_bias_nm: 0.10
+
+      # ⚠️ 슬루 제한은 안전상 필수다.
+      # M* 가 계단으로 0.1 N·m 뛰면 ω = 0.1/0.5 = 0.2 rad/s 로 각속도 예산을
+      # 한 번에 소진한다. 0.05 N·m/s 로 묶으면 기여분이 0.1 rad/s 가 된다.
+      moment_bias_slew_nm_s: 0.05
+      force_slew_n_s: 2.0              # Stage 1 램프 속도와 동일
+
+      # 영상 twist 신선도. 초과하면 면내 축을 0 으로 두고 힘 루프만 유지한다.
+      us_twist_timeout_s: 0.5
+
     # ---- Touch 원격조작 (DESIGN_NOTES §10 TELEOP_APPROACH) -----------------
     # 프로파일이 스케일·필터·데드존을 통째로 묶는다. 값 하나만 바꾸면 안 되는 이유는
     # 복강경 자유공간 조작과 초음파 접근 조작의 요구 분해능이 자릿수로 다르기 때문이다.
@@ -97,6 +193,11 @@
     #   ros2 param set /touch_teleop_node teleop.profile us_approach
     teleop:
       profile: us_approach
+
+      # 조작자 twist 는 admittance 를 거쳐 나간다. admittance 가 유일한
+      # desired_twist 발행자여야 둘이 다투지 않고, TELEOP 모드에서 6축 통과가 성립한다.
+      # 빈 문자열이면 기존 동작(/fr5_{side}/desired_twist 직접 발행) — 복강경 듀얼암용.
+      twist_topic_override: "/control/teleop_twist"
 
       # 기존 복강경 값. 참조용으로 남긴다.
       laparoscopic:

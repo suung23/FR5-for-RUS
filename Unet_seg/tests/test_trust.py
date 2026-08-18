@@ -23,6 +23,8 @@ from rus_perception.metrics.trust import (  # noqa: E402
     FrameOutcome,
     build_trust_report,
     calibration,
+    dice_to_iou,
+    iou_to_dice,
     component_attribution,
     detection_report,
     force_response,
@@ -65,6 +67,64 @@ def test_spearman_handles_ties_without_blowing_up() -> None:
 def test_correlation_is_none_when_undefined() -> None:
     assert spearman([1.0], [1.0]) is None
     assert pearson([1.0, 1.0, 1.0], [1.0, 2.0, 3.0]) is None
+
+
+# -- Dice / IoU --------------------------------------------------------------
+
+
+def test_dice_iou_conversion_round_trips() -> None:
+    for value in (0.0, 0.25, 0.538, 0.70, 0.85, 1.0):
+        assert iou_to_dice(dice_to_iou(value)) == pytest.approx(value)
+    assert dice_to_iou(0.70) == pytest.approx(0.5384615, abs=1e-6)
+    assert dice_to_iou(1.0) == pytest.approx(1.0)
+    assert dice_to_iou(0.0) == pytest.approx(0.0)
+
+
+def test_conversion_rejects_values_outside_the_unit_interval() -> None:
+    with pytest.raises(ValueError):
+        dice_to_iou(1.2)
+    with pytest.raises(ValueError):
+        iou_to_dice(-0.1)
+
+
+def test_every_rank_based_result_is_identical_under_dice_and_iou() -> None:
+    """Dice and IoU are a monotone transform of each other, so they order frames
+    identically. Everything in this module is rank-based, so swapping the metric
+    -- with the floor converted -- must change nothing at all. If this ever
+    fails, some statistic has started depending on the metric's *scale*."""
+    rng = np.random.default_rng(0)
+    dice = rng.beta(5, 2, 400)
+    iou = np.array([dice_to_iou(d) for d in dice])
+    quality = np.clip(0.6 * dice + 0.4 * rng.beta(4, 2, 400) + rng.normal(0, 0.08, 400), 0, 1)
+    valid = quality >= 0.6
+
+    by_dice = build_trust_report(
+        frames(list(quality), list(dice), list(valid)), accuracy_floor=0.70
+    )
+    by_iou = build_trust_report(
+        frames(list(quality), list(iou), list(valid)), accuracy_floor=dice_to_iou(0.70)
+    )
+
+    assert by_dice.agreement.spearman == pytest.approx(by_iou.agreement.spearman)
+    assert by_dice.detection.auroc == pytest.approx(by_iou.detection.auroc)
+    assert by_dice.risk.aurc == pytest.approx(by_iou.risk.aurc)
+    assert by_dice.gate.to_dict() == by_iou.gate.to_dict() or (
+        by_dice.gate.trusted_bad == by_iou.gate.trusted_bad
+        and by_dice.gate.trusted_good == by_iou.gate.trusted_good
+    )
+
+
+def test_forgetting_to_convert_the_floor_changes_the_question() -> None:
+    """The trap the CLI warns about: an unconverted floor is a far stricter
+    criterion, and only the gate counts reveal it."""
+    rng = np.random.default_rng(1)
+    dice = rng.beta(5, 2, 400)
+    iou = np.array([dice_to_iou(d) for d in dice])
+    quality = np.clip(dice + rng.normal(0, 0.1, 400), 0, 1)
+
+    correct = gate_confusion(frames(list(quality), list(iou)), dice_to_iou(0.70))
+    unconverted = gate_confusion(frames(list(quality), list(iou)), 0.70)
+    assert unconverted.trusted_bad > correct.trusted_bad
 
 
 # -- agreement ---------------------------------------------------------------

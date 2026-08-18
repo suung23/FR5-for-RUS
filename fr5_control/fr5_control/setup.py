@@ -33,6 +33,10 @@ setup(
         'console_scripts': [
             # --- 초음파 (RUS) ---
             'us_servo = fr5_control.us_servo_node:main',
+            'us_admittance = fr5_control.us_admittance_node:main',
+            'us_supervisor = fr5_control.us_supervisor_node:main',
+            'us_force_search = fr5_control.us_force_search_node:main',
+            'us_perception = fr5_control.us_perception_node:main',
             # --- 복강경 시절부터 남은 것. Phase 0 검증 후 legacy 로 옮긴다 ---
             'fr5_status = fr5_control.fr5_status_node:main',
             'fr5_servo_joint_control = fr5_control.fr5_servo_joint_control_node:main',

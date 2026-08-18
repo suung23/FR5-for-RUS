@@ -120,7 +120,7 @@ Phase 1에서 `ForceSensorAutoComputeLoad` 기반 페이로드 식별 절차를 
  ┌─────────────────┐  ┌────────────────┐  ┌──────────────┐  ┌────────────┐
  │ force_search    │  │  supervisor    │  │ policy_node  │  │  (로깅)     │
  │    _node        │◄─┤   상태머신      ├─►│   3-DoF      │  │            │
- │  0.2 Hz         │  │   실패복구      │  │   ~5 Hz      │  └────────────┘
+ │  Stage1 전용     │  │   실패복구      │  │  속도3+set3   │  └────────────┘
  │  Stage1 + 배경   │  └────────┬───────┘  └──────┬───────┘
  └────────┬────────┘           │                 │
           │ /control/f_normal_setpoint           │ /control/image_twist
@@ -159,34 +159,75 @@ Phase 1에서 `ForceSensorAutoComputeLoad` 기반 페이로드 식별 절차를 
 
 ## 3.1 노드 목록
 
-| 노드 | 주기 | 상태 | 기원 |
-|---|---|---|---|
-| `servo_node` | 125 Hz | 개조 | `fr5_servo_joint_control_node.py` |
-| `diff_ik_node` | 100 Hz | 개조 | `freespace_two_twist.py` |
-| `admittance_node` | 100 Hz | **신규** | — |
-| `us_frame_node` | 30 Hz | 개조 | `camera_node.py` |
-| `perception_node` | 30 Hz | **신규** — `rus_perception.Predictor` 얇은 래퍼 (§13.3) | — |
-| `quality_raw_node` | 30 Hz | **신규** — `rus_perception.compute_raw_quality` 얇은 래퍼 (§13.3.3) | — |
-| `policy_node` | ~5 Hz | **신규** | `fr5_inference/` 구조 참조 |
-| `force_search_node` | 0.2 Hz | **신규** | — |
-| `supervisor` | 20 Hz | **신규** | — |
-| `teleop` (Touch) | — | 유지 | `touch_teleop` |
-| `data_collector` | 30 Hz | 개조 | `fr5_h5_collector.py` |
+실행 파일 이름은 `ros2 run <패키지> <실행파일>` 의 실행파일이다.
+
+| 노드 / 실행파일 | 패키지 | 주기 | 구현 | 기원 |
+|---|---|---|---|---|
+| `us_servo` | `fr5_control` | 125 Hz | ✅ | `fr5_servo_joint_control_node.py` |
+| `us_diff_ik` | `fr5_ik` | 100 Hz | ✅ | `freespace_two_twist.py` |
+| `us_admittance` | `fr5_control` | 100 Hz | ✅ | 신규 |
+| `us_frame` | `fr5_vision` | 30 Hz | ✅ | `camera_node.py` |
+| `us_perception` | `fr5_control` | 30 Hz | ✅ | 신규 — `rus_perception` 얇은 래퍼 (§13.3) |
+| `us_force_search` | `fr5_control` | Stage 1 중에만 | ✅ | 신규 — 상시 루프 아님 (§8.4) |
+| `us_supervisor` | `fr5_control` | 20 Hz | ✅ | 신규 |
+| `policy_node` | — | ~5 Hz | ❌ Phase 6 | `fr5_inference/` 구조 참조 |
+| `touch_twist` | `touch_teleop` | 50 Hz | ✅ 개조 | 프로파일 분리 (§10.4) |
+| `data_collector` | `dataset` | 30 Hz | ❌ 개조 대기 | `fr5_h5_collector.py` |
+
+### 지각 노드는 하나다 ✅ (2026-08-18 결정)
+
+이 표는 원래 `perception_node` 와 `quality_raw_node` 를 **따로** 두었으나, 구현하면서
+하나로 합쳤다.
+
+이유: **두 품질함수가 같은 ROI 를 봐야 한다.** `Q_raw` 와 `Q_seg` 가 서로 다른 영역을
+보면 §5.3 의 진단 분기가 무너진다 — "둘 다 열화"와 "한쪽만 열화"를 구별할 수 없게 된다.
+`us_perception` 은 `Predictor.roi_for()` 가 만든 마스크를 `compute_raw_quality` 에
+그대로 넘겨 이것을 보장한다. 노드를 나누면 ROI 를 두 번 만들거나 토픽으로 주고받아야
+하는데, 둘 다 어긋날 여지를 만든다.
 
 ## 3.2 주요 토픽
 
-| 토픽 | 타입 | 발행자 | 주기 |
+토픽 그래프는 코드에서 추출해 대조했다 (24개, 발행자–구독자 전부 연결됨).
+
+| 토픽 | 타입 | 발행자 | 구독자 |
 |---|---|---|---|
-| `/us/image` | `Image` | `us_frame_node` | 30 Hz |
-| `/us/quality_raw` | `Float32` (+진단) | `quality_raw_node` | 30 Hz |
-| `/us/control_state` | `UsControlState` (신규 msg) | `perception_node` | 30 Hz |
-| `/fr5_right/wrench` | `WrenchStamped` | `servo_node` | 100 Hz+ |
-| `/control/f_normal_setpoint` | `Float32` | `force_search_node` | 이벤트 |
-| `/control/image_twist` | `Twist` (x, y, rz만) | `policy_node` | ~5 Hz |
-| `/fr5_right/desired_twist` | `Twist` | `admittance_node` | 100 Hz |
-| `/fr5_right/joint_velocity_cmds` | `JointState` | `diff_ik_node` | 100 Hz |
-| `/diag/twist_tracking_error` | `Float32MultiArray[6]` | `diff_ik_node` | 100 Hz |
-| `/supervisor/state` | `String` | `supervisor` | 20 Hz |
+| `/us/image` | `Image` (mono8) | `us_frame` | `us_perception` |
+| `/us/quality_raw` | `Float32` | `us_perception` | `us_force_search`, `us_supervisor` |
+| `/us/quality_seg` | `Float32` | `us_perception` | `us_force_search` |
+| `/us/valid_for_control` | `Bool` | `us_perception` | `us_force_search`, `us_supervisor` |
+| `/us/rejection_reasons` | `String` (구분자 pipe) | `us_perception` | `us_supervisor` |
+| `/us/control_features` | `Float32MultiArray` | `us_perception` | (policy 대기) |
+| `/fr5_right/wrench` | `WrenchStamped` | `us_servo` | admittance, diff_ik, force_search, supervisor |
+| `/control/contact_setpoint` | `WrenchStamped` | `us_force_search` → policy | `us_admittance` |
+| `/control/image_twist` | `Twist` (x, y, rz) | policy ❌ | `us_admittance` |
+| `/control/teleop_twist` | `Twist` (6축) | `touch_twist` | `us_admittance` |
+| `/supervisor/state` | `String` | `us_supervisor` | `us_force_search` |
+| `/supervisor/mode` | `String` | `us_supervisor` | `us_admittance` |
+| `/fr5_right/desired_twist` | `Twist` | `us_admittance` | `us_diff_ik` |
+| `/fr5_right/joint_velocity_cmds` | `JointState` | `us_diff_ik` | `us_servo` |
+| `/operator/engage`, `/operator/confirm` | `Bool` | 수동 ❌ | `us_supervisor` |
+
+진단: `/diag/admittance`, `/diag/force_search`, `/diag/force_curve`,
+`/diag/twist_tracking_error`, `/diag/retreating`, `/diag/perception_latency`
+
+### setpoint 는 `WrenchStamped` 하나로 묶는다 ✅ (2026-08-18 결정)
+
+`(F_n*, M*_x, M*_y)` 를 `Float32` 셋으로 쪼개면 세 값이 **서로 다른 시각에** 도착해
+동기가 깨진다. `WrenchStamped` 는 의미가 정확히 맞고(목표 접촉 wrench) 헤더에
+타임스탬프가 있다.
+
+```
+force.z  = F_n*      torque.x = M*_x      torque.y = M*_y
+```
+
+덕분에 `us_interfaces` 커스텀 메시지 패키지가 **덜 급해졌다**. `/us/control_features` 만
+임시 형식으로 남아 있고, policy 를 만들 때 함께 확정한다.
+
+### `Q_raw` 는 점수를 낼 수 없으면 NaN ✅
+
+`0` 으로 내면 "품질 최악"과 "측정 불가"가 구별되지 않아 supervisor 가 잘못된 재탐색을
+건다. 소비자 둘 다 NaN 을 명시적으로 처리한다 — supervisor 는 `None` 으로 바꾸고,
+force_search 는 그 표본을 평균에서 제외한다.
 
 ---
 
@@ -295,13 +336,24 @@ v_slip = ω × δ
 
 # 5. 제어 축 분담 ✅
 
-| 축 | 제어원 | 목표 | 대역 | 학습 |
+**모든 축은 100 Hz admittance 또는 5 Hz policy가 직접 구동합니다. policy는 힘 축을
+속도로 지령하지 않고 setpoint만 옮깁니다** (2026-08-17 결정, §5.4).
+
+| 축 | 구동 | 추종 대상 | 대역 | setpoint 출처 |
 |---|---|---|---|---|
-| `z` | admittance | `F_n → F_n*` | 100 Hz | 불필요 |
-| `rx` | 아날리틱 | `M_x → 0` | 100 Hz | 불필요 |
-| `ry` | 아날리틱 | `M_y → 0` | 100 Hz | 불필요 |
-| — | 힘 탐색 (배경) | `Q_raw` 최대화하는 **최소** `F_n*` | ~0.2 Hz | 불필요 |
-| `x`, `y`, `rz` | **영상 policy** | `Q_seg` | ~5 Hz | **학습** |
+| `z` | admittance | `F_n → F_n*` | 100 Hz | Stage 1 탐색 → Stage 2 **policy** |
+| `rx` | admittance | `M_x → M*_x` | 100 Hz | **policy** (5 Hz) |
+| `ry` | admittance | `M_y → M*_y` | 100 Hz | **policy** (5 Hz) |
+| `x`, `y`, `rz` | **policy** | 속도 직접 지령 | 5 Hz | — |
+
+policy 출력은 **속도 3 + setpoint 3**입니다:
+
+```
+(v_x, v_y, ω_z)          속도 — 즉시 반영
+(M*_x, M*_y, F_n*)       setpoint — 100 Hz 힘 루프가 추종
+```
+
+`M* = 0`이면 순수 법선 정렬이고, 지금까지의 설계와 동일하게 동작합니다.
 
 ## 5.1 왜 이 분담인가 (쟁점 7)
 
@@ -322,6 +374,57 @@ v_slip = ω × δ
 프로브 중앙"을 의미하며 법선 정렬과 근사적으로만 일치합니다.
 
 실용상 충분하지만, 논문에서는 이 구분을 명시해야 합니다.
+
+## 5.4 모멘트 setpoint 편향 — policy가 기울임을 쓰는 방법 ✅
+
+**결정 (2026-08-17): policy는 기울임을 쓸 수 있어야 합니다.**
+
+### 왜 필요한가
+
+영상면에서 표적을 옮기는 방법은 물리적으로 두 가지이고, 서로 다릅니다.
+
+| 방법 | 축 | 효과 |
+|---|---|---|
+| **미끄러짐** | `x`, `y` 병진 | 접촉점 자체가 이동. 시야가 평행이동 |
+| **기울임** | `rx`, `ry` 회전 | 접촉점 고정, 빔이 부채꼴로 쓸림 |
+
+깊이 `d`의 표적에 대해 기울기 `θ`는 대략 `d·θ`의 미끄러짐과 등가입니다. 방광 깊이 60 mm에서
+**5° 기울임 ≈ 5 mm 미끄러짐**.
+
+**미세 조정에서는 기울임이 우월합니다.** 미끄러짐은 접촉 패치를 바꾸고 마찰의 stick-slip을
+겪는데, 이것이 몇 mm 단위 보정에서 가장 나쁜 특성입니다. 기울임은 접촉점을 유지합니다.
+
+쟁점 7에서 `rx, ry`를 힘 루프에 통째로 준 대가가 여기서 드러납니다 — policy에 남은 회전은
+`rz`(영상면 자체 회전)뿐이고, `rz`는 centroid를 좌우로 옮기지 못합니다.
+
+### 구조 — `F_n*`와 대칭
+
+```
+M_x → M*_x ,  M_y → M*_y        (M* = 0 이면 순수 법선 정렬)
+```
+
+policy가 `M*`를 편향시키면 admittance가 **의도적으로 기울어진 평형**에 정착합니다.
+
+- **대역 분리 유지.** policy는 100 Hz로 회전을 지령하지 않고 5 Hz로 setpoint만 옮깁니다.
+  실제 자세 추종은 여전히 100 Hz 힘 루프
+- **학습 부담이 낮음.** setpoint는 느리고 부드러운 신호라 속도 지령보다 데이터 요구량이 적음
+- **안전 한계가 물리적으로 옳음.** 과도한 편향 = 모서리 눌림이므로 `max_moment_nm`이 그대로
+  편향 상한 역할
+
+### 한계와 슬루율 🟡
+
+| 항목 | 값 | 근거 |
+|---|---|---|
+| `max_moment_bias_nm` | **0.10** | `max_moment_nm` 0.3에 과도응답 여유를 남김 |
+| `moment_bias_slew_nm_s` | **0.05** | 계단 입력 금지. 아래 참조 |
+| `force_setpoint_slew_n_s` | **2.0** | Stage 1 램프 속도와 동일 |
+
+⚠️ **setpoint 슬루 제한이 안전상 필수입니다.** `M*`가 계단으로 0.1 N·m 뛰면 admittance가
+`ω = ΔM / B_r = 0.1 / 0.5 = 0.2 rad/s` — 각속도 상한 전체를 한 번에 소진합니다.
+0.05 N·m/s로 제한하면 기여분이 0.1 rad/s로 묶입니다.
+
+⏳ 편향 0.1 N·m에서 실제 몇 도가 나오는지는 접촉 회전강성에 달려 있어 **실측 전에는
+모릅니다.** Phase 2에서 측정합니다.
 
 ## 5.3 품질함수와 액추에이터의 대응 ✅
 
@@ -385,7 +488,7 @@ Q_raw = Σ wᵢ sᵢ / Σ wᵢ  ∈ [0, 1]
 
 ## 6.3 `Q_seg` — Stage 2용 🟡
 
-기존 `Unet_seg/src/control/quality.py`를 **코드 수정 없이 설정만으로** 재사용합니다.
+기존 `Unet_seg/rus_perception/control/quality.py`를 **코드 수정 없이 설정만으로** 재사용합니다.
 
 ### 문제: 현행 `Q`를 그대로 쓰면 힘 탐색이 반대로 갑니다 ⚠️
 
@@ -508,15 +611,24 @@ v_z = clamp( (F_n* − F_n) / B_z ,  ±v_z_max )
 ## 8.2 자세 정렬 축 (rx, ry) 🟡
 
 ```
-ω_x = clamp( −M_x / B_r , ±ω_max )
-ω_y = clamp( −M_y / B_r , ±ω_max )
+ω_x = clamp( (M*_x − M_x) / B_r , ±ω_max )
+ω_y = clamp( (M*_y − M_y) / B_r , ±ω_max )
 ```
+
+`M*`는 policy가 5 Hz로 옮기는 편향 setpoint입니다 (§5.4). `M* = 0`이면 순수 법선 정렬.
+**`M*`에는 슬루 제한이 반드시 걸려야 합니다** — 계단 입력이 각속도 예산을 한 번에
+소진합니다.
 
 | 파라미터 | 값 🟡 | 근거 |
 |---|---|---|
 | `B_r` | **0.5 N·m·s/rad** | 0.05 N·m → 0.1 rad/s (≈5.7°/s) |
 | `ω_max` | **0.2 rad/s** | ≈11°/s |
 | 모멘트 데드밴드 | **0.01 N·m** | ⏳ F/T 잡음 실측 후 조정 |
+| `max_moment_bias_nm` | **0.10** | §5.4 |
+| `moment_bias_slew_nm_s` | **0.05** | §5.4 |
+
+⚠️ 데드밴드는 **오차 `M* − M`에 적용**해야 합니다. 측정값 `M`에 걸면 편향이 걸린 상태에서
+정상 동작 지점이 데드밴드 밖으로 나가 항상 움직입니다.
 
 부호는 ⏳ 하드웨어에서 검증 (§4.4와 동일한 위험).
 
@@ -538,7 +650,7 @@ V_probe = [ v_x_img,  v_y_img,  v_z_adm,
 
 이 지점이 나중에 QP로 갈아끼울 때 목적함수/제약으로 바뀝니다.
 
-## 8.4 배경 힘 적응 (0.2 Hz) ✅ 쟁점 6
+## 8.4 배경 힘 적응 ✅ 쟁점 6
 
 FORCE LOCK은 **완전 잠금이 아니라 setpoint 기능**입니다. Stage 1은 끝나는 것이 아니라
 저대역 배경 루프로 잔존합니다.
@@ -546,16 +658,35 @@ FORCE LOCK은 **완전 잠금이 아니라 setpoint 기능**입니다. Stage 1�
 이유: `F_n*`를 고정한 채 5-DoF로 움직이면 프로브가 곡률과 조직 특성이 다른 지점으로 이동
 합니다. 그 지점의 최적 힘은 `F_n*`가 아닙니다. 프로브를 기울이면 접촉 패치 자체가 바뀝니다.
 
-**방식 🟡 — 전체 재탐색이 아닌 디더 기반 경사 추정:**
+### 디더를 버리고 절충안으로 ✅ (2026-08-17 결정)
 
-```
-5초 주기로:
-  F_n* ± 0.25 N 섭동 → ΔQ̄_raw 관측
-  경사 방향으로 F_n* 를 0.1 N 이동 (안전 한계 내)
-```
+**폐기된 방식:** 5초 주기로 `F_n*`를 ±0.25 N 섭동시켜 `ΔQ̄_raw`로 경사를 추정.
 
-**전체 재탐색 트리거:** `Q̄_raw`가 Stage 1 종료 시점 대비 🟡 **25% 이상 열화된 상태가 3초
-지속**되면 Stage 1b 재진입.
+폐기 이유 — **귀속(attribution)이 불가능합니다.** 디더 반주기 2.5 s 동안 policy가 프로브를
+10 mm/s로 움직이면 **25 mm 이동**합니다. 25 mm 이동이 만드는 해부학적 `Q_raw` 변화가
+±0.25 N이 만드는 변화보다 훨씬 큽니다. 경사 추정치가 잡음에 묻힙니다.
+
+**채택된 절충안:**
+
+| 단계 | `F_n*` 출처 | 성질 |
+|---|---|---|
+| **Stage 1a / 1b** | **명시적 격자 탐색** (§7.3) | 규칙 — `min{F : Q̄ ≥ (1−ε)Q̄max}` |
+| **Stage 2** | **policy 출력** (5 Hz, 슬루 제한) | 학습 |
+
+이렇게 하면:
+
+- 쟁점 3의 **"최대 품질을 내는 최소 힘"이 Stage 1에서 규칙으로 확보**됩니다. policy가
+  이어받는 시점의 출발값이 그 규칙의 결과입니다
+- 스캔 중 적응은 policy가 하므로 **디더가 필요 없고, 귀속 문제가 성립하지 않습니다**
+- 32 s의 탐색 비용은 스캔 시작 전 **한 번만** 발생합니다
+- Stage 1이 만든 **힘–품질 곡선(`Q̄` vs `F` 표본)이 학습 데이터로 남습니다**. 버리지 말고
+  에피소드에 기록해야 합니다
+
+**부수 효과 — 0.2 Hz 루프가 사라집니다.** §11 타임스케일 표에서 `F_n*` 적응 행이 없어지고
+policy 5 Hz에 흡수됩니다. 아키텍처가 루프 하나만큼 단순해집니다.
+
+**안전망은 유지:** `Q̄_raw`가 Stage 1 종료 시점 대비 🟡 **25% 이상 열화된 상태가 3초
+지속**되면 Stage 1b 재진입. policy의 `F_n*`가 나빠져도 명시적 탐색이 되찾아옵니다.
 
 ---
 
@@ -703,6 +834,35 @@ supervisor는 두 집합의 합집합을 소비합니다. 코드가 겹치면 �
 ⚠️ `excessive_shadowing`은 유일하게 **힘 축으로 해결되지 않는** 원시 실패입니다. 힘을 올리면
 악화될 수 있으므로 Stage 1 격자 탐색을 계속 돌리면 안 됩니다.
 
+## 10.5 모드 계약 — admittance 가 유일한 twist 발행자 ✅ (2026-08-18)
+
+teleop 과 admittance 가 둘 다 `desired_twist` 를 발행하면 다툰다. 그리고
+`TELEOP_APPROACH` 에서 조작자는 **z 를 포함한 6축**이 필요한데 z 는 힘 루프 소유다.
+
+해결: 조작자 twist 를 `/control/teleop_twist` 로 우회시키고, **admittance 가 모드에 따라
+동작을 바꾼다.** mux 경쟁이 사라지고 발행자가 하나로 유지된다.
+
+| 상태 | 모드 | admittance 동작 |
+|---|---|---|
+| `IDLE` | `idle` | 영 twist |
+| `TELEOP_APPROACH` | `teleop` | **조작자 6축 그대로 통과, 힘 루프 정지** |
+| `STAGE1A` / `STAGE1B` / `STAGE2` | `contact` | 힘 3축 + 영상 3축 |
+| `RETREAT` | `retreat` | 프로브 −z 등속 후퇴 |
+
+**힘 루프를 끄는 것이 핵심이다.** 접근 단계에는 접촉이 없어 `F_n = 0` 인데, 힘 루프를
+켜두면 `F_n*` 를 향해 스스로 내려가 조작자와 z 를 다툰다.
+
+통과 모드에서도 §12.3 의 속도 클램프는 유지하고, 조작자 지령이 끊기면 발행을 멈춰
+하위 워치독이 후퇴시킨다 — 프로브가 마지막 속도로 계속 가는 것을 막는다.
+
+### 감독자가 죽으면 멈춘다 🟡
+
+모드를 한 번이라도 받은 뒤 `mode_timeout_s`(0.5 s) 넘게 끊기면 admittance 는 발행을
+멈춘다. 마지막 모드를 붙들고 계속 도는 것이 가장 위험하다.
+
+단, 모드를 **한 번도** 받지 못했으면 `admittance.default_mode` 로 돈다 — supervisor
+없이 단독 기동해 시험할 수 있어야 하기 때문이다.
+
 ## 10.4 TELEOP_APPROACH 원격조작 프로파일 ✅
 
 Touch 햅틱 장치는 그대로 재사용하되, **입력 프로파일을 초음파용으로 분리**합니다
@@ -751,12 +911,16 @@ F/T 잡음 바닥이 높아 모멘트 데드밴드를 크게 잡아야 한다면
 | 루프 | 주기 | 담당 |
 |---|---|---|
 | 서보 (관절) | **125 Hz** | ServoJ |
-| 카테시안 + admittance | **100 Hz** | `F_n` 추종, 자세 정렬 |
+| 카테시안 + admittance | **100 Hz** | `F_n → F_n*`, `M → M*` 추종 |
 | US 프레임 → 세그 → 특징 | **~30 Hz** | 영상 특징 |
-| 영상 policy | **~5 Hz** | 3-DoF 지령 |
-| `F_n*` 적응 | **~0.2 Hz** | Stage 1 잔존 루프 |
+| supervisor | **20 Hz** | 상태 전이, 재탐색 트리거 |
+| 영상 policy | **~5 Hz** | 속도 3축 + setpoint 3개 |
 
 힘 루프(100 Hz)와 영상 루프(5 Hz)가 **20× 벌어져** 깔끔하게 분리됩니다.
+
+**0.2 Hz 루프는 없습니다.** 디더 기반 배경 적응을 폐기하고 절충안을 채택하면서(§8.4)
+`F_n*` 적응이 policy 5 Hz에 흡수되었습니다. Stage 1의 명시적 탐색은 상태 전이 중 한 번만
+도는 절차이지 상시 루프가 아닙니다.
 
 ## 11.1 위험 ⏳
 
@@ -924,6 +1088,9 @@ Phase 1 이후의 검증 기준은 반드시 실로봇 + 팬텀입니다.
 
 ## 13.3 `Unet_seg` — 지각 리포의 경계 ✅
 
+> **검증 계획:** `docs/VALIDATION_PLAN.md` — 데이터 도착 시 실행할 지표·그림·합격 기준.
+> 신뢰도 지표는 `rus_perception/metrics/trust.py`, 그림은 `scripts/plot_report.py`.
+>
 > **도판:** `docs/architecture.html` 부록 A. 내보낸 이미지는 `docs/figures/`:
 > `07-quality-definitions` (두 품질함수 전체 명세),
 > `08-slim-unet` (망 구조 · 256² 기준 텐서 모양),
@@ -1014,6 +1181,23 @@ from rus_perception.control import compute_control_quality, compute_raw_quality
 
 → **Phase 0 항목입니다.** perception_node를 짜기 전에 끝나 있어야 합니다.
 
+### 13.3.6 ROI — 두 품질함수가 공유하는 단일 정의 ✅ 배선 완료
+
+부채꼴 ROI가 세그 경로 어디에도 없었습니다. 그래서 세 가지가 조용히 깨져 있었습니다:
+
+| 값 | 깨진 방식 |
+|---|---|
+| `mask_area_ratio` | 분모가 **프레임 전체 직사각형**. 프레임그래버 크롭이 `mask_completeness`를 흔들고, 그건 힘에 민감한 항이므로 → **크롭이 최적 힘 F\*를 바꿨습니다** |
+| `segmentation_confidence` | 프레임 전체 평균이라 **빔 바깥 검은 영역이 지배**. 경계에서 헤매도 점수가 높게 나오는데 `min_segmentation_confidence: 0.50`은 활성 게이트 |
+| `border_contact_ratio` | 이미지 사각형 가장자리만 센다. 부채꼴이 프레임 안에 내접하면 **마스크가 그 가장자리에 절대 닿지 않아 이 기준이 영원히 발화하지 않습니다** |
+
+**조치:** `rus_perception/control/roi.py` 신설. `full`(기본, 기존 동작과 완전 동일) /
+`rect`(리니어) / `fan`(convex·phased) / `file` 4가지 모드. `extract_control_state()`와
+`compute_raw_quality()`가 **같은 마스크를 받습니다** — Q_raw만 ROI를 알던 비대칭 해소.
+`ControlState`에 `roi_mode` / `roi_area_px` 기록 (분모를 모르면 면적비는 의미가 없으므로).
+
+⏳ 기하 파라미터는 전부 자리표시. §14.1-4 확정 시 `control.roi` YAML 한 곳만 바꿉니다.
+
 ---
 
 # 14. 미결 / 실측 대기
@@ -1035,8 +1219,16 @@ from rus_perception.control import compute_control_quality, compute_raw_quality
 
 1. **policy 모델 형태** — world model / IBVS interaction matrix / behavior cloning. **미결**
    - 3-DoF로 축소되어(쟁점 7) 난이도가 크게 낮아진 상태에서 재검토
-2. **`Q_raw` 4개 지표의 타당성** — §6.2. Phase 3에서 실증 필요
-3. **`target_area_ratio = 0.15`** — §6.3. 실제 방광 영상으로 재설정
+2. **`Q_raw` 4개 지표의 타당성** — §6.2. Phase 3에서 실증 필요.
+   `metrics.trust.force_response()`가 단조·단봉 판정을 계산하고 `plot_report.py`가
+   그림 B8로 그린다. 합격 기준은 `docs/VALIDATION_PLAN.md` 게이트 4
+3. **`target_area_ratio = 0.15`** — §6.3. 실제 방광 영상으로 재설정.
+   더 근본적으로, **`Q_seg`의 8개 가중치 전부가 임의값이다.**
+   `metrics.trust.component_attribution()`이 각 항의 기여를 측정해 재도출 근거를 준다
+   (그림 B5). 0 왼쪽 막대 = 그 항을 빼면 Q가 좋아진다는 뜻
+4. **`accuracy_floor` / `target_bad_rate`** ❓ — "행동해도 되는 Dice 하한"과
+   "신뢰한 프레임 중 틀려도 되는 비율". **측정이 아니라 제어 요구에서 오는 결정**이고,
+   검증의 모든 합격/불합격이 여기 걸린다. `VALIDATION_PLAN.md` §1
 
 ## 14.3 알려진 결함 ⚠️
 
@@ -1081,6 +1273,24 @@ from rus_perception.control import compute_control_quality, compute_raw_quality
 
 Phase 0–2는 US 없이 진행 가능합니다. Phase 3의 하드웨어 대기와 병렬로 갈 수 있습니다.
 
+## 15.1 Phase 0 검증 통과 후 정리할 것 ✅
+
+아래는 **지금 지우지 않습니다.** `us_servo_node` / `us_diff_ik_node`가 실기에서 검증되기
+전까지는 기존 복강경 경로가 유일하게 동작이 확인된 참조이기 때문입니다. Phase 0 검증
+기준을 통과한 시점에 `legacy_laparoscopic/`으로 옮깁니다.
+
+| 대상 | 남겨 둔 이유 | 옮길 때 함께 할 일 |
+|---|---|---|
+| `fr5_ik/freespace_two_twist.py` | `us_diff_ik_node`가 대체하지만 미검증. `calculate_initial_ref()`가 가짜 RCM 기준 프레임을 만들어 `gripper_wrt_rcm`을 발행하는 잔재 | `fr5_ik/setup.py` 진입점 제거, `teleop.launch.py` 갱신 |
+| `fr5_control/fr5_servo_joint_control_node{,_limit}.py` | `us_servo_node`가 대체하지만 미검증. 듀얼암 + 그리퍼 | `fr5_control/setup.py` 진입점 제거 |
+| `fr5_control/fr5_status_node.py` | `us_servo_node`에 흡수 예정 | RPC 연결 이중화 정리 |
+| `keyboard_teleop` | **이미 동작 불능** — `/fr5_right/current_gripper_wrt_rcm`를 구독하는데 활성 트리에 발행자가 없음. 소비자였던 `*_two_pos`는 이미 legacy | 폐기하거나 twist 기반으로 재작성 |
+| `touch_teleop/run_touch_teleop.sh` | **이미 깨짐** — legacy로 옮긴 `rcm_control`을 실행. 경로도 하드코딩 | 삭제 (런치파일로 대체됨) |
+| `dataset/*` 3개의 `*_wrt_rcm` h5 필드명 | 기존 에피소드와의 호환 | 수집기 개조(Phase 6 데이터 수집) 때 함께 |
+
+⚠️ 이 목록은 **Phase 0 검증 기준 통과가 조건**입니다. mock 통과만으로는 부족합니다 —
+§12.5에 적은 대로 mock은 기구학만 맞습니다. 실로봇에서 twist 추종을 확인한 뒤에 옮깁니다.
+
 ---
 
 ## 부록: 결정 이력
@@ -1106,3 +1316,18 @@ Phase 0–2는 US 없이 진행 가능합니다. Phase 3의 하드웨어 대기�
 | 2026-08-14 | — | `Q_raw` 음영 판정은 **90-percentile 상대** 기준 (median 아님). §13.3.4b |
 | 2026-08-14 | — | `scan_geometry: sector`는 **구현하지 않고 예외**. 컬럼≠A-line (§13.3.4a) |
 | 2026-08-14 | — | **로봇 백엔드 추상화 + mock** 을 Phase 0에 포함. §12.5 |
+| 2026-08-17 | — | **ROI를 두 품질함수가 공유**. `mask_area_ratio` 분모·`segmentation_confidence` 지지·`border_contact_ratio` 경계가 전부 ROI 기준 (§13.3.6) |
+| 2026-08-17 | — | 신뢰도 검증을 **정확도와 분리**. `metrics/trust.py` + 그림 13종. 핵심 수치는 `trusted_bad_rate` (`docs/VALIDATION_PLAN.md`) |
+| 2026-08-17 | — | `StandardUNet` `paper` 프리셋에 `in_channels/out_channels=1` 고정 — 없으면 8,636,418로 논문 대조가 성립하지 않음 |
+| 2026-08-17 | — | **학습 : 검증 = 7 : 3, 시험셋 없음** (`ratios: [0.70, 0.30, 0.00]`). 비율은 프레임이 아니라 **환자 수**에 걸림. `strategy: patient_random`, `evaluation.split: val`. 대가는 임계를 고른 셋에서 성능을 보고하는 것 — 환자가 늘면 3분할로 복귀 |
+| 2026-08-17 | — | Touch 원격조작 **프로파일 분리** — 회전 데드존 파라미터화. §10.4 |
+| 2026-08-17 | — | 회전 중심 = 프로브 접촉면이 **RCM의 대체물**. §4.5 |
+| 2026-08-17 | — | 복강경 잔재 정리는 **Phase 0 실기 검증 통과 후**. §15.1 |
+| 2026-08-17 | — | **모멘트 setpoint 편향** — policy가 기울임을 쓴다. `M → M*`. §5.4 |
+| 2026-08-17 | — | policy 출력 = **속도 3 + setpoint 3** `(v_x,v_y,ω_z,M*_x,M*_y,F_n*)`. §5 |
+| 2026-08-17 | — | 디더 **폐기** → 절충안: Stage 1 명시 탐색 + Stage 2 policy. §8.4 |
+| 2026-08-17 | — | 0.2 Hz 루프 소멸. 타임스케일 5단 → 5단(구성 변경). §11 |
+| 2026-08-18 | — | **모드 계약** — admittance 가 유일한 twist 발행자, teleop 은 통과 모드. §10.5 |
+| 2026-08-18 | — | 지각 노드 **하나로 통합** — 두 품질함수가 같은 ROI 를 봐야 한다. §3.1 |
+| 2026-08-18 | — | setpoint 를 `WrenchStamped` 로 묶어 동기 확보. `us_interfaces` 연기. §3.2 |
+| 2026-08-18 | — | `Q_raw` 측정 불가 = **NaN** (0 아님). 소비자 둘 다 명시 처리. §3.2 |

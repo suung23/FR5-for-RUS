@@ -611,6 +611,8 @@ def run_script(name: str, *args: str) -> subprocess.CompletedProcess:
         "benchmark.py",
         "architecture_report.py",
         "make_synthetic_dataset.py",
+        "check_dataset.py",
+        "plot_report.py",
     ],
 )
 def test_every_script_exposes_a_working_help(script: str) -> None:

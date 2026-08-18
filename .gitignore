@@ -3,7 +3,7 @@ __pycache__/
 
 # 빌드 산출물. 단 벤더링된 fairino SDK 바이너리는 리포에 포함되어야 한다.
 *.so
-!fr5_contorl/fr5_control/fr5_control/fairino/**/*.so
+!**/fairino/**/*.so
 
 build/
 install/
@@ -14,3 +14,4 @@ venv/
 
 *.egg-info/
 .pytest_cache/
+.pytest_tmp/

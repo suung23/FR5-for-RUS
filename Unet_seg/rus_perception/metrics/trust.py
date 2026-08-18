@@ -73,6 +73,8 @@ __all__ = [
     "TrustReport",
     "spearman",
     "pearson",
+    "dice_to_iou",
+    "iou_to_dice",
     "rank_agreement",
     "gate_confusion",
     "detection_report",
@@ -90,6 +92,56 @@ __all__ = [
 DEFAULT_ACCURACY_FLOOR = 0.70
 
 _EPS = 1e-12
+
+
+# ---------------------------------------------------------------------------
+# Dice <-> IoU
+# ---------------------------------------------------------------------------
+
+
+def dice_to_iou(dice: float) -> float:
+    """Convert a per-frame Dice to the IoU of the same pair of masks.
+
+    ``IoU = Dice / (2 - Dice)``. The two are a strictly increasing function of
+    each other, so on a *single frame* they carry identical information.
+    """
+    dice = float(dice)
+    if not 0.0 <= dice <= 1.0:
+        raise ValueError(f"dice must be in [0, 1], got {dice}.")
+    return dice / (2.0 - dice)
+
+
+def iou_to_dice(iou: float) -> float:
+    """Convert a per-frame IoU to the Dice of the same pair of masks.
+
+    ``Dice = 2 * IoU / (1 + IoU)``.
+    """
+    iou = float(iou)
+    if not 0.0 <= iou <= 1.0:
+        raise ValueError(f"iou must be in [0, 1], got {iou}.")
+    return 2.0 * iou / (1.0 + iou)
+
+
+# Why every function below takes one generic ``accuracy`` rather than both:
+#
+# Dice and IoU are monotonically related per frame, so they induce the SAME
+# ordering of frames. Every statistic here -- Spearman rho, AUROC, the
+# risk-coverage sweep, the operating point -- is rank-based, so swapping one for
+# the other changes nothing at all, provided the floor is converted with the
+# helpers above. Computing both would double the output and add no information.
+#
+# The floor is the trap. ``accuracy_floor=0.70`` means very different things in
+# the two units: Dice 0.70 is IoU 0.538, and applying 0.70 directly to IoU is a
+# far harsher criterion that will roughly double the reported trusted-bad rate
+# with no visible sign that the question changed.
+#
+# The equivalence breaks the moment frames are AVERAGED, because ``d -> d/(2-d)``
+# is convex: at equal mean Dice, the more spread-out model has the higher mean
+# IoU. A model that is perfect on most frames and loses the bladder entirely on a
+# few can therefore win on mean IoU and lose on mean Dice against a uniformly
+# mediocre one -- which is exactly the failure shape this system produces. That
+# is why :mod:`rus_perception.metrics.spatial` reports both means, and why the
+# decision that matters here is the per-frame floor rather than either mean.
 
 
 # ---------------------------------------------------------------------------

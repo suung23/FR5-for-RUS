@@ -14,9 +14,25 @@ data:
   require_labeled_current: true
 
 split:
-  strategy: manifest             # manifest | patient_random
-  ratios: [0.7, 0.15, 0.15]
+  # 학습 : 검증 = 7 : 3. 별도 시험셋을 두지 않는 결정이므로 test 는 0.
+  #
+  # 비율은 프레임이 아니라 **환자 수**에 걸린다. 한 스윕의 프레임은 서로 강하게
+  # 상관되어 있어 프레임 단위로 나누면 같은 환자의 해부가 학습셋에서 검증셋으로
+  # 새고 모든 수치가 부풀려진다. assert_no_patient_leakage 가 이를 강제한다.
+  # 환자 10명 -> train 7 / val 3.
+  #
+  # strategy: patient_random 인 이유 — 새로 도착한 manifest 에는 split 열이 없다.
+  # manifest 전략은 그 열을 요구하므로 데이터가 오자마자 실패한다. 나중에 분할을
+  # 고정하고 싶으면 scripts/check_dataset.py --write-split 로 열을 채운 뒤
+  # strategy 를 manifest 로 바꾸면 된다.
+  strategy: patient_random       # manifest | patient_random
+  ratios: [0.70, 0.30, 0.00]     # train : val : test
   seed: 42
+
+  # ⚠️ test 를 0 으로 두면 임계값을 고른 데이터와 성능을 보고하는 데이터가 같아진다.
+  # docs/VALIDATION_PLAN.md 의 운용점(Q 임계)·accuracy_floor·target_bad_rate 는
+  # 전부 검증셋에서 고르는 값이므로, 같은 셋에서 낙관적으로 나온다.
+  # 환자가 충분해지면 3분할로 되돌릴 것: ratios [0.70, 0.15, 0.15] + evaluation.split: test
 
 augmentation:
   enabled: true
@@ -194,7 +210,9 @@ control:
       shadow_penalty: 1.0
 
 evaluation:
-  split: test
+  # split.ratios 의 test 가 0 이므로 val 에서 평가한다. 여기가 test 로 남아 있으면
+  # evaluate.py 가 "Split 'test' is empty" 로 멈춘다 — 두 키는 함께 움직인다.
+  split: val
   compute_hd95: true
   pixel_spacing: 1.0             # 1.0 reports HD95 in pixels; set the real
                                  # spacing (mm/px) to report millimetres

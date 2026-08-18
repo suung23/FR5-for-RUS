@@ -88,6 +88,11 @@ public:
         this->declare_parameter<double>("teleop.us_approach.linear_deadzone", 0.002);
         this->declare_parameter<double>("teleop.us_approach.angular_deadzone", 0.02);
 
+        // 초음파 스택에서는 조작자 twist 가 admittance 를 거쳐 나간다. admittance 가
+        // 유일한 desired_twist 발행자여야 둘이 다투지 않고, TELEOP 모드에서 6축 통과가
+        // 성립한다. 빈 문자열이면 기존 동작(팔별 desired_twist 직접 발행).
+        this->declare_parameter<std::string>("teleop.twist_topic_override", "");
+
         this->declare_parameter<std::string>("left_dev_name", "touch_left");
         this->declare_parameter<std::string>("right_dev_name", "Touch_Right");
 
@@ -156,7 +161,11 @@ private:
         ctx->prefix = "touch/" + side; // e.g., touch/left
 
         // Create publishers with specific topics
-        std::string twist_topic = "/fr5_" + side + "/desired_twist";
+        const std::string override_topic =
+            this->get_parameter("teleop.twist_topic_override").as_string();
+        std::string twist_topic = override_topic.empty()
+            ? "/fr5_" + side + "/desired_twist"
+            : override_topic;
         std::string gripper_topic = "/fr5_" + side + "/desired_gripper_pose";
 
         ctx->twist_pub = this->create_publisher<geometry_msgs::msg::Twist>(twist_topic, 10);

@@ -162,21 +162,40 @@ def _series(history: Sequence[Mapping[str, Any]], key: str) -> tuple[list[float]
     return epochs, values
 
 
-def _label_line_end(ax: "matplotlib.axes.Axes", x, y, text: str, color: str) -> None:
-    """Direct-label the last point of a line -- identity without a legend lookup."""
-    if not x:
+def _label_line_ends(ax: "matplotlib.axes.Axes", entries: Sequence[tuple]) -> None:
+    """Direct-label line ends, but only where the labels will not collide.
+
+    Direct labels are *selective* by design. Converging series -- which is what
+    loss terms do -- would stack their labels into an unreadable smear, and the
+    legend already carries identity. So a label is drawn only when its line ends
+    far enough from the one below it; the rest rely on the legend.
+
+    Args:
+        entries: ``(x, y, text, color)`` per series, already plotted.
+    """
+    drawn = [(x[-1], y[-1], text, color) for x, y, text, color in entries if x]
+    if not drawn:
         return
-    ax.annotate(
-        text,
-        xy=(x[-1], y[-1]),
-        xytext=(4, 0),
-        textcoords="offset points",
-        va="center",
-        fontsize=8,
-        color=color,
-        fontweight="medium",
-        annotation_clip=False,
-    )
+    low, high = ax.get_ylim()
+    span = max(high - low, 1e-12)
+    minimum_gap = 0.055 * span
+
+    drawn.sort(key=lambda item: item[1])
+    last_labelled: Optional[float] = None
+    for x_end, y_end, text, color in drawn:
+        if last_labelled is not None and (y_end - last_labelled) < minimum_gap:
+            continue
+        ax.annotate(
+            text,
+            xy=(x_end, y_end),
+            xytext=(5, 0),
+            textcoords="offset points",
+            va="center",
+            fontsize=8,
+            color=color,
+            annotation_clip=False,
+        )
+        last_labelled = y_end
 
 
 def _note(ax: "matplotlib.axes.Axes", text: str, loc: str = "lower right") -> None:
@@ -226,13 +245,15 @@ def plot_loss_decomposition(history: Sequence[Mapping[str, Any]]) -> "Figure":
         ("loss/jaccard", "Jaccard", CATEGORICAL[2]),
         ("loss/spatial_total", "spatial total", PALETTE["ink_2"]),
     ]
+    spatial_drawn = []
     for key, label, color in spatial:
         x, y = _series(history, key)
         if not x:
             continue
         style = "--" if key == "loss/spatial_total" else "-"
         top.plot(x, y, style, color=color, label=label)
-        _label_line_end(top, x, y, label, color)
+        spatial_drawn.append((x, y, label, color))
+    _label_line_ends(top, spatial_drawn)
     top.set_title("Spatial loss terms")
     top.set_ylabel("loss")
     if top.lines:
@@ -243,13 +264,15 @@ def plot_loss_decomposition(history: Sequence[Mapping[str, Any]]) -> "Figure":
         ("loss/temporal_control", "temporal control", CATEGORICAL[4]),
     ]
     drawn = False
+    temporal_drawn = []
     for key, label, color in temporal:
         x, y = _series(history, key)
         if not x:
             continue
         drawn = True
         bottom.plot(x, y, "-", color=color, label=label)
-        _label_line_end(bottom, x, y, label, color)
+        temporal_drawn.append((x, y, label, color))
+    _label_line_ends(bottom, temporal_drawn)
 
     ramp_x, ramp_y = _series(history, "temporal/weight_factor")
     if ramp_x:
@@ -276,15 +299,24 @@ def plot_loss_decomposition(history: Sequence[Mapping[str, Any]]) -> "Figure":
 def plot_validation_curves(history: Sequence[Mapping[str, Any]]) -> "Figure":
     """Validation accuracy, stability and the selection score that picks the model.
 
-    All three are bounded in ``[0, 1]``, so they share one axis honestly. The
+    All four are bounded in ``[0, 1]``, so they share one axis honestly. The
     chosen epoch is marked: model selection never uses training loss, and seeing
     *which* epoch won next to the curves is how a silent selection bug surfaces.
+
+    Dice and IoU are both drawn even though they are monotonically related per
+    frame, because these are *means over frames* and the map ``d -> d/(2-d)`` is
+    convex. The **gap between the two curves is a spread signal**: it widens when
+    accuracy is concentrated in a few catastrophic frames rather than spread
+    evenly, which is precisely the bladder-lost failure this system produces.
+    Two curves that stay parallel mean uniform performance.
     """
     apply_style()
     figure, ax = plt.subplots(figsize=(7.2, 4.0))
 
+    drawn = []
     for key, label, color, style in (
         ("val/dice", "val Dice", PALETTE["image"], "-"),
+        ("val/iou", "val IoU", CATEGORICAL[1], "-"),
         ("val/temporal_iou", "val temporal IoU", PALETTE["force"], "-"),
         ("val/selection_score", "selection score", PALETTE["ink"], "--"),
     ):
@@ -292,7 +324,9 @@ def plot_validation_curves(history: Sequence[Mapping[str, Any]]) -> "Figure":
         if not x:
             continue
         ax.plot(x, y, style, color=color, label=label)
-        _label_line_end(ax, x, y, label, color)
+        drawn.append((x, y, label, color))
+    ax.set_ylim(0, 1)
+    _label_line_ends(ax, drawn)
 
     x, y = _series(history, "val/selection_score")
     if x:
@@ -328,6 +362,7 @@ def plot_temporal_diagnostics(history: Sequence[Mapping[str, Any]]) -> "Figure":
         2, 1, figsize=(7.2, 4.6), sharex=True, gridspec_kw={"hspace": 0.3, "height_ratios": [2, 1]}
     )
 
+    drawn = []
     for key, label, color in (
         ("temporal/reliable_pixel_ratio", "reliable pixels", PALETTE["image"]),
         ("temporal/weight_factor", "ramp weight", PALETTE["ink_3"]),
@@ -336,7 +371,9 @@ def plot_temporal_diagnostics(history: Sequence[Mapping[str, Any]]) -> "Figure":
         if not x:
             continue
         top.plot(x, y, "-", color=color, label=label)
-        _label_line_end(top, x, y, label, color)
+        drawn.append((x, y, label, color))
+    top.set_ylim(0, 1)
+    _label_line_ends(top, drawn)
     top.axhline(0.10, color=PALETTE["bad"], linewidth=_THIN, linestyle=":")
     top.annotate(
         "min_reliable_ratio",
@@ -508,7 +545,7 @@ def plot_risk_coverage(report: TrustReport) -> "Figure":
             f"operating point\ncoverage {100.0 * report.operating.coverage:.0f}%"
             f"   {report.name} >= {report.operating.threshold:.3f}",
             xy=(report.operating.coverage, report.operating.achieved_bad_rate),
-            xytext=(8, 12),
+            xytext=(12, -30),
             textcoords="offset points",
             fontsize=8,
             color=PALETTE["good"],
@@ -685,10 +722,12 @@ def plot_reason_codes(report: TrustReport) -> "Figure":
     ax.axvline(report.accuracy_floor, color=PALETTE["ink_3"], linewidth=_THIN, linestyle="--")
     ax.annotate(
         f"floor {report.accuracy_floor:.2f}",
-        xy=(report.accuracy_floor, len(stats) - 0.4),
+        xy=(report.accuracy_floor, 0.985),
+        xycoords=("data", "axes fraction"),
         xytext=(4, 0), textcoords="offset points",
-        fontsize=8, color=PALETTE["ink_3"],
+        va="top", fontsize=8, color=PALETTE["ink_3"],
     )
+    ax.set_ylim(-0.7, len(stats) - 0.3)
 
     ax.set_yticks(y)
     ax.set_yticklabels(
@@ -790,7 +829,7 @@ def plot_force_response(report: ForceResponseReport, name: str = "Q_raw") -> "Fi
                     color=PALETTE["good"], fontweight="bold")
     if report.argmax_force is not None and report.argmax_force != report.f_star:
         ax.axvline(report.argmax_force, color=PALETTE["ink_3"], linewidth=_THIN, linestyle="--")
-        ax.annotate("argmax", xy=(report.argmax_force, 0.86),
+        ax.annotate("argmax", xy=(report.argmax_force, 0.04),
                     xycoords=("data", "axes fraction"), xytext=(5, 0),
                     textcoords="offset points", fontsize=8, color=PALETTE["ink_3"])
 
@@ -801,6 +840,14 @@ def plot_force_response(report: ForceResponseReport, name: str = "Q_raw") -> "Fi
     if report.sign_changes is not None:
         lines.append(f"turns     {report.sign_changes}")
     _note(ax, "\n".join(lines), "lower right")
+
+    # Headroom top and bottom: F*/argmax labels ride just under the top spine
+    # and the verdict block sits in the lower right, so neither meets the curve.
+    if measured:
+        low = min(m - s for m, s in zip(means, sems))
+        high = max(m + s for m, s in zip(means, sems))
+        span = max(high - low, 1e-6)
+        ax.set_ylim(low - 0.34 * span, high + 0.16 * span)
 
     ax.set_xlabel("contact force  F_n  [N]")
     ax.set_ylabel(f"mean {name} over the hold window")

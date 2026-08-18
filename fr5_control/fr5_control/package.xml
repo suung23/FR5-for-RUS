@@ -1,15 +1,20 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>fr5_ik</name>
+  <name>fr5_control</name>
   <version>0.0.0</version>
   <description>TODO: Package description</description>
   <maintainer email="rosotarun@gmail.com">rosota</maintainer>
-  <license>Apache-2.0</license>
+  <license>TODO: License declaration</license>
 
   <depend>rclpy</depend>
-  <exec_depend>python3-numpy</exec_depend>
-  <exec_depend>python3-pykdl</exec_depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>cv_bridge</depend>
+  <exec_depend>python3-scipy</exec_depend>
+  
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

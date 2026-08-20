@@ -669,6 +669,85 @@ accuracy claim.
 
 ---
 
+## Real data: the PFUS pelvic-floor dataset
+
+`scripts/prepare_pfus.py` converts the public **PFUS** dataset into this
+repository's manifest format, which makes it the first real ultrasound data the
+models here can be trained and validated on.
+
+| | |
+|---|---|
+| Content | Pelvic-floor ultrasound, midsagittal plane |
+| Patients | 110 (`P000` … `P109`), one sweep each |
+| Frames | 14,852, **every frame annotated** |
+| Annotation | Eight polygons per frame: Pubis, Urethra, Bladder, Uterus, Vagina, Anus, Rectum, Levator ani muscle |
+| Frame size | Varies per patient (~700×500 to ~1250×815), scan-converted sector on black background |
+| Source | Solís-Martín, García-Mejido, Sainz, Galán-Páez (Universidad de Sevilla), CC-BY-4.0 |
+
+The polygons are stored in the pixel coordinates of the frame beside them, so
+they are rasterised at the original resolution and resized with the image.
+
+```bash
+# unzip the release, then:
+python scripts/prepare_pfus.py \
+    --source ~/datasets/pfus/raw/data \
+    --output-dir ~/datasets/pfus \
+    --labels Bladder --qc-samples 16 --report-occupancy
+```
+
+This writes `masks/PXXX/frame_YYY.png` (binary, 0/255), `manifest.csv` with
+patient-level `train`/`val`/`test` splits, `splits.json` recording the exact
+assignment, and — with `--qc-samples` — mask-over-image overlays in `qc/` so the
+rasterisation can be checked by eye before any training run.
+
+**Only the requested labels become foreground.** The default `--labels Bladder`
+reproduces exactly the binary bladder task the models, losses, control features
+and metrics in this repository are built for; the other seven structures stay
+background. `--labels` accepts several names, but the pipeline is binary, so
+multiple labels are merged into one foreground class rather than kept apart.
+
+Statistics of the default preparation (`seed=42`, ratios 0.7/0.15/0.15):
+
+```
+patients            : 110      train  10359 frames / 78 patients
+sequences           : 110      val     2476 frames / 16 patients
+frames              : 14852    test    2017 frames / 16 patients
+labeled frames      : 14852
+empty masks         : 0        bladder occupancy: mean 0.0388, min 0.0052, max 0.1604
+```
+
+Two properties of this dataset that matter when reading any number produced
+from it:
+
+* **Consecutive frames of one patient carry near-identical polygons** — the
+  annotation was propagated along each sweep. The effective sample size is
+  therefore closer to 110 than to 14,852, which is exactly why splitting is done
+  at the patient level and never at the frame level.
+* **The bladder is small and often close to empty** (3.9 % of the frame on
+  average, 0.5 % at the minimum), unlike the filled bladders the Slim U-Net
+  paper's task assumes. Dice on this dataset is therefore not comparable with
+  the paper's reported figures.
+
+Train and evaluate on it with the two ready-made configs:
+
+```bash
+python scripts/train.py    --config configs/pfus_bladder.yaml
+python scripts/evaluate.py --config configs/pfus_bladder.yaml \
+    --checkpoint checkpoints/pfus_bladder/best.pt --split test
+
+python scripts/train.py    --config configs/pfus_bladder_slim.yaml
+python scripts/evaluate.py --config configs/pfus_bladder_slim.yaml \
+    --checkpoint checkpoints/pfus_bladder_slim/best.pt --split test
+```
+
+Both configs use the manifest's own splits (`split.strategy: manifest`), 256×256
+input, per-image intensity normalisation and the same schedule, so the Standard
+and Slim runs differ only in architecture. Horizontal flipping is disabled: the
+midsagittal pelvic-floor view has a fixed anatomical left/right, and mirroring it
+would teach an orientation that never occurs.
+
+---
+
 ## Training
 
 **Standard U-Net baseline**
@@ -1296,10 +1375,10 @@ or a network connection. The ONNX test skips itself if `onnxruntime` is absent.
 | Trainable parameter counts | **Measured** — exact match to both reported figures |
 | Estimated MACs / FLOPs | **Computed analytically** (not a measured runtime) |
 | PyTorch ↔ ONNX numerical agreement | **Verified** (< 1e-3 max logit difference) |
-| Segmentation accuracy (Dice, IoU, HD95) on bladder ultrasound | **Not yet benchmarked** |
-| Reproduction of the paper's reported accuracy | **Not attempted** — dataset unavailable |
-| Temporal-stability metrics on clinical video | **Not yet benchmarked** |
-| Inference latency / FPS on target hardware | **Not yet benchmarked** |
+| Segmentation accuracy (Dice, IoU, HD95) on bladder ultrasound | **Measured on PFUS** — see below. Pelvic-floor midsagittal data, *not* the paper's task |
+| Reproduction of the paper's reported accuracy | **Not attempted** — the paper's dataset is still unavailable |
+| Temporal-stability metrics on clinical video | **Measured on PFUS** — see below |
+| Inference latency / FPS on target hardware | **Measured** on an RTX 4090 at 256×256 — see below |
 | GPU memory usage | **Not yet benchmarked** |
 | Benefit of the temporal loss over the spatial-only baseline | **Not yet benchmarked** |
 | Validity-gate and `Q_seg` threshold calibration | **Not yet benchmarked** |
@@ -1309,6 +1388,43 @@ or a network connection. The ONNX test skips itself if `onnxruntime` is absent.
 Everything marked *Not yet benchmarked* has a command in this README that
 produces the number. None of them is estimated, extrapolated or quoted from the
 paper.
+
+### First real-data results (PFUS, test split)
+
+40 epochs, 256×256, identical schedule for both architectures; model selection on
+the validation split, metrics from the untouched test split (16 patients, 2,017
+frames). Commands are the ones in [Real data: the PFUS pelvic-floor
+dataset](#real-data-the-pfus-pelvic-floor-dataset).
+
+| | Standard U-Net | Slim U-Net |
+|---|---|---|
+| best val Dice (epoch) | 0.7506 (7) | 0.7530 (25) |
+| test Dice | **0.731** ± 0.206 | 0.698 ± 0.269 |
+| test Dice, median | 0.788 | **0.805** |
+| test IoU | **0.610** | 0.588 |
+| precision / recall | 0.733 / **0.762** | **0.793** / 0.705 |
+| HD95 (px) | 15.5 | **13.7** |
+| missed-bladder rate | **0.05 %** | 6.6 % |
+| warped temporal IoU | **0.940** | 0.928 |
+| invalid control frames | **3.0 %** | 10.7 % |
+| inference / end-to-end (RTX 4090) | 1.13 / 3.03 ms | **0.82 / 2.64 ms** |
+
+Read these as a pipeline validation and an architecture comparison, not as an
+accuracy claim for a bladder-tracking controller:
+
+* **The mean hides the failure mode.** Slim U-Net has the better *median* Dice
+  and the better HD95 but the worse mean, because it loses the bladder entirely
+  on 6.6 % of frames (0.05 % for the Standard U-Net) — and a controller reacts to
+  exactly those frames. Its higher invalid-control-frame rate says the same thing
+  from the gate's side.
+* **Per-patient variance dominates.** Test Dice ranges from 0.92 (P041) to 0.28
+  (P021) for the Standard U-Net, and P021 collapses to 0.08 for the Slim U-Net.
+  Two of sixteen patients account for most of the gap between the mean and the
+  median.
+* **Stability is not correctness.** 444 of 2,017 test frames are classified
+  `stable_inaccurate`: temporally consistent and anatomically wrong.
+* Validation Dice was reached at epoch 7 (Standard) and then flat while the
+  training loss kept falling — the run is overfit well before epoch 40.
 
 One calibration note already observable on synthetic data: the default
 `min_segmentation_confidence: 0.50` rejects under-trained models, because

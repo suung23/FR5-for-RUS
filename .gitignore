@@ -14,3 +14,11 @@ venv/
 
 *.egg-info/
 .pytest_cache/
+
+# 별도 git 리포지토리로 클론한 초음파 수신기 (medical-physical-ai/tracer)
+tracer/
+
+# imu_bench: 로컬 툴체인(venv/심링크), 빌드 산출물, 보드별 자력계 보정값
+imu_bench/.toolchain/
+imu_bench/.build/
+imu_bench/mag_cal.json

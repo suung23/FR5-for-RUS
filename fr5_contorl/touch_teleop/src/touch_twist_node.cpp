@@ -1,5 +1,6 @@
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/twist.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
 #include <std_msgs/msg/float32.hpp> // 그리퍼 제어용 메시지
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
@@ -42,6 +43,7 @@ public:
 
         // Button state tracking
         bool was_btn2_pressed = false;
+        bool was_deadman_engaged = false;
     };
 
     struct DeviceContext {
@@ -52,6 +54,7 @@ public:
         // Each device has its own publishers
         rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr twist_pub;
         rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr gripper_pub;
+        rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr stylus_pub;
 
         TouchState state;
         std::string prefix; // "touch/left" or "touch/right"
@@ -65,6 +68,9 @@ public:
         double filter_alpha;
         double linear_deadzone;   // m/s, 필터 후 body 속도에 적용
         double angular_deadzone;  // rad/s, 위와 같음
+        double lin_sign[3];       // 축별 부호 뒤집개 (프로파일 무관)
+        double ang_sign[3];
+        double tip_roll_deg;      // 침투축 둘레 회전 (프레임 정합의 남은 자유도)
     };
 
     TouchTeleopNode() : Node("touch_teleop_node") {
@@ -88,8 +94,31 @@ public:
         this->declare_parameter<double>("teleop.us_approach.linear_deadzone", 0.002);
         this->declare_parameter<double>("teleop.us_approach.angular_deadzone", 0.02);
 
-        this->declare_parameter<std::string>("left_dev_name", "touch_left");
-        this->declare_parameter<std::string>("right_dev_name", "Touch_Right");
+        // 자유공간 검증용. 프로브도 조직도 없는 단계에서 접촉용 스케일(us_approach)을
+        // 쓸 이유가 없다. 데드존은 손 잡음 특성이라 us_approach 와 같은 값을 쓴다.
+        this->declare_parameter<double>("teleop.freespace.linear_scale", 0.4);
+        this->declare_parameter<double>("teleop.freespace.angular_scale", 0.4);
+        this->declare_parameter<double>("teleop.freespace.filter_alpha", 0.3);
+        this->declare_parameter<double>("teleop.freespace.linear_deadzone", 0.002);
+        this->declare_parameter<double>("teleop.freespace.angular_deadzone", 0.05);
+
+        // RUS 는 오른팔 단일 제어다 (DESIGN_NOTES: 제어 대상 오른팔 192.168.58.3).
+        // 왼쪽은 비활성, 오른쪽은 기본 장치. 위 initDevice 의 규약 참조.
+        // 축별 부호 뒤집개. 매 주기 읽으므로 조작하면서 확정할 수 있다:
+        //   ros2 param set /touch_teleop_node teleop.angular_sign "[1.0, -1.0, 1.0]"
+        // 아래 매핑에 곱해지기만 한다. 기본 [1,1,1] 이면 매핑 그대로다.
+        // 침투축(프로브 +z) 둘레 회전. 스타일러스 촉 ≡ 프로브 침투축 을 고정해도
+        // 그 축 둘레 회전은 남는다 — 영상면이 플랜지에 대해 어떻게 놓이는지는
+        // 프로브가 장착되어야 정해지기 때문이다. 90 의 배수를 넣으면 축 정렬이
+        // 유지되고, 90° 는 pitch 와 roll 이 서로 바뀐 것으로 느껴진다.
+        // 매 주기 읽으므로 조작 중에 바꿔가며 확정할 수 있다.
+        this->declare_parameter<double>("teleop.tip_roll_deg", 90.0);
+
+        this->declare_parameter<std::vector<double>>("teleop.linear_sign", {1.0, 1.0, 1.0});
+        this->declare_parameter<std::vector<double>>("teleop.angular_sign", {1.0, 1.0, 1.0});
+
+        this->declare_parameter<std::string>("left_dev_name", "");
+        this->declare_parameter<std::string>("right_dev_name", "default");
 
         std::string left_name = this->get_parameter("left_dev_name").as_string();
         std::string right_name = this->get_parameter("right_dev_name").as_string();
@@ -113,7 +142,7 @@ public:
             
             const Profile p = loadProfile();
             RCLCPP_INFO(this->get_logger(), "Touch Teleop Ready.");
-            RCLCPP_INFO(this->get_logger(), " - Button 1 (Gray): Hold to PAUSE (Clutch)");
+            RCLCPP_INFO(this->get_logger(), " - Button 1 (Gray): 누르고 있는 동안에만 동작 (데드맨). 놓으면 정지");
             RCLCPP_INFO(this->get_logger(), " - Button 2 (White): Hold to GRIP (%.0f), Release to OPEN (%.0f)",
                         GRIPPER_CLOSED, GRIPPER_OPEN);
             RCLCPP_INFO(this->get_logger(), "Active Devices: %zu", devices_.size());
@@ -121,6 +150,8 @@ public:
                 "Profile '%s': lin x%.3f (deadzone %.4f m/s), ang x%.3f (deadzone %.4f rad/s), alpha %.2f",
                 this->get_parameter("teleop.profile").as_string().c_str(),
                 p.linear_scale, p.linear_deadzone, p.angular_scale, p.angular_deadzone, p.filter_alpha);
+            RCLCPP_INFO(this->get_logger(),
+                "프레임 정합: 촉(-Z) ≡ 침투(+z), 침투축 둘레 %.0f°", p.tip_roll_deg);
     }
 
     ~TouchTeleopNode() {
@@ -141,12 +172,34 @@ private:
     HDSchedulerHandle hd_scheduler_handle_;
     rclcpp::TimerBase::SharedPtr timer_;
 
+    // dev_name 규약:
+    //   ""        → 이 쪽 장치를 아예 열지 않는다 (RUS 는 오른팔 단일)
+    //   "default" → HD_DEFAULT_DEVICE(NULL) 로 기본 장치를 연다
+    //   그 외      → Touch_Setup 으로 등록된 이름으로 연다
+    //
+    // USB Touch X 는 HID 로 잡히고, HID 장치는 Touch_Setup 을 거치지 않으므로
+    // 등록된 이름이 존재하지 않는다. 이름을 넘기면 무조건 실패한다. "default" 가
+    // 이 경우의 정답이다. 이더넷 장치는 이름 등록이 있으므로 기존 경로도 남긴다.
     void initDevice(const std::string& dev_name, const std::string& side) {
-        HDErrorInfo error;
-        HHD hHD = hdInitDevice(dev_name.c_str());
-        
-        if (hHD == HD_INVALID_HANDLE || HD_DEVICE_ERROR(error = hdGetError())) {
-            RCLCPP_WARN(this->get_logger(), "Failed to init device '%s' (%s): %s", dev_name.c_str(), side.c_str(), hdGetErrorString(error.errorCode));
+        if (dev_name.empty()) {
+            RCLCPP_INFO(this->get_logger(), "%s 장치는 비활성 (이름이 비어 있음)", side.c_str());
+            return;
+        }
+
+        const bool use_default = (dev_name == "default");
+        const char *hd_name = use_default ? HD_DEFAULT_DEVICE : dev_name.c_str();
+        const char *label = use_default ? "<default>" : dev_name.c_str();
+
+        HHD hHD = hdInitDevice(hd_name);
+
+        // hdGetError() 를 먼저 부른다. 예전 코드는
+        //   hHD == HD_INVALID_HANDLE || HD_DEVICE_ERROR(error = hdGetError())
+        // 였는데, 핸들이 무효면 단축평가로 error 가 대입되지 않은 채 출력되어
+        // 실제 원인 대신 "No error" 가 찍혔다.
+        HDErrorInfo error = hdGetError();
+        if (hHD == HD_INVALID_HANDLE || HD_DEVICE_ERROR(error)) {
+            RCLCPP_WARN(this->get_logger(), "Failed to init device '%s' (%s): %s",
+                        label, side.c_str(), hdGetErrorString(error.errorCode));
             return;
         }
 
@@ -161,12 +214,14 @@ private:
 
         ctx->twist_pub = this->create_publisher<geometry_msgs::msg::Twist>(twist_topic, 10);
         ctx->gripper_pub = this->create_publisher<std_msgs::msg::Float32>(gripper_topic, 10);
+        ctx->stylus_pub = this->create_publisher<geometry_msgs::msg::PoseStamped>(
+            "/touch/" + side + "/stylus_pose", 10);
 
         // Init state time
         ctx->state.last_time = this->now();
 
         devices_.push_back(ctx);
-        RCLCPP_INFO(this->get_logger(), "Initialized %s on topics: %s, %s", dev_name.c_str(), twist_topic.c_str(), gripper_topic.c_str());
+        RCLCPP_INFO(this->get_logger(), "Initialized %s on topics: %s, %s", label, twist_topic.c_str(), gripper_topic.c_str());
     }
 
     // --- Haptic Loop (1kHz) ---
@@ -204,7 +259,7 @@ private:
     Profile loadProfile() {
         const std::string name = this->get_parameter("teleop.profile").as_string();
         std::string key;
-        if (name == "laparoscopic" || name == "us_approach") {
+        if (name == "laparoscopic" || name == "us_approach" || name == "freespace") {
             key = name;
         } else {
             RCLCPP_ERROR(this->get_logger(),
@@ -213,13 +268,23 @@ private:
             key = "us_approach";
         }
         const std::string p = "teleop." + key + ".";
-        return Profile{
+        Profile out{
             this->get_parameter(p + "linear_scale").as_double(),
             this->get_parameter(p + "angular_scale").as_double(),
             this->get_parameter(p + "filter_alpha").as_double(),
             this->get_parameter(p + "linear_deadzone").as_double(),
             this->get_parameter(p + "angular_deadzone").as_double(),
+            {1.0, 1.0, 1.0},
+            {1.0, 1.0, 1.0},
+            this->get_parameter("teleop.tip_roll_deg").as_double(),
         };
+        const auto ls = this->get_parameter("teleop.linear_sign").as_double_array();
+        const auto as = this->get_parameter("teleop.angular_sign").as_double_array();
+        for (size_t i = 0; i < 3; ++i) {
+            if (i < ls.size()) out.lin_sign[i] = ls[i];
+            if (i < as.size()) out.ang_sign[i] = as[i];
+        }
+        return out;
     }
 
     // --- ROS Loop (50Hz) ---
@@ -270,18 +335,33 @@ private:
         }
 
         // =========================================================
-        // 2. CLUTCH LOGIC (Button 1)
+        // 2. 데드맨 (Button 1) — 누르고 있는 동안에만 teleop
         // =========================================================
+        // 이전에는 반대였다: 누르면 멈추는 클러치. 그러면 아무것도 안 누른 상태가
+        // "계속 움직임"이라, 손을 놓거나 스타일러스를 떨어뜨리면 로봇이 계속 간다.
+        // 데드맨으로 뒤집으면 놓는 순간 정지한다.
+        //
+        // 정지 시에도 0 twist 를 계속 발행한다. 발행을 멈추면 us_diff_ik_node 의
+        // 100 ms twist 워치독이 걸려 프로브 -z 후퇴가 시작된다 (§12.2). 여기서
+        // 원하는 것은 후퇴가 아니라 정지다.
         bool is_btn1_pressed = (s.buttons & HD_DEVICE_BUTTON_1) != 0;
 
-        if (is_btn1_pressed) {
-            ctx->twist_pub->publish(geometry_msgs::msg::Twist()); // Stop robot
+        if (!is_btn1_pressed) {
+            ctx->twist_pub->publish(geometry_msgs::msg::Twist());
             s.filtered_lin_vel.setZero();
             s.filtered_ang_vel.setZero();
-            s.prev_position = s.position; // Reset diff
+            s.prev_position = s.position;   // 누르는 순간 튀지 않도록 차분 기준 갱신
             s.prev_rotation = s.rotation;
             s.last_time = now;
+            if (s.was_deadman_engaged) {
+                RCLCPP_INFO(this->get_logger(), "[%s] 데드맨 해제 — 정지", ctx->prefix.c_str());
+                s.was_deadman_engaged = false;
+            }
             return;
+        }
+        if (!s.was_deadman_engaged) {
+            RCLCPP_INFO(this->get_logger(), "[%s] 데드맨 engage — teleop 활성", ctx->prefix.c_str());
+            s.was_deadman_engaged = true;
         }
 
         // =========================================================
@@ -311,17 +391,112 @@ private:
         if (s.filtered_lin_vel.norm() < profile.linear_deadzone) s.filtered_lin_vel.setZero();
         if (s.filtered_ang_vel.norm() < profile.angular_deadzone) s.filtered_ang_vel.setZero();
 
-        // Mapping & Publish
+        // ---- 축 매핑 (초음파 프로브 기준, 2026-08-18 실측으로 확정) ----
+        //
+        // 이전 값은 복강경 툴 기준이었고 "Signs fixed as per original code" 라는
+        // 주석만 달린 채 근거가 남아 있지 않았다. 프로브로 바꾸면서 다시 측정했다.
+        //
+        // 측정 (구 매핑 기준, 손 동작 → 발행된 축):
+        //     오른쪽으로 밀기 → -lin y      (2위 대비 3.0배)
+        //     앞쪽으로  밀기 → +lin z      (1.4배 — 분리 약함)
+        //     아래로   누르기 → +lin x      (6.5배)
+        //   세 축을 행렬로 놓으면 행렬식이 +1 이다. 즉 하나의 강체 회전으로 설명되며,
+        //   2번의 분리비가 낮아도 나머지 두 축과 기하학적으로 모순되지 않는다.
+        //
+        // 목표 (DESIGN_NOTES §4.1 프로브 프레임):
+        //     +z = 조직 침투(법선), +x = lateral(영상면 내), +y = elevational
+        //   → 아래로 누르기 = +z,  오른쪽 = +x,  앞쪽 = -y
+        //
+        //   앞쪽이 -y 인 것은 임의 선택이 아니다. 오른쪽=+x, 아래=+z 를 고정하면
+        //   남은 부호는 행렬식이 +1 이어야 한다는 조건으로 결정된다. +y 로 두면
+        //   행렬식이 -1 이 되어 회전이 아니라 거울상이 된다.
+        //
+        // 구 → 신 변환을 풀면 x 는 그대로, y 와 z 는 부호 반전이다
+        // (장치 x 축 기준 180° 회전 하나).
+        //
+        // 회전축에도 **같은** 회전을 적용한다. 병진과 회전에 다른 변환을 쓰면
+        // 그 twist 는 강체 운동이 아니게 된다. 실측 회전 부호를 그대로 쓰지 않은
+        // 이유는 측정 안내가 "기울이세요/비트세요" 라는 왕복 동작이어서 피크 부호가
+        // 어느 방향이 더 빨랐는지에 좌우되기 때문이다. 축 대응(부호 무시)은
+        // pitch→rx, roll→ry, yaw→rz 로 실측과 일치하며, yaw→rz 는 §5 에서
+        // policy 가 담당하는 영상면 회전축과 맞는다.
+        //
+        // ⏳ 회전 3축의 부호는 방향을 지정한 재측정으로 확인해야 한다.
         geometry_msgs::msg::Twist twist;
-        
-        // Axis Mapping (Signs fixed as per original code: +X/+Y/+Z -> +Z/+X/+Y from OH Frame)
-        twist.linear.x =  -(s.filtered_lin_vel.z() * l_scale);
-        twist.linear.y =  -( s.filtered_lin_vel.x() * l_scale); 
-        twist.linear.z =  (s.filtered_lin_vel.y() * l_scale);
 
-        twist.angular.x =  -(s.filtered_ang_vel.z() * a_scale); 
-        twist.angular.y =  -(s.filtered_ang_vel.x() * a_scale);
-        twist.angular.z =  s.filtered_ang_vel.y() * a_scale;
+        // ---- 스타일러스 ≡ 프로브 (규칙 기반, 2026-08-18) ----
+        //
+        // 이전에는 손동작 속도를 재서 축을 맞췄다. 그 방식은 손목 결합과 파지 각도에
+        // 오염된다 — 5 회 반복 측정에서도 "앞쪽"이 "오른쪽"·"아래"와 각각 71° 로 나와
+        // 측정 행렬의 행렬식이 -0.885 였다. 회전을 정의할 수 없는 데이터다.
+        //
+        // 대신 두 프레임의 **문서화된 규약**으로 정한다.
+        //
+        // OpenHaptics 장치/스타일러스 프레임 (OpenHaptics_ProgGuide):
+        //   +X 오른쪽, +Y 위, +Z 화면 밖 = 조작자 쪽
+        //   "the pencil should be designed to lie along the Z-axis with the
+        //    pencil tip at the origin"  → 촉이 가리키는 방향은 -Z
+        //
+        // 프로브 프레임 (DESIGN_NOTES §4.1):
+        //   +z 조직 침투 방향(= 프로브가 가리키는 방향), +x lateral, +y elevational
+        //
+        // 동일시:
+        //   스타일러스 -Z (촉 방향) ≡ 프로브 +z (침투 방향)
+        //   스타일러스 +X (오른쪽)  ≡ 프로브 +x (lateral)
+        //   → 남은 축은 det=+1 조건이 결정한다:  A = diag(+1, -1, -1)
+        //
+        // 병진과 회전에 **같은** A 를 쓴다. 다르게 쓰면 twist 가 강체 운동이 아니게 된다.
+        // 속도는 이미 스타일러스 body 프레임으로 투영되어 있으므로(위 참조),
+        // A 를 곱하면 그대로 프로브 프레임 twist 가 된다.
+        //
+        // ⏳ 침투축 대응은 규약으로 확정됐지만, **그 축을 중심으로 한 회전(roll)** 은
+        //    아직 자유도가 남아 있다. 프로브가 실제로 장착되어 영상면이 플랜지에 대해
+        //    어떻게 놓이는지 확인되면 확정된다. 그때까지 +X ≡ +x 는 잠정 규약이다.
+        //   A0 = diag(+1,-1,-1)                      촉 방향 ≡ 침투 방향
+        //   A  = Rz(tip_roll_deg) * A0                침투축 둘레 남은 자유도
+        //
+        // 회전으로 구현하는 이유: "pitch 와 roll 을 맞바꾼다" 를 단순 축 교환으로
+        // 하면 행렬식이 -1 이 되어 회전이 아니라 반사가 된다. Rz 를 곱하면
+        // det=+1 이 구조적으로 보장된다.
+        //
+        // 병진과 회전에 같은 A 를 쓴다. 회전만 바꾸면 강체 운동이 아니게 된다.
+        const double th = profile.tip_roll_deg * M_PI / 180.0;
+        const double c = std::cos(th), sn = std::sin(th);
+        Eigen::Matrix3d A0 = Eigen::Vector3d(1.0, -1.0, -1.0).asDiagonal();
+        Eigen::Matrix3d Rz;
+        Rz <<  c, -sn, 0.0,
+              sn,   c, 0.0,
+             0.0, 0.0, 1.0;
+        const Eigen::Matrix3d A = Rz * A0;
+
+        const Eigen::Vector3d v = A * s.filtered_lin_vel * l_scale;
+        const Eigen::Vector3d w = A * s.filtered_ang_vel * a_scale;
+
+        twist.linear.x  = profile.lin_sign[0] * v.x();
+        twist.linear.y  = profile.lin_sign[1] * v.y();
+        twist.linear.z  = profile.lin_sign[2] * v.z();
+
+        twist.angular.x = profile.ang_sign[0] * w.x();
+        twist.angular.y = profile.ang_sign[1] * w.y();
+        twist.angular.z = profile.ang_sign[2] * w.z();
+
+        // 스타일러스 자세를 그대로 발행한다. 위 규약이 실제 장치와 맞는지 확인하려면
+        // 속도가 아니라 **자세**를 봐야 한다 — 자세는 장치가 직접 주는 값이라
+        // 손목 결합에 오염되지 않는다.
+        {
+            geometry_msgs::msg::PoseStamped ps;
+            ps.header.stamp = now;
+            ps.header.frame_id = "touch_device";
+            ps.pose.position.x = s.position.x();
+            ps.pose.position.y = s.position.y();
+            ps.pose.position.z = s.position.z();
+            const Eigen::Quaterniond quat(s.rotation);
+            ps.pose.orientation.w = quat.w();
+            ps.pose.orientation.x = quat.x();
+            ps.pose.orientation.y = quat.y();
+            ps.pose.orientation.z = quat.z();
+            ctx->stylus_pub->publish(ps);
+        }
 
         ctx->twist_pub->publish(twist);
 
@@ -333,7 +508,25 @@ private:
 
 int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
-    auto node = std::make_shared<TouchTeleopNode>();
+
+    // 장치를 못 여는 것은 흔한 상황이다 — TouchCheckup 이 떠 있거나, 이 노드가
+    // 이미 하나 돌고 있으면 점유 실패한다. 예외를 그대로 두면 terminate 로
+    // SIGABRT + 코어덤프가 나고 데스크톱에 "system error" 팝업이 뜬다.
+    // 진단에 도움이 안 되므로 메시지를 내고 조용히 실패한다.
+    std::shared_ptr<TouchTeleopNode> node;
+    try {
+        node = std::make_shared<TouchTeleopNode>();
+    } catch (const std::exception &e) {
+        RCLCPP_ERROR(rclcpp::get_logger("touch_twist"),
+                     "기동 실패: %s\n"
+                     "  · 다른 touch_twist 나 TouchCheckup 이 장치를 잡고 있는지 확인\n"
+                     "  · lsusb 에 2988:0304 가 보이는지 확인\n"
+                     "  · Touch_HeadlessSetup name=\"Default Device\" dev=HID 로 설정 재생성",
+                     e.what());
+        rclcpp::shutdown();
+        return 1;
+    }
+
     rclcpp::spin(node);
     rclcpp::shutdown();
     return 0;

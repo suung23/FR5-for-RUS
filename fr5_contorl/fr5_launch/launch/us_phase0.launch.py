@@ -1,71 +1,124 @@
 """Phase 0 골격: 서보 + 미분 IK (DESIGN_NOTES §15).
 
-    ros2 launch fr5_launch us_phase0.launch.py                # mock, 하드웨어 불필요
-    ros2 launch fr5_launch us_phase0.launch.py backend:=fairino
+    ros2 launch fr5_launch us_phase0.launch.py                       # mock, 하드웨어 불필요
+    ros2 launch fr5_launch us_phase0.launch.py backend:=fairino      # 실로봇
+    ros2 launch fr5_launch us_phase0.launch.py teleop:=true freespace:=true
 
-두 노드 모두 fr5_control/config/probe.yaml 을 읽는다. 값은 거기서 고친다.
-``backend`` 인자만 명령줄에서 덮어쓰는데, 실로봇과 mock 을 오가는 일이 잦고
-그때마다 파일을 고치면 실수로 커밋될 수 있기 때문이다.
+세 노드 모두 fr5_control/config/probe.yaml 을 읽는다. 값은 거기서 고친다.
+명령줄 인자는 셋뿐이며, 모두 "실로봇과 mock 을 오가는" 류의 잦은 전환용이다.
+파일을 고치면 실수로 커밋되기 때문이다.
 """
 import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
+# freespace:=true 일 때만 덮어쓰는 값.
+#
+# probe.yaml 의 safety 값은 **접촉 중** 기준이다 (§12.3). 프로브도 조직도 없는
+# 자유공간 검증 단계에서 10 mm/s 상한을 쓰면 손을 크게 움직여도 로봇이 거의
+# 안 움직이는 것처럼 느껴진다. 그렇다고 probe.yaml 을 고치면 접촉 단계로 넘어갈 때
+# 되돌리는 것을 잊는다 — 그래서 launch 인자로만 존재한다.
+#
+# teleop 프로파일도 같이 바꾼다. 프로파일만 바꾸면 클램프에 걸려 체감이 안 변하고,
+# 클램프만 올리면 스케일이 낮아 여전히 느리다. 둘은 함께 움직여야 한다.
+FREESPACE_OVERRIDES = {
+    "teleop.profile": "freespace",
+    # 스케일만 올리면 이 클램프에 걸려 체감이 안 바뀐다. 함께 올린다.
+    # max_joint_vel 1.5 는 DESIGN_NOTES §12.3 이 "자유공간 기준"으로 언급한 값이다.
+    #
+    # 2026-08-19: 스케일과 함께 0.6 / 3.0 / 3.0 까지 올렸다가 되돌렸다. 실제로
+    # 조작해 보니 너무 빨랐다. 상향이 필요해 보였던 것은 us_diff_ik 가 죽어 있어
+    # 로봇이 안 움직인 탓이었고, 속도 한계 탓이 아니었다.
+    #
+    # 실질적 천장은 관절 상한이다 — 카테시안 상한을 올려도 IK 출력은 서보 단에서
+    # 다시 잘린다. 특이점 근처에서 DLS 가 큰 관절속도를 내므로 이 값이 곧
+    # 최악의 경우 속도이며, 그래서 필요 이상으로 올려두지 않는다.
+    "safety.max_linear_vel_m_s": 0.15,      # 10 → 150 mm/s
+    "safety.max_angular_vel_rad_s": 1.5,    # 0.2 → 1.5 rad/s
+    "safety.max_joint_vel_rad_s": 1.5,      # 0.5 → 1.5 rad/s
+}
 
-def generate_launch_description():
+
+def _launch_setup(context, *args, **kwargs):
     config = os.path.join(
         get_package_share_directory("fr5_control"), "config", "probe.yaml"
     )
+    backend = LaunchConfiguration("backend").perform(context)
+    freespace = LaunchConfiguration("freespace").perform(context).lower() in ("true", "1")
 
-    backend_arg = DeclareLaunchArgument(
-        "backend",
-        default_value="mock",
-        description='로봇 백엔드: "mock" (하드웨어 없음) 또는 "fairino" (실로봇)',
-    )
-    teleop_arg = DeclareLaunchArgument(
-        "teleop",
-        default_value="false",
-        description="Touch 원격조작 노드를 함께 띄운다 (햅틱 장치 필요)",
-    )
-    backend = LaunchConfiguration("backend")
+    # 노드마다 **사본**을 넘긴다. 같은 dict 객체를 세 노드에 공유하면 launch_ros 가
+    # 정규화하면서 그것을 소비해, 리스트에서 먼저 생성되는 노드에만 적용되고
+    # 나머지는 조용히 원래값으로 돈다. 실제로 us_servo 만 먹고 us_diff_ik 는
+    # 접촉용 상한(0.010 m/s)을 그대로 쓰고 있었다 — 눈에 띄지 않는 종류의 버그다.
+    def _params(*extra):
+        out = [config]
+        out.extend(e for e in extra if e)
+        if freespace:
+            out.append(dict(FREESPACE_OVERRIDES))
+        return out
 
-    return LaunchDescription([
-        backend_arg,
-        teleop_arg,
+    servo_params = _params({"robot.backend": backend})
+    ik_params = _params()
+    teleop_params = _params()
 
+    return [
         Node(
             package="fr5_control",
             executable="us_servo",
             name="us_servo_node",
             output="screen",
-            parameters=[config, {"robot.backend": backend}],
+            parameters=servo_params,
             emulate_tty=True,
         ),
-
         Node(
             package="fr5_ik",
             executable="us_diff_ik",
             name="us_diff_ik_node",
             output="screen",
-            parameters=[config],
+            parameters=ik_params,
             emulate_tty=True,
         ),
-
-        # Touch 원격조작. probe.yaml 의 teleop 프로파일을 읽는다.
-        # 조작 중에도 프로파일을 바꿀 수 있다:
-        #   ros2 param set /touch_teleop_node teleop.profile laparoscopic
+        # Touch 원격조작.
+        #   버튼 1 (회색): 누르고 있는 동안에만 동작한다 (데드맨). 놓으면 정지.
+        #   프로파일은 조작 중에도 바꿀 수 있다:
+        #     ros2 param set /touch_teleop_node teleop.profile us_approach
         Node(
             package="touch_teleop",
             executable="touch_twist",
             name="touch_teleop_node",
             output="screen",
-            parameters=[config],
+            parameters=teleop_params,
             condition=IfCondition(LaunchConfiguration("teleop")),
             emulate_tty=True,
         ),
+    ]
+
+
+def generate_launch_description():
+    return LaunchDescription([
+        DeclareLaunchArgument(
+            "backend",
+            default_value="mock",
+            description='로봇 백엔드: "mock" (하드웨어 없음) 또는 "fairino" (실로봇)',
+        ),
+        DeclareLaunchArgument(
+            "teleop",
+            default_value="false",
+            description="Touch 원격조작 노드를 함께 띄운다 (햅틱 장치 필요)",
+        ),
+        DeclareLaunchArgument(
+            "freespace",
+            default_value="false",
+            description=(
+                "자유공간 검증 모드. teleop 프로파일을 freespace 로 바꾸고 "
+                "속도 상한을 올린다. 프로브가 붙으면 절대 쓰지 말 것 — "
+                "probe.yaml 의 접촉용 한계(§12.3)를 덮어쓴다"
+            ),
+        ),
+        OpaqueFunction(function=_launch_setup),
     ])

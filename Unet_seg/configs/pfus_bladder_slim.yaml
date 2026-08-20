@@ -1,0 +1,61 @@
+# Slim U-Net on the PFUS dataset -- same data, same splits, same resolution and
+# same schedule as configs/pfus_bladder.yaml, so the two runs are a controlled
+# comparison of the architectures rather than of the training recipe.
+
+defaults: slim_unet_paper.yaml
+
+experiment:
+  name: pfus_bladder_slim
+  output_dir: runs/pfus_bladder_slim
+  seed: 42
+
+data:
+  manifest: /home/rosotauser/datasets/pfus/manifest.csv
+  root: null
+  image_size: [256, 256]
+  intensity_normalization: per_image
+
+model:
+  preset: production             # identical architecture, 256 x 256 working resolution
+  input_size: [256, 256]
+
+split:
+  strategy: manifest
+
+augmentation:
+  enabled: true
+  horizontal_flip: 0.0
+  vertical_flip: 0.0
+  rotation_degrees: 7.0
+  scale_range: [0.9, 1.1]
+  translate_ratio: 0.05
+  brightness: 0.15
+  contrast: 0.15
+  gamma_range: [0.8, 1.25]
+  gaussian_noise_std: 0.01
+  speckle_noise_std: 0.02
+
+train:
+  epochs: 40
+  batch_size: 16
+  num_workers: 8
+  device: auto
+  amp: true
+  checkpoint_dir: checkpoints/pfus_bladder_slim
+  optimizer:
+    name: adamw
+    lr: 1.0e-3
+    weight_decay: 1.0e-4
+  scheduler:
+    name: cosine
+    eta_min: 1.0e-6
+
+postprocess:
+  threshold: 0.5
+  largest_component: true
+  fill_holes: true
+
+evaluation:
+  split: test
+  compute_hd95: true
+  pixel_spacing: 1.0

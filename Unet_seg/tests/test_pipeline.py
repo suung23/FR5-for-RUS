@@ -764,3 +764,71 @@ def test_end_to_end_cli_workflow(tmp_path) -> None:
     assert "warped_temporal_iou" in payload["temporal"]
     assert "stages" in payload["latency"]
     assert "Temporal stability" in result.stdout
+
+
+def test_a_skipped_step_still_updates_the_grad_scaler(synthetic_dataset, tmp_path) -> None:
+    """A non-finite gradient must not leave the AMP scaler in its unscaled state.
+
+    ``unscale_()`` may be called at most once per optimizer between two
+    ``update()`` calls. Skipping the update when the gradient norm is non-finite
+    made the *next* iteration's ``unscale_()`` raise, which under AMP killed
+    training mid-run as soon as one fp16 gradient overflowed.
+    """
+    manifest_path, manifest = synthetic_dataset
+    output_dir = tmp_path / "scaler"
+    config = make_training_config(manifest_path, output_dir, temporal=False)
+    config.set("train.grad_clip", 1.0)
+
+    trainer = Trainer(
+        config=config,
+        model=build_model(config.section("model")),
+        train_manifest=manifest.filter(split="train"),
+        val_manifest=None,
+        output_dir=output_dir,
+    )
+
+    calls: list[str] = []
+    scaler = trainer.scaler
+
+    class SpyScaler:
+        """Records the scaler protocol and enforces the unscale_/update contract."""
+
+        def scale(self, loss):
+            return scaler.scale(loss)
+
+        def unscale_(self, optimizer):
+            if calls and calls[-1] == "unscale_":
+                raise RuntimeError(
+                    "unscale_() has already been called on this optimizer since "
+                    "the last update()."
+                )
+            calls.append("unscale_")
+            return scaler.unscale_(optimizer)
+
+        def step(self, optimizer):
+            calls.append("step")
+            return scaler.step(optimizer)
+
+        def update(self):
+            calls.append("update")
+            return scaler.update()
+
+    trainer.scaler = SpyScaler()
+    # Every step overflows, so every step takes the skip path.
+    trainer_module = sys.modules[Trainer.__module__]
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(
+        trainer_module.torch.nn.utils,
+        "clip_grad_norm_",
+        lambda *args, **kwargs: torch.tensor(float("inf")),
+    )
+    try:
+        with pytest.raises(RuntimeError, match="No training batches"):
+            trainer.train_epoch()
+    finally:
+        monkey.undo()
+
+    assert calls, "the scaler was never exercised"
+    assert "step" not in calls, "an overflowing step must not update the weights"
+    # unscale_ and update strictly alternate: no unscale_ is left dangling.
+    assert calls == ["unscale_", "update"] * (len(calls) // 2)

@@ -444,6 +444,12 @@ class Trainer:
                         self.state.global_step,
                     )
                     self.optimizer.zero_grad(set_to_none=True)
+                    # The gradients of this step have already been unscaled, and
+                    # under AMP a non-finite gradient is precisely the signal the
+                    # scaler exists to react to. Skipping the update() would leave
+                    # the scaler in its unscaled state, so the next iteration's
+                    # unscale_() would raise instead of training.
+                    self.scaler.update()
                     continue
             self.scaler.step(self.optimizer)
             self.scaler.update()

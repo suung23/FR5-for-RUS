@@ -118,6 +118,15 @@ class UsDiffIkNode(Node):
             f"미분 IK {self.rate_hz:.0f} Hz · DLS λ={self.solver.damping} · "
             f"twist 워치독 {self.twist_timeout * 1000:.0f} ms → 프로브 −z 후퇴"
         )
+        # 클램프를 기동 로그에 찍는다. 이 값이 안 보이면 freespace 인자를 빠뜨렸는지
+        # 조작감만으로는 구분할 수 없다 — teleop 스케일을 아무리 올려도 여기서 잘리므로
+        # "스케일이 안 먹는다" 로만 나타난다. 실제로 그 혼동이 있었다 (2026-08-19).
+        self.get_logger().info(
+            f"속도 클램프: 병진 {self.max_linear * 1000:.0f} mm/s · "
+            f"회전 {self.max_angular:.2f} rad/s"
+            + ("   ← 접촉용 한계다. 자유공간이면 freespace:=true 를 빠뜨린 것이다"
+               if self.max_linear <= 0.02 else "")
+        )
 
     # -- 설정 ------------------------------------------------------------
 

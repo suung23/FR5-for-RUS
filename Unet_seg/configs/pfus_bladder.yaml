@@ -1,0 +1,78 @@
+# Standard U-Net on the PFUS pelvic-floor ultrasound dataset (real clinical data).
+#
+# Dataset: 110 patients, 14,852 annotated midsagittal frames, eight structures
+# per frame (Solis-Martin et al., Universidad de Sevilla, CC-BY-4.0). Prepared
+# into the binary bladder task by:
+#
+#   python scripts/prepare_pfus.py --source <dataset>/data \
+#       --output-dir ~/datasets/pfus --labels Bladder
+#
+# The manifest already carries patient-level splits written by that script, so
+# `split.strategy: manifest` is used here: re-splitting at train time would let
+# a different seed silently move patients between train and test.
+#
+# Frames are 4:3-ish (~1020 x 688) and vary by a few pixels between patients;
+# the dataset resizes each one to a square, exactly as the synthetic pipeline
+# does. Vertical flip stays off: the pelvic-floor midsagittal view has a fixed
+# up/down orientation (pubis top-left, probe at the top), and flipping it would
+# teach anatomy that never occurs.
+
+defaults: standard_unet_baseline.yaml
+
+experiment:
+  name: pfus_bladder
+  output_dir: runs/pfus_bladder
+  seed: 42
+
+data:
+  manifest: /home/rosotauser/datasets/pfus/manifest.csv
+  root: null                     # paths in the manifest are relative to its own directory
+  image_size: [256, 256]
+  # Per-frame standardisation: gain and TGC differ between patients and
+  # machines in this dataset, and per-image statistics remove that offset
+  # without needing a dataset-wide mean that would not transfer to the FR5 rig.
+  intensity_normalization: per_image
+
+model:
+  input_size: [256, 256]
+
+split:
+  strategy: manifest             # splits come from prepare_pfus.py, not from a re-roll
+
+augmentation:
+  enabled: true
+  horizontal_flip: 0.0           # see header: the view has a fixed left/right anatomy
+  vertical_flip: 0.0
+  rotation_degrees: 7.0
+  scale_range: [0.9, 1.1]
+  translate_ratio: 0.05
+  brightness: 0.15
+  contrast: 0.15
+  gamma_range: [0.8, 1.25]
+  gaussian_noise_std: 0.01
+  speckle_noise_std: 0.02
+
+train:
+  epochs: 40
+  batch_size: 16
+  num_workers: 8
+  device: auto
+  amp: true
+  checkpoint_dir: checkpoints/pfus_bladder
+  optimizer:
+    name: adamw
+    lr: 1.0e-3
+    weight_decay: 1.0e-4
+  scheduler:
+    name: cosine
+    eta_min: 1.0e-6
+
+postprocess:
+  threshold: 0.5
+  largest_component: true        # one bladder per frame
+  fill_holes: true
+
+evaluation:
+  split: test
+  compute_hd95: true
+  pixel_spacing: 1.0             # px: the dataset publishes no mm/px scale

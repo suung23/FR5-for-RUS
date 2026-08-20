@@ -13,8 +13,10 @@
   <depend>geometry_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>eigen</depend>
-  <depend>fairino_hardware</depend>
-  <depend>fairino_msgs</depend>
+  <!-- fairino_hardware / fairino_msgs 는 주석 처리된 servo_control_node 만 쓰던 것이라
+       제거했다. 리포에 없는 패키지여서 rosdep install 이 여기서 멈춘다.
+       OpenHaptics(HD/HDU)는 apt 로 안 오므로 rosdep 키가 없다 — CMakeLists 에서
+       직접 -lHD -lHDU 로 링크한다. /usr/lib 에 설치되어 있어야 한다. -->
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

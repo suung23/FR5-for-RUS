@@ -1,0 +1,6 @@
+{
+  "images": "/home/rosotauser/FR5-for-RUS/Unet_seg/experiments/pfus_label_audit/annotation_audit/images",
+  "dark_percentile": 22.0,
+  "reference": "autolabel",
+  "note": "algorithmic proposals; human-arbitrated in review, not expert annotation"
+}

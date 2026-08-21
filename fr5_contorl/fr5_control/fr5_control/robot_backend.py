@@ -135,6 +135,14 @@ class RobotBackend(abc.ABC):
     def move_j(self, joint_pos_deg, vel: float) -> int:
         """블로킹 관절 이동. 서보 모드 밖에서만 쓴다."""
 
+    def reset_error(self) -> int:
+        """컨트롤러 폴트를 지운다. 0 이 성공.
+
+        추상이 아닌 이유: 폴트라는 개념이 없는 백엔드(mock)가 있고, 그쪽에서는
+        아무것도 하지 않는 것이 옳은 구현이기 때문이다.
+        """
+        return 0
+
     def close(self) -> None:
         """자원을 놓는다. 여러 번 불러도 안전해야 한다."""
 
@@ -208,6 +216,15 @@ class FairinoBackend(RobotBackend):
         return self._robot.MoveJ(
             joint_pos=list(joint_pos_deg), tool=0, user=0, vel=vel, blendT=-1.0
         )
+
+    def reset_error(self) -> int:
+        """``ResetAllError``. 폴트가 걸린 뒤에는 이것 없이는 어떤 모션도 받지 않는다.
+
+        ServoJ 가 29(ServoJ joint overrun)로 한 번 거부되면 컨트롤러는 폴트에 들어가고,
+        이후 모든 인터페이스 호출이 14(Interface execution failed)로 떨어진다. 종료 시
+        홈 복귀 ``MoveJ`` 까지 같은 이유로 실패하므로, 복귀 전에 여기를 먼저 통과해야 한다.
+        """
+        return self._robot.ResetAllError()
 
     def close(self) -> None:
         if self._robot is None:

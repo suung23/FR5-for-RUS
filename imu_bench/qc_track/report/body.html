@@ -1,0 +1,734 @@
+<title>프로브 IMU 추적 정확도</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&display=swap">
+<style>
+  :root {
+    --ground:   #f4f6f8;
+    --surface:  #ffffff;
+    --sunken:   #eef1f5;
+    --ink:      #111820;
+    --ink-soft: #3d4855;
+    --muted:    #667586;
+    --rule:     #dbe1e8;
+    --rule-soft:#e8ecf1;
+    --accent:   #1b5e8a;
+    --accent-w: #e3eef6;
+    --good:     #2c6e49;
+    --good-w:   #e4f1ea;
+    --bad:      #ac2a20;
+    --bad-w:    #f8e6e4;
+    --warn:     #92600d;
+    --warn-w:   #f7eeda;
+    --gt:       #1f77b4;
+    --sensor:   #d1620a;
+
+    --measure: 40rem;
+    --wide:    62rem;
+    --s1: 0.35rem; --s2: 0.7rem; --s3: 1.1rem; --s4: 1.8rem;
+    --s5: 2.8rem; --s6: 4.2rem;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:   #0d1117;
+      --surface:  #151b23;
+      --sunken:   #1b222b;
+      --ink:      #e4e9ef;
+      --ink-soft: #c0c9d4;
+      --muted:    #8c98a6;
+      --rule:     #29323d;
+      --rule-soft:#212933;
+      --accent:   #63aad9;
+      --accent-w: #16293a;
+      --good:     #6ec293;
+      --good-w:   #162a20;
+      --bad:      #ef8177;
+      --bad-w:    #2e1a18;
+      --warn:     #d9a85a;
+      --warn-w:   #2c2415;
+      --gt:       #5fa8d8;
+      --sensor:   #e8944a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:   #0d1117;
+    --surface:  #151b23;
+    --sunken:   #1b222b;
+    --ink:      #e4e9ef;
+    --ink-soft: #c0c9d4;
+    --muted:    #8c98a6;
+    --rule:     #29323d;
+    --rule-soft:#212933;
+    --accent:   #63aad9;
+    --accent-w: #16293a;
+    --good:     #6ec293;
+    --good-w:   #162a20;
+    --bad:      #ef8177;
+    --bad-w:    #2e1a18;
+    --warn:     #d9a85a;
+    --warn-w:   #2c2415;
+    --gt:       #5fa8d8;
+    --sensor:   #e8944a;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans KR", "Noto Sans KR", system-ui, sans-serif;
+    font-weight: 400;
+    font-size: 16px;
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+    word-break: keep-all;
+  }
+
+  .page {
+    max-width: var(--wide);
+    margin: 0 auto;
+    padding: var(--s5) var(--s3) var(--s6);
+    display: flex;
+    flex-direction: column;
+    gap: var(--s5);
+  }
+
+  .col { max-width: var(--measure); }
+
+  /* ---------- masthead ---------- */
+  .masthead { display: flex; flex-direction: column; gap: var(--s3); }
+  .kicker {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.72rem; font-weight: 500;
+    letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--accent);
+  }
+  h1 {
+    margin: 0;
+    font-size: clamp(2rem, 5vw, 2.9rem);
+    font-weight: 600; line-height: 1.18;
+    letter-spacing: -0.022em;
+    text-wrap: balance;
+  }
+  .standfirst {
+    margin: 0; max-width: var(--measure);
+    font-size: 1.12rem; font-weight: 300;
+    color: var(--ink-soft); line-height: 1.65;
+  }
+
+  .spec {
+    margin-top: var(--s2);
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    gap: 0;
+  }
+  .spec div {
+    padding: var(--s3) var(--s3) var(--s3) 0;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+  .spec dt {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.68rem; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: var(--s1);
+  }
+  .spec dd { margin: 0; font-size: 0.92rem; line-height: 1.5; }
+
+  /* ---------- the answer ---------- */
+  .answer {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent);
+    padding: var(--s4);
+    display: flex; flex-direction: column; gap: var(--s3);
+  }
+  .answer h2 {
+    margin: 0; font-size: 1.05rem; font-weight: 600; letter-spacing: -0.01em;
+  }
+  .answer p { margin: 0; max-width: var(--measure); }
+  .answer strong { font-weight: 600; }
+
+  .headline-nums {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    gap: var(--s3);
+    margin-top: var(--s1);
+  }
+  .num { border-top: 2px solid var(--rule); padding-top: var(--s2); }
+  .num b {
+    display: block;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 1.55rem; font-weight: 500; line-height: 1.15;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .num span { display: block; font-size: 0.82rem; color: var(--muted); margin-top: var(--s1); line-height: 1.45; }
+  .num.pass b { color: var(--good); }
+  .num.fail b { color: var(--bad); }
+
+  /* ---------- sections ---------- */
+  section { display: flex; flex-direction: column; gap: var(--s3); }
+  h2.sec {
+    margin: 0;
+    font-size: 1.35rem; font-weight: 600; letter-spacing: -0.015em;
+    display: flex; align-items: baseline; gap: var(--s2);
+    padding-bottom: var(--s2);
+    border-bottom: 2px solid var(--ink);
+    text-wrap: balance;
+  }
+  h2.sec::before {
+    content: attr(data-n);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.85rem; font-weight: 500; color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+  h3 {
+    margin: var(--s3) 0 0;
+    font-size: 1rem; font-weight: 600; letter-spacing: -0.005em;
+    text-wrap: balance;
+  }
+  p { margin: 0; max-width: var(--measure); }
+  section > p, section > ul, section > ol { max-width: var(--measure); }
+  ul, ol { margin: 0; padding-left: 1.25rem; display: flex; flex-direction: column; gap: var(--s2); }
+  li { padding-left: 0.2rem; }
+  strong { font-weight: 600; }
+  em { font-style: normal; color: var(--accent); font-weight: 500; }
+
+  code, .mono {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.86em;
+    font-variant-numeric: tabular-nums;
+  }
+  code {
+    background: var(--sunken);
+    border: 1px solid var(--rule-soft);
+    padding: 0.06em 0.34em;
+    border-radius: 3px;
+  }
+
+  /* ---------- tables ---------- */
+  .tw { overflow-x: auto; border: 1px solid var(--rule); background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 0.87rem; min-width: 34rem; }
+  caption {
+    caption-side: bottom; text-align: left; padding: var(--s2) var(--s3) var(--s3);
+    color: var(--muted); font-size: 0.8rem; line-height: 1.55;
+  }
+  th, td {
+    padding: 0.55rem var(--s3);
+    text-align: right;
+    border-bottom: 1px solid var(--rule-soft);
+    white-space: nowrap;
+  }
+  th:first-child, td:first-child { text-align: left; }
+  thead th {
+    font-size: 0.7rem; font-weight: 600;
+    letter-spacing: 0.07em; text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1px solid var(--rule);
+    background: var(--sunken);
+    white-space: normal;
+  }
+  tbody td.n, tbody th.n {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tr.tot td { font-weight: 600; border-top: 1px solid var(--rule); background: var(--sunken); }
+  td.ref, th.ref { color: var(--muted); }
+
+  .chip {
+    display: inline-block;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.68rem; font-weight: 600; letter-spacing: 0.05em;
+    padding: 0.12rem 0.5rem; border-radius: 2px;
+  }
+  .chip.p { background: var(--good-w); color: var(--good); }
+  .chip.f { background: var(--bad-w);  color: var(--bad); }
+  .chip.n { background: var(--sunken); color: var(--muted); }
+  .chip.w { background: var(--warn-w); color: var(--warn); }
+
+  td.good { color: var(--good); font-weight: 500; }
+  td.bad  { color: var(--bad);  font-weight: 500; }
+
+  /* ---------- figures ---------- */
+  figure { margin: 0; display: flex; flex-direction: column; gap: var(--s2); }
+  figure img {
+    width: 100%; height: auto; display: block;
+    background: #ffffff;
+    border: 1px solid var(--rule);
+  }
+  figcaption { font-size: 0.82rem; color: var(--muted); line-height: 1.6; max-width: var(--measure); }
+  figcaption b { color: var(--ink-soft); font-weight: 600; }
+
+  /* ---------- notes ---------- */
+  .note {
+    border-left: 3px solid var(--warn);
+    background: var(--warn-w);
+    padding: var(--s3) var(--s4);
+    display: flex; flex-direction: column; gap: var(--s2);
+  }
+  .note.plain { border-left-color: var(--rule); background: var(--sunken); }
+  .note.hard  { border-left-color: var(--bad); background: var(--bad-w); }
+  .note h3 { margin: 0; font-size: 0.93rem; }
+  .note p, .note ul { max-width: none; font-size: 0.93rem; }
+
+  hr.soft { border: none; border-top: 1px solid var(--rule); margin: 0; }
+
+  footer {
+    border-top: 1px solid var(--rule);
+    padding-top: var(--s3);
+    color: var(--muted); font-size: 0.82rem;
+    display: flex; flex-direction: column; gap: var(--s2);
+  }
+  footer .mono { font-size: 0.78rem; }
+
+  a { color: var(--accent); text-underline-offset: 2px; }
+  a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 3px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+  @media (max-width: 40rem) {
+    .page { padding: var(--s4) var(--s3) var(--s5); gap: var(--s4); }
+    th, td { padding: 0.5rem 0.7rem; }
+  }
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <div class="kicker">qc_track · 2026-08-21</div>
+    <h1>초음파 프로브에 달린 IMU 는 프로브의 움직임을 얼마나 정확히 기록하나</h1>
+    <p class="standfirst">
+      FR5 플랜지에 BNO085 를 달고 teleop 으로 프로빙하듯 움직이면서, 로봇 FK 를 기준(GT)으로
+      회전과 병진을 각각 얼마나 따라가는지 쟀다.
+    </p>
+    <dl class="spec">
+      <div><dt>측정 대상</dt><dd>BNO085 자세 · 가속도 이중적분 변위</dd></div>
+      <div><dt>기준 (GT)</dt><dd>FR5 <code>ee_wrt_base</code> 144–148 Hz</dd></div>
+      <div><dt>보드</dt><dd>board-6-qc · XIAO nRF52840 Sense · 250 Hz</dd></div>
+      <div><dt>리그</dt><dd>플랜지 직결 · freespace teleop (Touch)</dd></div>
+      <div><dt>수집</dt><dd>정지 300 s · 정렬 120 s · 프로빙 90 s ×2</dd></div>
+      <div><dt>기록</dt><dd>GT 109,122 표본 / IMU 148,093 표본</dd></div>
+      <div><dt>기준 보고서</dt><dd>SurgiLogger Exp-Latency (2026-07-12, FR3)</dd></div>
+      <div><dt>작성</dt><dd><code>meta/qc_host6.json</code> 에서 자동 생성</dd></div>
+    </dl>
+  </header>
+
+  <div class="answer">
+    <h2>한 문단으로</h2>
+    <p>
+      <strong>회전은 잘 기록한다 — 자력계를 껐을 때에 한해서.</strong> 6 축(가속도+자이로)으로 풀면
+      기울기 0.4–1.1°, 축둘레 회전 1.9°, 지연 21 ms, 상관 0.997 이상이다. 같은 원시 데이터를 9 축으로
+      풀면 각오차가 4–11°, heading 드리프트가 분당 8.3° 로 무너진다. 로봇이 큰 강자성체라 그렇다.
+    </p>
+    <p>
+      <strong>병진은 멈춤과 멈춤 사이가 1 초를 넘으면 못 쓴다.</strong> 정지 상태의 오차 바닥은
+      1 초에 0.62 mm 로 기준값과 일치하지만, 실제로 움직인 구간은 1–2 초에 15 mm(이동거리의 22 %),
+      2–4 초에 55 mm(104 %)다. 오차가 구간 길이의 제곱으로 자라기 때문이고, 이것은 조정이 아니라
+      물리다. <strong>0.5–1 초 구간은 이번 세션에 실제 이동이 하나도 안 들어가 아직 못 쟀다.</strong>
+    </p>
+    <div class="headline-nums">
+      <div class="num pass"><b>0.42°</b><span>기울기 각오차 RMS<br>(지연 보정 후, 6 축)</span></div>
+      <div class="num pass"><b>21 ms</b><span>회전 실효 지연<br>기준 보고서 12–28 ms</span></div>
+      <div class="num pass"><b>0.62 mm</b><span>1 초 변위 오차 바닥<br>기준 0.67 mm</span></div>
+      <div class="num fail"><b>15 mm</b><span>1–2 초 실제 이동 오차<br>이동거리의 22 %</span></div>
+    </div>
+  </div>
+
+  <section>
+    <h2 class="sec" data-n="1">요약</h2>
+    <div class="tw">
+      <table>
+        <caption>
+          모든 값은 6 축(자력계 미사용) 기준이다. 회전은 <code>probe</code> 블록 84 s,
+          변위 오차 바닥은 <code>still</code> 블록 300 s. 기준 열은 SurgiLogger Exp-Latency 실측값
+          (같은 칩 BNO085, 같은 정렬 해법, 같은 추정기) 또는 imu_bench QC_PLAN §9.
+        </caption>
+        <thead>
+          <tr><th>무엇</th><th>값</th><th>문턱</th><th class="ref">기준 실측</th><th>결과</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>IMU↔로봇 고정회전 잔차 RMS</td><td class="n good">0.81°</td><td class="n">&lt; 3°</td><td class="n ref">1.26°</td><td><span class="chip p">통과</span></td></tr>
+          <tr><td>정렬 관측도 (2번째 최소특이값)</td><td class="n good">1.051</td><td class="n">—</td><td class="n ref">0.327</td><td><span class="chip p">양호</span></td></tr>
+          <tr><td>동적 각오차 RMS · 채널 최대</td><td class="n">1.95°</td><td class="n">&lt; 2°</td><td class="n ref">—</td><td><span class="chip p">통과</span></td></tr>
+          <tr><td>동적 각오차 RMS · 회전 전체(geodesic)</td><td class="n bad">2.50°</td><td class="n">&lt; 2°</td><td class="n ref">—</td><td><span class="chip f">불합격</span></td></tr>
+          <tr><td>회전 실효 지연</td><td class="n good">21 ms</td><td class="n">&lt; 50 ms</td><td class="n ref">12–28 ms</td><td><span class="chip p">통과</span></td></tr>
+          <tr><td>상호상관 최소</td><td class="n good">0.997</td><td class="n">&gt; 0.99</td><td class="n ref">0.999</td><td><span class="chip p">통과</span></td></tr>
+          <tr><td>heading(spin) 드리프트</td><td class="n good">0.23 °/min</td><td class="n">&lt; 1</td><td class="n ref">—</td><td><span class="chip p">통과</span></td></tr>
+          <tr><td>변위 오차 바닥 / 기준 대비 배수</td><td class="n good">1.40×</td><td class="n">&lt; 2×</td><td class="n ref">1.0×</td><td><span class="chip p">통과</span></td></tr>
+          <tr><td>실제 이동 변위 오차 (1–2 s)</td><td class="n">15 mm</td><td class="n">—</td><td class="n ref">—</td><td><span class="chip n">판정 없음</span></td></tr>
+          <tr><td>실제 이동 변위 오차 (0.5–1 s)</td><td class="n">—</td><td class="n">—</td><td class="n ref">—</td><td><span class="chip w">미측정</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      이동 구간 변위에는 일부러 문턱을 걸지 않았다. 시술 중 한 번에 얼마를 움직이는지 확언할 수 없어
+      어떤 숫자를 통과선으로 삼든 근거가 아니라 임의값이 되기 때문이다. 대신 §4 의 곡선이 답이다 —
+      <em>용도가 정해지면 그 곡선에서 필요한 칸을 읽어 문턱을 정한다.</em>
+    </p>
+  </section>
+
+  <section>
+    <h2 class="sec" data-n="2">무엇을, 왜 이렇게 쟀나</h2>
+    <p>
+      IMU 는 회전과 병진을 같은 방식으로 재면 안 된다. 회전은 중력과 자이로로 직접 관측되지만,
+      병진은 가속도를 두 번 적분해야 하고 상수 바이어스에 대해 <code>t²</code> 로 자란다.
+      전 구간 시계열 오차는 센서의 성질이 아니라 적분 길이의 함수일 뿐이다.
+    </p>
+    <div class="tw">
+      <table>
+        <caption>
+          <code>mag_map</code> 은 자기장의 위치 의존성을 가리려던 블록인데 이번 세션에서 성립하지
+          않았다 (§6.3). 위 표에서 뺐다.
+        </caption>
+        <thead><tr><th>블록</th><th>길이</th><th>무엇을 준다</th><th>이번 결과</th></tr></thead>
+        <tbody>
+          <tr><td><code>still</code></td><td class="n">300 s</td><td style="text-align:left">변위 오차 바닥, 자세 드리프트</td><td style="text-align:left">창 1,184 개 · 사용</td></tr>
+          <tr><td><code>align</code></td><td class="n">120 s</td><td style="text-align:left">IMU↔base 고정회전 + 가속도계 보정</td><td style="text-align:left">정지 자세 7 개 · 사용</td></tr>
+          <tr><td><code>probe</code></td><td class="n">90 s</td><td style="text-align:left">지연, 동적 자세오차, ZUPT 변위</td><td style="text-align:left">정지 22 · 이동 21 · 사용</td></tr>
+          <tr><td><code>probe_cal</code></td><td class="n">90 s</td><td style="text-align:left">캘리브레이션 검증 (다른 궤적)</td><td style="text-align:left">이동 6 개뿐 · 부분 사용</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>회전과 병진에 다른 자를 쓴다</h3>
+    <ul>
+      <li>
+        <strong>회전</strong> — 정지 자세로만 <code>X = A·Y·B</code> 를 풀어 IMU 세계좌표와 로봇 base 를
+        잇고, 그 다음 상호상관으로 지연을 빼고, <em>남는 것</em>을 각오차로 본다. 움직이는 데이터로
+        정렬을 풀면 지연이 정렬오차로 둔갑한다.
+      </li>
+      <li>
+        <strong>병진</strong> — 양 끝이 정지인 구간으로 잘라 구간별 변위 오차를 낸다(ZUPT). ZUPT 가
+        상수 가속도 바이어스를 원리적으로 제거한다. 그리고 <strong>보정 단계를 넷 나란히</strong> 낸다:
+        A 무보정 / B 영점 바이어스 / C +ZUPT / D +캘리브레이션. C 만 보면 어느 보정이 실제로 일을
+        하는지 알 수 없다.
+      </li>
+    </ul>
+
+    <h3>시간축</h3>
+    <div class="tw">
+      <table>
+        <caption>
+          IMU 는 장치 시계를 PC 시계에 맞춘 값을 시간축으로 쓴다. <code>pc_unix</code> 를 직접 쓰면
+          시리얼 read 한 번이 여러 프레임을 물고 와 계단으로 양자화된다. <b>짝비율</b>은
+          <code>ee_wrt_base</code>(타임스탬프 없음)를 같은 발행 틱의 <code>joint_states</code> 헤더
+          시각과 짝지은 비율이다.
+        </caption>
+        <thead>
+          <tr><th>블록</th><th>GT n</th><th>GT Hz</th><th>IMU n</th><th>IMU Hz</th><th>skew</th><th>잔차 p95</th><th>짝비율</th><th>CRC</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>still</code></td><td class="n">55,003</td><td class="n">145.5</td><td class="n">74,958</td><td class="n">256.0</td><td class="n">−17 ppm</td><td class="n">4.48 ms</td><td class="n">100 %</td><td class="n">0</td></tr>
+          <tr><td><code>align</code></td><td class="n">22,866</td><td class="n">148.3</td><td class="n">29,545</td><td class="n">256.0</td><td class="n">−11 ppm</td><td class="n">4.66 ms</td><td class="n">100 %</td><td class="n">0</td></tr>
+          <tr><td><code>probe</code></td><td class="n">16,155</td><td class="n">144.1</td><td class="n">21,869</td><td class="n">253.0</td><td class="n">−25 ppm</td><td class="n">4.93 ms</td><td class="n">100 %</td><td class="n">0</td></tr>
+          <tr><td><code>probe_cal</code></td><td class="n">15,098</td><td class="n">146.2</td><td class="n">21,721</td><td class="n">256.0</td><td class="n">−23 ppm</td><td class="n">4.62 ms</td><td class="n">100 %</td><td class="n">0</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      <code>|skew| &lt; 30 ppm</code> 이면 90 s 구간에서 2.7 ms 미만이라 지연 추정에 영향이 없다.
+      CRC 오류와 시퀀스 누락은 <code>probe_cal</code> 의 누락 3 건을 빼면 전부 0 이다.
+    </p>
+  </section>
+
+  <section>
+    <h2 class="sec" data-n="3">회전 — 프로브가 어디를 향하는지</h2>
+    <p>
+      프로빙에서는 프로브를 거의 연직으로 세운다. 그 자세에서 기준 보고서의 '지평선 기준 롤' 은
+      투영이 0 벡터가 되어 무너지므로, 기울기를 두 성분(<code>tip_x</code>, <code>tip_y</code>)으로
+      쪼개고 침투축 둘레 회전을 <code>spin</code> 으로 따로 낸다. <code>tilt</code> 는 기준 보고서
+      '하방각' 의 정확한 여각이라 그 값과 직접 비교된다.
+    </p>
+    <div class="tw">
+      <table>
+        <caption>
+          <code>probe</code> 블록 84 s, 6 축. <b>지연 부호</b>가 음수인 것은 센서가 GT 보다
+          <em>이르다</em>는 뜻이 아니라, GT 쪽에 컨트롤러→PC 몫이 이미 실려 있기 때문이다 — 그 몫은
+          세 채널에 똑같이 실리므로 채널 사이의 차이는 정확하고 절대값에만 공통 오프셋이 있다.
+        </caption>
+        <thead>
+          <tr><th>채널</th><th>지연</th><th>상관</th><th>GT 진폭</th><th>오차 RMS</th><th>지연보정 후</th><th>드리프트</th><th class="ref">기준</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>tilt</code> 기울기 크기</td><td class="n">−21 ms</td><td class="n">0.9992</td><td class="n">14.0°</td><td class="n">0.50°</td><td class="n good">0.42°</td><td class="n">+0.37 °/min</td><td class="n ref">12 ms / 0.999</td></tr>
+          <tr><td><code>tip_y</code> 기울기 y</td><td class="n">−21 ms</td><td class="n">0.9991</td><td class="n">20.1°</td><td class="n">0.80°</td><td class="n good">0.73°</td><td class="n">+0.38 °/min</td><td class="n ref">—</td></tr>
+          <tr><td><code>tip_x</code> 기울기 x</td><td class="n">−23 ms</td><td class="n">0.9974</td><td class="n">19.6°</td><td class="n">1.17°</td><td class="n good">1.14°</td><td class="n">−0.83 °/min</td><td class="n ref">—</td></tr>
+          <tr><td><code>spin</code> 축둘레 회전</td><td class="n">−7 ms</td><td class="n">0.9997</td><td class="n">20.1°</td><td class="n">1.95°</td><td class="n">1.95°</td><td class="n good">+0.23 °/min</td><td class="n ref">28 ms / 0.999</td></tr>
+          <tr class="tot"><td>회전 전체 (geodesic)</td><td class="n">−21 ms</td><td class="n">—</td><td class="n">—</td><td class="n">2.52°</td><td class="n bad">2.50°</td><td class="n">—</td><td class="n ref">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      네 채널 모두 문턱 2° 아래다. 불합격으로 찍힌 2.50° 는 <strong>회전 그 자체</strong>(geodesic)로,
+      세 축의 오차가 합쳐진 값이다. 채널별로 쓰면 통과, 자세 전체를 하나의 회전으로 보면 살짝 넘는다 —
+      용도에 따라 어느 쪽을 봐야 하는지가 갈린다. 영상면 기울기만 쓰면 <code>tilt</code> 0.42° 가 답이고,
+      3 차원 자세를 통째로 쓰면 2.50° 가 답이다.
+    </p>
+
+    <figure>
+      <img src="{{FIG_SOURCES}}" alt="6축과 9축의 각오차, 정렬 잔차, heading 드리프트를 나란히 비교한 막대그래프. 모든 항목에서 6축이 크게 낫다.">
+      <figcaption>
+        <b>그림 1.</b> 같은 원시 데이터에 같은 해법을 쓰고 자력계만 넣고 뺐다. 왼쪽 —
+        채널별 각오차. 자력계를 넣으면 <code>spin</code> 이 1.95° 에서 11.23° 로 6 배가 된다.
+        가운데 — IMU↔로봇 고정회전이 아예 안 풀린다(0.81° → 6.68°). 오른쪽 — 방위가 분당 8.3° 로 흐른다.
+        <code>tilt</code> 만 9 축에서도 버티는데, 기울기는 중력으로 관측되어 자력계가 관여하지 않기 때문이다.
+      </figcaption>
+    </figure>
+
+    <figure>
+      <img src="{{FIG_MAIN}}" alt="probe 블록의 시계열 4행 3열 요약. 좌측은 GT와 IMU 시계열, 중앙은 확대, 우측은 오차 분포와 판정표.">
+      <figcaption>
+        <b>그림 2.</b> <code>probe</code> 블록 전체(6 축). 파랑 = 로봇 GT, 주황 = IMU,
+        청록 = IMU 를 제 지연만큼 당긴 것. <strong>청록이 파랑에 겹치면 차이의 정체가 오로지
+        시간이동</strong>이라는 뜻이고, 겹치지 않고 남는 부분이 진짜 자세 오차다. 오른쪽 열의 오차
+        분포가 ±2° 안에 모여 있다. 맨 아래 행은 회전이 아니라 병진이다 — 구간별 변위 오차와
+        정지 구간 오차 바닥.
+      </figcaption>
+    </figure>
+
+    <div class="note plain">
+      <h3>정렬을 못 풀면 이 표는 전부 무의미하다</h3>
+      <p>
+        정렬 관측도(2번째 최소특이값)가 <strong>1.051</strong> 이다. 이 값이 0 에 가까우면 정지 자세들이
+        한 축으로만 기울어 해가 유일하지 않고, 그때는 잔차가 작든 크든 아무것도 못 말한다.
+        같은 리그에서 자세를 5–18° 밖에 안 벌렸던 앞선 시도는 관측도 0.12 였고, 그 데이터로 낸
+        모든 회전 숫자는 버렸다.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="sec" data-n="4">병진 — 프로브가 얼마나 움직였는지</h2>
+    <p>
+      이 절이 이 QC 의 답이다. IMU 는 병진을 직접 재지 못하므로, 물어볼 수 있는 것은
+      <strong>"몇 초짜리 움직임까지 믿을 수 있는가"</strong> 하나뿐이다.
+    </p>
+
+    <figure>
+      <img src="{{FIG_DISP}}" alt="구간 길이에 대한 변위 오차의 로그-로그 그래프. 오차 바닥은 기준선과 겹치고, 실제 이동은 그보다 한 자릿수 위에 있다.">
+      <figcaption>
+        <b>그림 3.</b> 회색 = 정지 구간에 같은 파이프라인을 돌린 <strong>오차 바닥</strong> — 이보다 잘
+        나올 수 없다. 점선 회색이 imu_bench QC_PLAN §9 의 기준 바닥인데 실측이 거의 그대로 겹친다.
+        주황 = teleop 으로 <strong>실제 움직인</strong> 구간. 둘의 벌어짐이 곧 움직임 자체가 만드는
+        오차다. 속이 빈 동그라미는 이동거리가 0.005 mm 인 칸 — 안 움직인 구간이라 이 칸은 채워진 것이
+        아니라 <strong>비어 있는 것</strong>이다.
+      </figcaption>
+    </figure>
+
+    <div class="tw">
+      <table>
+        <caption>
+          A 무보정 / B 영점 바이어스 / C +ZUPT / D +캘리브레이션. 오차 바닥은 <code>still</code> 블록
+          300 s, 실제 이동은 <code>probe</code> 블록. 값은 모두 중앙값.
+        </caption>
+        <thead>
+          <tr><th rowspan="2">구간 길이</th><th colspan="3">정지 구간 (오차 바닥)</th><th colspan="4">실제 이동 구간</th></tr>
+          <tr><th>C 실측</th><th class="ref">§9 기준</th><th>창 수</th><th>n</th><th>이동거리</th><th>C 오차</th><th>상대오차</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="n">0.5 s</td><td class="n good">0.21 mm</td><td class="n ref">0.23</td><td class="n">1,184</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="n"><span class="chip w">미측정</span></td></tr>
+          <tr><td class="n">1 s</td><td class="n good">0.62 mm</td><td class="n ref">0.67</td><td class="n">591</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="n"><span class="chip w">미측정</span></td></tr>
+          <tr><td class="n">1–2 s</td><td class="n">—</td><td class="n ref">—</td><td class="n">—</td><td class="n">4</td><td class="n">67 mm</td><td class="n">14.8 mm</td><td class="n">22 %</td></tr>
+          <tr><td class="n">2 s</td><td class="n good">1.68 mm</td><td class="n ref">1.70</td><td class="n">295</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="n">—</td></tr>
+          <tr><td class="n">2–4 s</td><td class="n">—</td><td class="n ref">—</td><td class="n">—</td><td class="n">10</td><td class="n">51 mm</td><td class="n bad">55.1 mm</td><td class="n bad">104 %</td></tr>
+          <tr><td class="n">4–8 s</td><td class="n">—</td><td class="n ref">—</td><td class="n">—</td><td class="n">6</td><td class="n">48 mm</td><td class="n bad">99.6 mm</td><td class="n bad">178 %</td></tr>
+          <tr><td class="n">5 s</td><td class="n good">7.66 mm</td><td class="n ref">7.00</td><td class="n">117</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="n">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>곡선의 모양은 물리로 정해져 있다</h3>
+    <p>
+      ZUPT 가 상수 바이어스를 지우므로 남는 것은 자세오차가 만드는 중력 누설 <code>a</code> 이고,
+      오차는 대략 <code>a·T²/8</code> 로 자란다. 자세오차 0.58° 면 중력 누설 0.1 m/s², 3 초 구간에서
+      약 112 mm 다. 거꾸로 <strong>2 초 창에서 5 mm 를 맞추려면 자세오차가 0.05° 여야 하는데</strong>
+      BNO085 로는 도달 불가능하다. 짧은 구간일수록 급격히 정확해지므로 이 센서의 사용 가능 영역은
+      <em>0.5 초 안팎</em>이고, 그것이 이번에 못 잰 칸이다.
+    </p>
+
+    <h3>가속도 모형 — 6 축에서야 물리적으로 말이 된다</h3>
+    <div class="tw">
+      <table>
+        <caption>
+          <code>R_bs(C·a + d) − g = p̈ + R̈·r</code> 을 15 개 미지수에 대해 한꺼번에 푼다. 나눠 풀면
+          좌변이 스케일 오차 × 중력에 지배되어 지렛대가 엉뚱하게 나온다. 적합 <code>align+probe</code>,
+          n = 40,702.
+        </caption>
+        <thead><tr><th>파라미터</th><th>6 축</th><th>9 축 (칩 RV)</th><th class="ref">참고</th></tr></thead>
+        <tbody>
+          <tr><td>스케일 오차 [%]</td><td class="n good">−0.01 / −0.87 / −1.07</td><td class="n bad">+4.14 / +0.29 / −2.47</td><td class="n ref">보정 후 +0.16</td></tr>
+          <tr><td>비직교 [deg]</td><td class="n good">−0.156</td><td class="n bad">−1.441</td><td class="n ref">—</td></tr>
+          <tr><td>바이어스 크기 [m/s²]</td><td class="n good">0.019 – 0.042</td><td class="n bad">0.13 – 0.42</td><td class="n ref">—</td></tr>
+          <tr><td>지렛대 <code>|r|</code> [mm]</td><td class="n">15.2</td><td class="n">14.6</td><td class="n ref">CAD 미확인</td></tr>
+          <tr><td>가속도 잔차 [m/s²]</td><td class="n good">0.0925 → 0.0775</td><td class="n bad">0.3415 → 0.1371</td><td class="n ref">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      6 축 스케일 오차가 1 % 안쪽, 비직교가 0.16° 다 — MEMS 가속도계로 기대할 수 있는 값이다.
+      9 축에서 나온 +4.14 % 와 −1.44° 는 센서의 성질이 아니라 <strong>자세가 틀린 채로 중력을 뺀
+      결과</strong>가 스케일로 흡수된 것이다. 지렛대 15.2 mm 는 두 소스가 서로 비슷하게 내지만
+      CAD 값과 대조하지 않았다.
+    </p>
+  </section>
+
+  <section>
+    <h2 class="sec" data-n="5">이 측정에서 드러난 것</h2>
+
+    <h3>5.1 이 리그에서 자력계는 자세를 <em>측정 가능하게</em> 악화시킨다</h3>
+    <p>
+      §3 의 그림 1 이 전부다. 결정적인 것은 <strong>세 소스 모두 정렬 관측도가 1.0 안팎</strong>이라는
+      점이다 — 즉 이 비교는 정렬이 잘 풀린 상태에서의 비교이고, 그래서 잔차의 차이가 진짜 차이다.
+      앞선 세션에서도 같은 방향이 보였지만 그때는 관측도가 0.12–0.98 로 들쭉날쭉해 결론을 낼 수 없었다.
+    </p>
+    <p>
+      한편 자기장 자체는 생각보다 얌전하다. 센서 고정 왜곡 모형 <code>m = K·R·h + b</code> 를 로봇의
+      알려진 자세로 풀면 네 블록 47 개 자세가 잔차 2.41 µT(잡음의 2.1 배), 방향오차 2.31° 로 들어온다.
+      <strong>칩 융합이 무너지는 정도(6–11°)가 자기장 왜곡 자체(2.3°)보다 훨씬 크다</strong> — 즉 문제는
+      "자기장이 심하게 왜곡됐다" 가 아니라 "칩의 9 축 융합이 이 정도 왜곡에도 heading 을 못 지킨다" 다.
+    </p>
+
+    <h3>5.2 9 축이 더 주는 것은 지구 기준 절대 heading 하나뿐이다</h3>
+    <p>
+      기울기 두 자유도와 병진은 중력이 관측되므로 6 축이 전부 낸다. 선택은 "절대 heading 대 heading
+      없음" 이 아니라 <strong>"팔 자세 따라 흔들리는 heading 대 분당 0.23° 로 천천히 흐르는
+      heading"</strong> 이다. 후자는 블록 시작에서 로봇 GT 로 원점을 한 번 잡으면 그 구간 안에서
+      정확하다. 로거가 raw acc/gyr/mag 를 항상 남기므로 9 축/6 축은 수집이 아니라 분석 시점의 선택이다.
+    </p>
+
+    <h3>5.3 아직 답 못한 것 — 자기장이 팔 위치에 따라 변하는가</h3>
+    <p>
+      이걸 모형 없이 가르려면 <strong>자세는 같고 위치만 다른 정지 쌍</strong>이 필요하다. 자세가 같으면
+      센서 고정 왜곡의 예측이 완전히 같으므로, 측정이 다르면 남는 설명은 위치에 따른 장 변화뿐이다.
+      손으로 두 번 시도했고 두 번 다 쓸 수 있는 쌍이 <strong>0 개</strong>였다.
+    </p>
+    <div class="tw">
+      <table>
+        <caption>
+          정지 문턱을 아예 빼고 153 쌍을 전부 뒤진 결과. 100 mm 넘게 벌어진 쌍은 예외 없이 자세차가
+          8° 를 넘는다 — Touch 스타일러스로 직교 병진만 손으로 내는 것은 노력의 문제가 아니다.
+        </caption>
+        <thead><tr><th>정지 문턱</th><th>정지 구간</th><th>쌍</th><th>자세차 ≤ 3°</th><th>그중 위치차 ≥ 100 mm</th></tr></thead>
+        <tbody>
+          <tr><td class="n">3.0 s</td><td class="n">4</td><td class="n">6</td><td class="n">0</td><td class="n bad">0</td></tr>
+          <tr><td class="n">2.0 s</td><td class="n">10</td><td class="n">45</td><td class="n">0</td><td class="n bad">0</td></tr>
+          <tr><td class="n">0.8 s</td><td class="n">18</td><td class="n">153</td><td class="n">2</td><td class="n bad">0 <span class="chip n">1 mm, 39 mm</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      다음 세션에서는 로봇이 스스로 돈다 — 각속도 0 인 twist 를 보내면 미분 IK 가 자세를 붙든 채
+      옮기므로 자세차가 설계상 0 이 된다. 다만 <strong>이 결론이 나기 전까지 §5.1 의 원인 진단은
+      절반만 확정</strong>이다: 자력계를 쓰면 안 된다는 것은 실측이고, 그 이유가 '팔 위치에 따라 장이
+      변해서' 인지 '칩 융합이 약해서' 인지는 아직 안 갈렸다. 대처가 갈리지 않으므로(둘 다 6 축이 답)
+      운용 결론은 바뀌지 않는다.
+    </p>
+
+    <h3>5.4 캘리브레이션이 검증에서 무너진다</h3>
+    <p>
+      <code>probe</code> 로 풀고 <code>probe_cal</code> 로 평가했다. 적합 블록에서 C 77 mm → D 100 mm,
+      검증 블록에서 C 422 mm → D 757 mm. <strong>D 가 C 보다 나쁘다</strong> — 과적합이다.
+      <code>probe_cal</code> 에 이동 구간이 6 개뿐이었고 그중 3 개가 4–8 초짜리라 통계가 서지 않는다.
+      §4 의 표에서 D 열을 뺀 이유다.
+    </p>
+
+    <h3>5.5 칩이 자이로 보정을 끝까지 '완료' 로 안 찍는다</h3>
+    <p>
+      다섯 블록 90 분 내내 <code>cal_gyr = 0</code> 이었다 (같은 시각 <code>cal_rv</code> 2–3,
+      <code>cal_mag</code> 2). 조작으로 올릴 방법이 없어 수집 전 게이트에서 뺐고, 대신 기록에는 남긴다.
+      <strong>결과에 영향은 없어 보인다</strong> — 6 축 각오차가 0.4–1.9° 로 나온 것이 그 근거다.
+    </p>
+  </section>
+
+  <section>
+    <h2 class="sec" data-n="6">정직하게 밝혀 둘 것</h2>
+    <ul>
+      <li>
+        <strong>정렬(14:15)과 프로빙(12:15)이 다른 시각의 기록이다.</strong> 6 축은 heading 이 원리적으로
+        관측되지 않아 <em>분석하는 블록 자신의 정지 자세로 다시 정렬</em>하므로 §3·§4 의 6 축 숫자는
+        영향을 받지 않는다. 반면 9 축 숫자는 그 사이의 표류가 오차로 잡혀 <strong>그만큼 과대평가일 수
+        있다.</strong> 9 축이 나쁘다는 결론 자체는 <code>align</code> 블록 안에서만 비교한
+        0.81° 대 6.68° 가 근거라 흔들리지 않는다.
+      </li>
+      <li>
+        <strong>0.5–1 초 칸이 비어 있다.</strong> 그 칸이 곧 이 센서의 사용 가능 영역인데, 이번
+        <code>probe</code> 블록에서 자이로로 센 짧은 이동은 7 개였지만, 멈춤과 멈춤 사이로
+        잘라낸 ZUPT 구간에서는 이동 시간이 1 초 이하인 것이 하나도 없었다. 다음 수집에서 채워야 한다.
+      </li>
+      <li>
+        <strong>지연은 "로봇 상태 스트림 대비" 값이다.</strong> 컨트롤러 UDP 상태 패키지가 PC 에 닿기까지의
+        몫은 GT 쪽에 이미 실려 있고 여기서 지울 방법이 없다. 그 몫은 세 회전 채널에 똑같이 실리므로
+        채널 사이의 차이는 정확하고, 절대값에는 그만큼의 공통 오프셋이 있다.
+      </li>
+      <li>
+        <strong>GT 발행이 145 Hz 다.</strong> 한 샘플이 6.9 ms 라 지연을 그보다 잘게 읽지 못한다.
+        표의 −7 ms(<code>spin</code>)는 그래서 "한 샘플 안쪽" 이상으로 해석하면 안 된다.
+      </li>
+      <li>
+        <strong>지렛대 15.2 mm 를 CAD 와 대조하지 않았다.</strong> 회귀 추정값끼리는 6 축·9 축이 서로
+        비슷하지만(15.2 / 14.6 mm) 독립적인 확인이 없다.
+      </li>
+      <li>
+        <strong>프로브가 아직 안 달려 있다.</strong> IMU 는 J6 플랜지에 직결돼 있고 미분 IK 도 플랜지를
+        툴 프레임으로 쓴다. 실제 프로브가 달리면 지렛대 <code>r</code> 이 커져 회전 동반 구간의
+        <code>ω×(ω×r)</code> 항이 지금보다 크게 실린다.
+      </li>
+    </ul>
+  </section>
+
+  <section>
+    <h2 class="sec" data-n="7">그래서 무엇을 할 수 있나</h2>
+    <div class="note plain">
+      <h3>지금 이 센서로 할 수 있는 것</h3>
+      <ul>
+        <li><strong>프로브의 자세를 기록한다.</strong> 6 축으로, 기울기 0.4–1.1°, 지연 21 ms.
+          영상면의 기울기를 태깅하거나 프리핸드 스캔의 자세 궤적을 남기는 용도에 충분하다.</li>
+        <li><strong>짧은 재배치의 변위를 기록한다.</strong> 멈춤과 멈춤 사이가 1 초 이하일 때.
+          다만 그 칸의 실측이 아직 없다 — 다음 수집에서 확정한다.</li>
+        <li><strong>로봇 FK 를 교차 검증한다.</strong> 자세 채널은 상관 0.997 이상이라 FK 가 어긋나면
+          바로 드러난다.</li>
+      </ul>
+    </div>
+    <div class="note hard">
+      <h3>이 센서로 하면 안 되는 것</h3>
+      <ul>
+        <li><strong>9 축 heading 을 믿는 것.</strong> 이 리그에서 분당 8.3° 흐르고 팔 자세에 따라
+          6–11° 어긋난다.</li>
+        <li><strong>1 초를 넘는 이동의 위치를 IMU 만으로 재구성하는 것.</strong> 2–4 초 구간에서
+          이동거리만큼의 오차가 난다(104 %). 이것은 튜닝으로 못 고친다.</li>
+        <li><strong>연속 프리핸드 스캔의 절대 위치를 쌓는 것.</strong> 위 항목의 당연한 귀결이다.
+          멈춤이 없으면 ZUPT 가 없고, ZUPT 가 없으면 A 열(무보정)이 답인데 1 초에 40 mm 다.</li>
+      </ul>
+    </div>
+    <h3>다음 세션이 할 일</h3>
+    <ol>
+      <li><strong>0.5–1 초 이동을 최소 8 개</strong> 넣어 사용 가능 영역의 실측을 채운다.</li>
+      <li><strong><code>mag_map</code> 을 스크립트로</strong> 돌려 자기장의 위치 의존성을 가른다
+        (각속도 0 twist · 자세 3 × 위치 5).</li>
+      <li><strong><code>probe_cal</code> 을 다시</strong> 딴다. 이동 구간 16 개 이상이라야 캘리브레이션
+        검증이 통계가 된다.</li>
+      <li><strong>실제 프로브를 달고</strong> 지렛대가 커진 조건에서 회전 동반 구간을 다시 잰다.</li>
+    </ol>
+  </section>
+
+  <footer>
+    <p class="mono">
+      raw_data/meta/qc_host6.json · qc_chip.json · program.json 에서 자동 생성 —
+      이 보고서에 손으로 적은 값은 없다.
+    </p>
+    <p class="mono">
+      재현: <code>python3 run_session.py</code> → <code>python3 analyze_track.py --sources host6,chip</code>
+      → <code>python3 plot_track.py --source host6</code> · <code>python3 plot_report.py</code>
+    </p>
+    <p class="mono">
+      수집 2026-08-21 12:00–14:15 KST · 분석기 자체 시험 33 개 통과 ·
+      기준 보고서 SurgiLogger QC Exp-Latency (2026-07-12)
+    </p>
+  </footer>
+
+</div>

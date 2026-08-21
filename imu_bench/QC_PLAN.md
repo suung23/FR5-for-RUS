@@ -14,6 +14,12 @@
 9. **오차 바닥 (실측)** — 정지 구간에 같은 파이프라인을 돌린 값. **C 기준 0.5 s에 0.23 mm, 1 s에 0.7 mm, 2 s에 1.7 mm, 5 s에 7 mm.** 실제 이동에서는 여기에 스케일 오차 × 이동거리가 더해진다.
 10. **통과 기준** — 1 s 창 `ε` < 2 mm, 2 s 창 `ε` < 5 mm, 100 mm 이동 `ε_rel` < 3 %(캘리브 후). ⏳ IMU 용도(FK 검증 / 프리핸드 기록 / 영상 태깅)가 확정되면 재조정한다.
 
+> **실행.** 이 계획의 4~8 번(로봇 GT 가 필요한 항목)은
+> [qc_track/](qc_track/) 에 구현되어 있다 — 블록 구성과 조작 지시문은
+> `qc_track/protocol.py`, 지표와 판정은 `qc_track/analyze_track.py`, 기준값은
+> `qc_track/reference.py` 다. 회전(자세) 항목이 계획에 없었는데, 프로빙에서는
+> 자세 오차가 곧 영상면 기울기라 같은 비중으로 넣었다.
+>
 > 측정 모델과 오차원의 상세 유도는 코드 docstring에 있다 —
 > [host/zero_ref.py](host/zero_ref.py) (영점), [host/displacement_check.py](host/displacement_check.py) (변위·ZUPT),
 > [host/fusion.py](host/fusion.py) (자세·프레임 규약).

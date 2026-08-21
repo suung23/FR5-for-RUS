@@ -133,6 +133,22 @@ python3 host/displacement_check.py logs/imu_20260819_162310.csv
 완전히 사라지기 때문이다. 로봇 point-to-point 이동이 이 조건을 공짜로 만족한다.
 자세한 것은 [QC_PLAN.md](QC_PLAN.md) §2.6 · §3.6.
 
+### 로봇 GT 대비 추적 QC (`qc_track/`)
+
+**외부 GT 가 있는** 쪽이다. FR5 플랜지에 IMU 를 달고 teleop 으로 초음파 프로빙하듯
+움직이면서, 회전과 병진을 로봇 FK 대비 얼마나 정확히 따라가는지 잰다. 결과 표에
+[Surgilogger QC / Exp-Latency](https://github.com/Rosota-Research/QC) 의 실측값과
+이 벤치의 변위 오차 바닥이 **기준 열로 같이** 찍힌다.
+
+```bash
+cd qc_track
+python3 run_session.py --dry-run     # 계획과 조작 지시문
+python3 simulate_session.py          # 로봇 없이 분석기 검증 (권장, 먼저)
+python3 analyze_track.py --run raw_data_sim
+```
+
+자세한 것은 [qc_track/README.md](qc_track/README.md).
+
 ### 로그 분석 (`host/analyze_log.py`)
 
 ```bash
@@ -222,6 +238,7 @@ host/imu_log.py                 세션 로거 (CSV / HDF5 + 메타 JSON)
 host/imu_gui.py                 실시간 GUI 뷰어
 host/imu_fusion_view.py         터미널 뷰어 + 자력계 보정
 host/analyze_log.py             로그 -> QC 지표 (GT 불필요)
+qc_track/                       로봇 GT 대비 추적 QC (회전 + 병진)
 host/displacement_check.py      변위 오차 바닥 (A/B/C 보정 단계 비교)
 scripts/setup_toolchain.sh      툴체인 설치 (최초 1회)
 scripts/flash.sh                빌드 + 업로드

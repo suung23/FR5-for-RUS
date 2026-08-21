@@ -33,6 +33,8 @@ setup(
         'console_scripts': [
             # --- 초음파 (RUS) ---
             'us_servo = fr5_control.us_servo_node:main',
+            # PX6D F/T 센서 시리얼 점검. 제어 경로가 아니라 배선·축 확인용이다.
+            'px6d_probe = fr5_control.px6d_probe:main',
             # --- 복강경 시절부터 남은 것. Phase 0 검증 후 legacy 로 옮긴다 ---
             'fr5_status = fr5_control.fr5_status_node:main',
             'fr5_servo_joint_control = fr5_control.fr5_servo_joint_control_node:main',

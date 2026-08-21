@@ -78,6 +78,12 @@ class ImuStream(threading.Thread):
         # 최신 값
         self.acc = self.gyr = self.mag = self.mag_raw = None
         self.chip_q = None
+        # BNO085 가 레코드마다 실어 보내는 보정 정확도 (0=미보정 ~ 3=완전).
+        # 지금까지 파싱만 하고 버렸다 — 그래서 2026-08-20 QC 에서 '자력계가
+        # 교란된 것인가, 애초에 보정이 안 된 것인가' 를 가릴 수 없었다.
+        # 둘은 대처가 정반대라 (환경을 바꾸느냐 / 보정을 다시 뜨느냐) 반드시
+        # 갈라야 한다.
+        self.cal_status = {"acc": None, "gyr": None, "mag": None, "rv": None}
         self.align = None
         self.saw_mag = False
         self.seeded = not self.do_seed
@@ -133,6 +139,7 @@ class ImuStream(threading.Thread):
                 "held_s": 0.0 if self.t_start is None else time.time() - self.t_start,
                 "n_fuse": self.n_fuse,
                 "saw_mag": self.saw_mag,
+                "cal_status": dict(self.cal_status),
                 "rates": {k: self.rate.hz(k) for k in
                           (REC_ACCEL, REC_GYRO, REC_MAG, REC_RV)},
                 "crc_errors": self.parser.crc_errors,
@@ -205,14 +212,18 @@ class ImuStream(threading.Thread):
         with self._lock:
             if rtype == REC_GYRO:
                 self.gyr = np.array([rec.x, rec.y, rec.z])
+                self.cal_status["gyr"] = rec.status
             elif rtype == REC_MAG:
                 self.mag_raw = np.array([rec.x, rec.y, rec.z])
                 self.mag = mag_calib.apply(self.cal, self.mag_raw)
                 self.saw_mag = True
+                self.cal_status["mag"] = rec.status
             elif rtype == REC_RV:
                 self.chip_q = np.array([rec.qw, rec.qx, rec.qy, rec.qz])
+                self.cal_status["rv"] = rec.status
             elif rtype == REC_ACCEL:
                 self.acc = np.array([rec.x, rec.y, rec.z])
+                self.cal_status["acc"] = rec.status
                 t_us = self._unwrap[rtype].unwrap(rec.evt_us)
 
                 if not self.seeded and self.mag is not None:
@@ -268,6 +279,8 @@ class ImuStream(threading.Thread):
                 None if chip_q is None else chip_q[2], None if chip_q is None else chip_q[3],
                 cr, cp, cy, diff,
                 rel[0], rel[1], rel[2],
+                self.cal_status["acc"], self.cal_status["gyr"],
+                self.cal_status["mag"], self.cal_status["rv"],
             ])
 
         if self.n_fuse % self._decim:

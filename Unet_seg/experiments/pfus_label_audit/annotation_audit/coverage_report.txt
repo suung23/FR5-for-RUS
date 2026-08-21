@@ -1,0 +1,31 @@
+PFUS1 annotation audit subset -- Phase 2 coverage
+====================================================
+
+samples: 80   patients: 16   frames/patient: 5
+source split: test (model-unseen)   seed: 42   selection: blind to model predictions
+
+bladder_size           large=31  medium=24  small=25
+contrast_level         high=30  low=28  medium=22
+boundary_visibility    clear=25  moderate=31  weak=24
+
+shadow_present         32/80  (40%)
+irregular_contour      28/80  (35%)
+deformation            44/80  (55%)
+
+per-patient condition spread (distinct bladder_size x contrast_level cells covered):
+  P000  cells=1  size=small  boundary=clear
+  P001  cells=2  size=small  boundary=clear
+  P011  cells=2  size=small  boundary=moderate,weak
+  P012  cells=1  size=large  boundary=clear,moderate
+  P019  cells=2  size=medium,small  boundary=clear,moderate
+  P020  cells=3  size=large,medium  boundary=clear
+  P021  cells=2  size=medium  boundary=weak
+  P040  cells=2  size=large  boundary=clear,moderate,weak
+  P041  cells=1  size=large  boundary=moderate
+  P043  cells=3  size=medium,small  boundary=weak
+  P085  cells=1  size=large  boundary=clear,moderate
+  P089  cells=2  size=large,medium  boundary=moderate
+  P095  cells=2  size=medium  boundary=clear,moderate,weak
+  P097  cells=2  size=large  boundary=moderate,weak
+  P108  cells=3  size=medium,small  boundary=moderate,weak
+  P109  cells=3  size=medium,small  boundary=moderate,weak

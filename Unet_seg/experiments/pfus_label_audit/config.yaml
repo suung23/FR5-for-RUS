@@ -1,0 +1,52 @@
+# Provenance for experiments/pfus_label_audit. Records what this audit ran
+# against; it is not consumed by the training pipeline.
+
+experiment:
+  name: pfus_label_audit
+  purpose: >
+    Separate four candidate causes of the PFUS1 bladder shortfall: model
+    limitation, annotation quality / target definition, train-validation
+    leakage, and ultrasound domain characteristics.
+  created: 2026-08-20
+  seed: 42
+
+dataset:
+  manifest: /home/rosotauser/datasets/pfus/manifest.csv
+  manifest_sha256: 395ccff15aec71fd
+  patients: 110
+  frames: 14852
+  source: >
+    PFUS pelvic-floor ultrasound (Solis-Martin et al., Universidad de Sevilla,
+    CC-BY-4.0). Eight polygon-annotated structures per frame; only "Bladder"
+    was rasterised into the binary task by scripts/prepare_pfus.py.
+
+split:
+  strategy: manifest          # frozen, NOT re-rolled -- see patient_split_seed42.json
+  unit: patient
+  ratios: [0.7, 0.15, 0.15]
+  seed: 42
+  leakage_verified: true
+
+checkpoints_under_audit:
+  standard: checkpoints/pfus_bladder/best.pt        # epoch 7/40
+  slim: checkpoints/pfus_bladder_slim/best.pt       # epoch 25/40
+
+audit_subset:
+  split: test
+  patients: 16
+  frames_per_patient: 5
+  total_frames: 80
+  selection: farthest-point sampling in globally z-scored feature space
+  blind_to_model_predictions: true
+
+environments:
+  # Split on purpose: the only torch here is CPU-only and has no scipy; the
+  # only python with scipy has no torch.
+  inference: /home/rosotauser/Pytorch-UNet/venv/bin/python   # torch 2.13.0+cpu
+  metrics: /usr/bin/python3                                  # numpy 1.26.4, scipy 1.11.4, cv2 4.6.0
+  original_training: RTX 4090 (CUDA), not available in this session
+
+metrics:
+  distance_units: pixels      # PFUS1 publishes no mm/px scale
+  aggregation: patient-level, cluster bootstrap over patients (10,000 draws)
+  postprocessing: threshold 0.5, largest_component, fill_holes (from checkpoint config)

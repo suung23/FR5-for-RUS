@@ -1,0 +1,23 @@
+  20/110 patients
+  40/110 patients
+  60/110 patients
+  80/110 patients
+  100/110 patients
+  110/110 patients
+
+motion_ratio (label displacement / image displacement) over 110 patients:
+  min 0.000  p05 0.564  p25 1.262  median 1.751  p75 2.229  max 4.672
+
+lowest 10 (label barely moves while the image does):
+  P045  split=train ratio=0.000  label=0.000 px  image=0.099 px  frames=80
+  P059  split=train ratio=0.000  label=0.000 px  image=0.042 px  frames=47
+  P078  split=train ratio=0.000  label=0.000 px  image=0.040 px  frames=105
+  P086  split=train ratio=0.239  label=0.015 px  image=0.063 px  frames=61
+  P050  split=train ratio=0.518  label=0.060 px  image=0.116 px  frames=89
+  P047  split=train ratio=0.545  label=0.056 px  image=0.102 px  frames=73
+  P018  split=train ratio=0.588  label=0.057 px  image=0.098 px  frames=90
+  P001  split=test  ratio=0.679  label=0.461 px  image=0.680 px  frames=144
+  P062  split=train ratio=0.726  label=0.141 px  image=0.195 px  frames=84
+  P017  split=train ratio=0.862  label=0.088 px  image=0.102 px  frames=200
+
+wrote /home/rosotauser/FR5-for-RUS/Unet_seg/experiments/pfus_label_audit/dataset_audit/label_integrity.csv

@@ -1,0 +1,150 @@
+{
+  "num_patients": 110,
+  "contrast_percentiles": {
+    "0": -47.11,
+    "5": -18.4355,
+    "10": -14.311,
+    "25": 2.01,
+    "50": 19.57,
+    "75": 34.8175,
+    "90": 49.001000000000005,
+    "100": 79.79
+  },
+  "lowest_15": [
+    {
+      "patient_id": "P000",
+      "split": "test",
+      "num_frames": 147,
+      "contrast": -47.11,
+      "texture": 1.26,
+      "darkness_pct": 96.2,
+      "area_frac": 0.013
+    },
+    {
+      "patient_id": "P008",
+      "split": "train",
+      "num_frames": 183,
+      "contrast": -40.15,
+      "texture": 0.907,
+      "darkness_pct": 94.3,
+      "area_frac": 0.0236
+    },
+    {
+      "patient_id": "P055",
+      "split": "train",
+      "num_frames": 229,
+      "contrast": -30.26,
+      "texture": 1.125,
+      "darkness_pct": 90.6,
+      "area_frac": 0.029
+    },
+    {
+      "patient_id": "P049",
+      "split": "train",
+      "num_frames": 108,
+      "contrast": -24.6,
+      "texture": 1.574,
+      "darkness_pct": 86.2,
+      "area_frac": 0.0506
+    },
+    {
+      "patient_id": "P019",
+      "split": "test",
+      "num_frames": 122,
+      "contrast": -21.65,
+      "texture": 1.272,
+      "darkness_pct": 88.2,
+      "area_frac": 0.0335
+    },
+    {
+      "patient_id": "P069",
+      "split": "train",
+      "num_frames": 97,
+      "contrast": -18.44,
+      "texture": 0.995,
+      "darkness_pct": 85.7,
+      "area_frac": 0.0516
+    },
+    {
+      "patient_id": "P009",
+      "split": "train",
+      "num_frames": 139,
+      "contrast": -18.43,
+      "texture": 1.143,
+      "darkness_pct": 86.4,
+      "area_frac": 0.0379
+    },
+    {
+      "patient_id": "P015",
+      "split": "train",
+      "num_frames": 129,
+      "contrast": -16.68,
+      "texture": 1.091,
+      "darkness_pct": 84.0,
+      "area_frac": 0.0285
+    },
+    {
+      "patient_id": "P083",
+      "split": "val",
+      "num_frames": 130,
+      "contrast": -14.65,
+      "texture": 1.026,
+      "darkness_pct": 90.9,
+      "area_frac": 0.0222
+    },
+    {
+      "patient_id": "P039",
+      "split": "train",
+      "num_frames": 98,
+      "contrast": -14.51,
+      "texture": 0.904,
+      "darkness_pct": 89.3,
+      "area_frac": 0.023
+    },
+    {
+      "patient_id": "P014",
+      "split": "val",
+      "num_frames": 229,
+      "contrast": -14.5,
+      "texture": 1.201,
+      "darkness_pct": 86.0,
+      "area_frac": 0.0373
+    },
+    {
+      "patient_id": "P035",
+      "split": "train",
+      "num_frames": 161,
+      "contrast": -14.29,
+      "texture": 1.033,
+      "darkness_pct": 88.4,
+      "area_frac": 0.026
+    },
+    {
+      "patient_id": "P084",
+      "split": "train",
+      "num_frames": 122,
+      "contrast": -13.68,
+      "texture": 1.065,
+      "darkness_pct": 83.4,
+      "area_frac": 0.0271
+    },
+    {
+      "patient_id": "P108",
+      "split": "test",
+      "num_frames": 109,
+      "contrast": -12.15,
+      "texture": 1.285,
+      "darkness_pct": 85.0,
+      "area_frac": 0.0369
+    },
+    {
+      "patient_id": "P032",
+      "split": "val",
+      "num_frames": 228,
+      "contrast": -11.58,
+      "texture": 1.299,
+      "darkness_pct": 82.2,
+      "area_frac": 0.0675
+    }
+  ]
+}

@@ -13,6 +13,34 @@ the wrong structure scores perfectly here. Whenever ground truth is available,
 * ``unstable``          -- inconsistent over time,
 
 so the two properties are never conflated.
+
+Temporal-consistency definition (v2, single source of truth)
+------------------------------------------------------------
+A *transition* is a consecutive frame pair ``(t-1, t)``. The previous mask is
+always compared after motion compensation, i.e. against ``W(M_{t-1})``.
+Transitions are scored as follows:
+
+============================  =========================  ==================
+current / motion-aligned prev  kind                       contributes
+============================  =========================  ==================
+non-empty / non-empty          ``scored``                 its actual Dice/IoU
+non-empty / empty              ``onset``                  0.0
+empty / non-empty              ``offset``                 0.0
+empty / empty                  ``absent``                 **excluded**
+============================  =========================  ==================
+
+``warped_temporal_dice`` is the mean over every transition except ``absent``,
+which is reported separately as ``absent_transition_rate``. Both-empty
+transitions are excluded rather than scored 1.0 because a model that emits
+nothing twice in a row is not consistent, it is silent -- crediting that as
+perfect stability let a 61%-dropout sequence report 0.946 in an earlier
+revision of this file. A sequence with no scorable transition reports ``None``,
+never 1.0.
+
+Note the asymmetry with :func:`~rus_perception.metrics.segmentation`'s
+frame-level accuracy, where two empty masks legitimately are a perfect match:
+there the reference is ground truth, here it is the model's own previous
+output.
 """
 
 from __future__ import annotations
@@ -24,6 +52,11 @@ from typing import Any, Optional, Sequence
 import numpy as np
 
 __all__ = [
+    "SCORED",
+    "ONSET",
+    "OFFSET",
+    "ABSENT",
+    "transition_kind",
     "TemporalFrameRecord",
     "TemporalSequenceMetrics",
     "compute_sequence_temporal_metrics",
@@ -33,6 +66,24 @@ __all__ = [
 ]
 
 _EPS = 1e-8
+
+SCORED = "scored"
+ONSET = "onset"
+OFFSET = "offset"
+ABSENT = "absent"
+
+
+def transition_kind(current: np.ndarray, warped_previous: np.ndarray) -> str:
+    """Classify a transition as ``scored``, ``onset``, ``offset`` or ``absent``."""
+    has_current = int(np.count_nonzero(current)) > 0
+    has_previous = int(np.count_nonzero(warped_previous)) > 0
+    if has_current and has_previous:
+        return SCORED
+    if has_current:
+        return ONSET
+    if has_previous:
+        return OFFSET
+    return ABSENT
 
 
 @dataclass
@@ -54,6 +105,10 @@ class TemporalFrameRecord:
         previous_area_ratio: Motion-aligned previous area ratio.
         valid_for_control: Output of the validity gate.
         target: Optional binary ground-truth mask.
+        motion_compensated: Whether ``warped_previous_mask`` was actually warped
+            by a flow field. ``False`` means the previous mask was reused
+            unchanged, and the sequence metrics say so rather than claiming a
+            compensation that never happened.
     """
 
     frame_id: str
@@ -68,16 +123,22 @@ class TemporalFrameRecord:
     previous_area_ratio: Optional[float] = None
     valid_for_control: bool = True
     target: Optional[np.ndarray] = None
+    motion_compensated: bool = True
 
 
-def _iou_dice(a: np.ndarray, b: np.ndarray) -> tuple[float, float]:
-    """IoU and Dice between binary masks; ``(1, 1)`` when both are empty."""
+def _iou_dice(a: np.ndarray, b: np.ndarray) -> tuple[Optional[float], Optional[float]]:
+    """IoU and Dice between binary masks; ``(None, None)`` when both are empty.
+
+    Returning ``None`` rather than ``1.0`` is the whole point of the v2
+    definition documented at the top of this module: on a temporal axis two
+    empty masks are an absent transition, not a perfectly consistent one.
+    """
     a = (np.asarray(a) > 0).astype(np.float64)
     b = (np.asarray(b) > 0).astype(np.float64)
     intersection = float((a * b).sum())
     total = float(a.sum() + b.sum())
     if total == 0.0:
-        return 1.0, 1.0
+        return None, None
     union = total - intersection
     return (
         float(intersection / union) if union > 0 else 1.0,
@@ -103,6 +164,11 @@ class TemporalSequenceMetrics:
     num_transitions: int
     warped_temporal_dice: Optional[float]
     warped_temporal_iou: Optional[float]
+    num_scored_transitions: int
+    num_absent_transitions: int
+    absent_transition_rate: float
+    track_break_rate: float
+    motion_compensated: bool
     reliability_weighted_probability_difference: Optional[float]
     normalized_centroid_jitter: Optional[float]
     relative_area_jitter: Optional[float]
@@ -122,6 +188,11 @@ class TemporalSequenceMetrics:
             "num_transitions": self.num_transitions,
             "warped_temporal_dice": self.warped_temporal_dice,
             "warped_temporal_iou": self.warped_temporal_iou,
+            "num_scored_transitions": self.num_scored_transitions,
+            "num_absent_transitions": self.num_absent_transitions,
+            "absent_transition_rate": self.absent_transition_rate,
+            "track_break_rate": self.track_break_rate,
+            "motion_compensated": self.motion_compensated,
             "reliability_weighted_probability_difference": (
                 self.reliability_weighted_probability_difference
             ),
@@ -172,6 +243,7 @@ def classify_sequence_frames(
         "stable_accurate": 0,
         "stable_inaccurate": 0,
         "unstable": 0,
+        "absent": 0,
         "unknown_accuracy": 0,
         "no_temporal_reference": 0,
     }
@@ -180,6 +252,9 @@ def classify_sequence_frames(
             counts["no_temporal_reference"] += 1
             continue
         iou, _ = _iou_dice(record.mask, record.warped_previous_mask)
+        if iou is None:
+            counts["absent"] += 1     # nothing on either side: not stable, not unstable
+            continue
         stable = iou >= stability_iou_threshold
         if record.target is None:
             counts["unknown_accuracy"] += 1
@@ -225,12 +300,25 @@ def compute_sequence_temporal_metrics(
     area_changes: list[float] = []
     stability: list[float] = []
 
+    absent = 0
+    breaks = 0
+    transitions = 0
+    compensated = True
+
     for record in records:
         if record.warped_previous_mask is None:
             continue
+        transitions += 1
+        compensated = compensated and record.motion_compensated
+        kind = transition_kind(record.mask, record.warped_previous_mask)
+        if kind == ABSENT:
+            absent += 1
+            continue           # excluded from the mean, counted on its own axis
+        if kind in (ONSET, OFFSET):
+            breaks += 1
         iou, dice = _iou_dice(record.mask, record.warped_previous_mask)
-        ious.append(iou)
-        dices.append(dice)
+        ious.append(float(iou))
+        dices.append(float(dice))
 
         if record.probability_map is not None and record.warped_previous_probability is not None:
             difference = np.abs(
@@ -295,6 +383,11 @@ def compute_sequence_temporal_metrics(
         num_transitions=len(ious),
         warped_temporal_dice=float(np.mean(dices)) if dices else None,
         warped_temporal_iou=float(np.mean(ious)) if ious else None,
+        num_scored_transitions=len(ious),
+        num_absent_transitions=absent,
+        absent_transition_rate=(absent / transitions) if transitions else 0.0,
+        track_break_rate=(breaks / transitions) if transitions else 0.0,
+        motion_compensated=compensated,
         reliability_weighted_probability_difference=(
             float(np.mean(prob_diffs)) if prob_diffs else None
         ),
@@ -358,6 +451,11 @@ def aggregate_temporal_metrics(
         "num_frames": int(sum(s.num_frames for s in sequences)),
         "warped_temporal_dice": mean_of("warped_temporal_dice"),
         "warped_temporal_iou": mean_of("warped_temporal_iou"),
+        "num_scored_transitions": int(sum(s.num_scored_transitions for s in sequences)),
+        "num_absent_transitions": int(sum(s.num_absent_transitions for s in sequences)),
+        "absent_transition_rate": mean_of("absent_transition_rate"),
+        "track_break_rate": mean_of("track_break_rate"),
+        "motion_compensated": all(s.motion_compensated for s in sequences),
         "reliability_weighted_probability_difference": mean_of(
             "reliability_weighted_probability_difference"
         ),

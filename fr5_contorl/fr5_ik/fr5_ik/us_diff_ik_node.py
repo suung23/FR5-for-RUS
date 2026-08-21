@@ -18,12 +18,14 @@ import math
 
 import numpy as np
 import rclpy
-from geometry_msgs.msg import Twist, WrenchStamped
+from geometry_msgs.msg import PoseStamped, Twist, WrenchStamped
 from rclpy.node import Node
+from scipy.spatial.transform import Rotation
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, Float32MultiArray
 
 from fr5_ik.dls_solver import DlsSolver
+from fr5_ik.teleop_frame import LinearFrameMapper
 
 JOINT_NAMES = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
 
@@ -77,6 +79,9 @@ class UsDiffIkNode(Node):
 
         self.rate_hz = float(self.get_parameter("rates.cartesian_hz").value)
         self.twist_timeout = float(self.get_parameter("watchdog.twist_timeout_s").value)
+        self.twist_hold = min(
+            float(self.get_parameter("watchdog.twist_hold_s").value), self.twist_timeout
+        )
         self.joint_timeout = float(self.get_parameter("watchdog.joint_state_timeout_s").value)
         self.retreat_speed = float(self.get_parameter("watchdog.retreat_speed_m_s").value)
         self.retreat_force = float(self.get_parameter("watchdog.retreat_until_force_n").value)
@@ -85,6 +90,14 @@ class UsDiffIkNode(Node):
         self.max_linear = float(self.get_parameter("safety.max_linear_vel_m_s").value)
         self.max_angular = float(self.get_parameter("safety.max_angular_vel_rad_s").value)
         self.normal_sign = float(self.get_parameter("ft_sensor.normal_force_sign").value)
+
+        # 병진 기준 프레임. "latched" 가 표류를 없애는 쪽, "probe" 가 예전 거동이다.
+        self.linear_frame = str(self.get_parameter("teleop.linear_frame").value)
+        self.engage_gap = float(self.get_parameter("teleop.engage_gap_s").value)
+        self.mapper = LinearFrameMapper(
+            tip_roll_deg=float(self.get_parameter("teleop.tip_roll_deg").value),
+            relatch_on_engage=bool(self.get_parameter("teleop.relatch_on_engage").value),
+        )
 
         self.solver = DlsSolver(
             lambda: build_chain(probe_xyz, probe_rpy),
@@ -102,12 +115,21 @@ class UsDiffIkNode(Node):
         self.last_joint_time = None
         self.retreat_started = None
         self._retreat_announced = False
+        self.rot_stylus = None
+        self.last_stylus_time = None
+        self._warned_no_stylus = False
 
         # -- 인터페이스 --------------------------------------------------
         ns = f"/{self.robot_name}"
         self.create_subscription(JointState, f"{ns}/joint_states", self._on_joints, 10)
         self.create_subscription(Twist, f"{ns}/desired_twist", self._on_twist, 10)
         self.create_subscription(WrenchStamped, f"{ns}/wrench", self._on_wrench, 10)
+        # 스타일러스 자세. teleop 이 데드맨을 잡고 있는 동안에만 발행하므로,
+        # **발행이 끊겼다 다시 오는 것 자체가 재파지 신호**다 (별도 토픽이 필요 없다).
+        side = str(self.robot_name).rsplit("_", 1)[-1]
+        self.create_subscription(
+            PoseStamped, f"/touch/{side}/stylus_pose", self._on_stylus, 10
+        )
 
         self.velocity_pub = self.create_publisher(JointState, f"{ns}/joint_velocity_cmds", 10)
         self.error_pub = self.create_publisher(Float32MultiArray, "/diag/twist_tracking_error", 10)
@@ -116,7 +138,8 @@ class UsDiffIkNode(Node):
         self.create_timer(1.0 / self.rate_hz, self._control_loop)
         self.get_logger().info(
             f"미분 IK {self.rate_hz:.0f} Hz · DLS λ={self.solver.damping} · "
-            f"twist 워치독 {self.twist_timeout * 1000:.0f} ms → 프로브 −z 후퇴"
+            f"twist ZOH 유지 {self.twist_hold * 1000:.0f} ms → 감쇠 → "
+            f"워치독 {self.twist_timeout * 1000:.0f} ms → 프로브 −z 후퇴"
         )
         # 클램프를 기동 로그에 찍는다. 이 값이 안 보이면 freespace 인자를 빠뜨렸는지
         # 조작감만으로는 구분할 수 없다 — teleop 스케일을 아무리 올려도 여기서 잘리므로
@@ -126,6 +149,13 @@ class UsDiffIkNode(Node):
             f"회전 {self.max_angular:.2f} rad/s"
             + ("   ← 접촉용 한계다. 자유공간이면 freespace:=true 를 빠뜨린 것이다"
                if self.max_linear <= 0.02 else "")
+        )
+        # 병진 기준이 무엇인지 안 찍으면, 축이 어긋났을 때 원인을 조작감으로만
+        # 판단하게 된다 — 2026-08-21 에 실제로 그렇게 시간을 썼다.
+        self.get_logger().info(
+            f"병진 기준 프레임: {self.linear_frame}"
+            + ("  (데드맨 첫 파지에 고정 → 표류 없음)" if self.linear_frame == "latched"
+               else "  ← 예전 거동이다. 손 자세가 돌면 축이 따라 돈다")
         )
 
     # -- 설정 ------------------------------------------------------------
@@ -146,12 +176,20 @@ class UsDiffIkNode(Node):
         self.declare_parameter("safety.max_angular_vel_rad_s", 0.2)
 
         self.declare_parameter("watchdog.twist_timeout_s", 0.1)
+        self.declare_parameter("watchdog.twist_hold_s", 0.04)
         self.declare_parameter("watchdog.joint_state_timeout_s", 0.2)
         self.declare_parameter("watchdog.retreat_speed_m_s", 0.005)
         self.declare_parameter("watchdog.retreat_until_force_n", 0.2)
         self.declare_parameter("watchdog.max_retreat_s", 3.0)
 
         self.declare_parameter("ft_sensor.normal_force_sign", -1.0)
+
+        # teleop 노드와 **같은** probe.yaml 항목을 읽는다. 값이 갈라지면 병진이
+        # 조용히 90° 틀어지므로, 여기서 따로 기본값을 만들지 않는다.
+        self.declare_parameter("teleop.tip_roll_deg", 90.0)
+        self.declare_parameter("teleop.linear_frame", "latched")
+        self.declare_parameter("teleop.relatch_on_engage", False)
+        self.declare_parameter("teleop.engage_gap_s", 0.3)
 
     def _resolve_tool(self):
         """프로브 변환을 읽는다. 미측정이면 기동을 거부한다.
@@ -202,6 +240,38 @@ class UsDiffIkNode(Node):
         )
         self.last_twist_time = self.get_clock().now()
 
+    def _on_stylus(self, msg: PoseStamped) -> None:
+        """스타일러스 자세. 발행이 끊겼다 다시 오면 재파지로 본다.
+
+        ``touch_twist_node`` 는 데드맨을 잡고 있는 동안에만 이 토픽을 낸다. 그래서
+        ``engage_gap_s`` 보다 긴 공백 뒤의 첫 메시지가 곧 "데드맨을 새로 잡았다" 이고,
+        전용 토픽을 새로 만들 필요가 없다.
+        """
+        now = self.get_clock().now()
+        orientation = msg.pose.orientation
+        self.rot_stylus = Rotation.from_quat(
+            [orientation.x, orientation.y, orientation.z, orientation.w]
+        ).as_matrix()
+
+        gap = (
+            None
+            if self.last_stylus_time is None
+            else (now - self.last_stylus_time).nanoseconds / 1e9
+        )
+        self.last_stylus_time = now
+
+        if self.q is None:
+            return  # 관절각을 모르면 기준을 잡을 수 없다. 다음 메시지에서 다시 본다.
+        if gap is not None and gap <= self.engage_gap and self.mapper.ready:
+            return  # 파지가 이어지는 중
+
+        if self.mapper.engage(self.solver.rotation_base_probe(self.q), self.rot_stylus):
+            self.get_logger().info(
+                f"병진 기준 프레임 고정 (파지 {self.mapper.engage_count}회차). "
+                f"이 순간의 축이 세션 내내 유지된다 — "
+                f"손 자세가 돌아도 '오른쪽'은 계속 같은 방향이다."
+            )
+
     def _on_wrench(self, msg: WrenchStamped) -> None:
         self.normal_force = self.normal_sign * msg.wrench.force.z
         self.wrench_stamp = self.get_clock().now()
@@ -218,6 +288,27 @@ class UsDiffIkNode(Node):
         if angular > self.max_angular:
             out[3:] *= self.max_angular / angular
         return out
+
+    def _hold_fade(self, now) -> float:
+        """직전 twist 를 아직 몇 % 로 믿을지. 오래된 지령일수록 0 에 가깝다.
+
+        이 루프는 100 Hz 인데 Touch 는 50 Hz 로 발행한다. 매 주기 최신 twist 를
+        그대로 다시 쓰는 것(ZOH)이 기본인데, 그대로 두면 발행이 끊긴 뒤에도
+        **워치독 만료(100 ms)까지** 마지막 지령이 계속 재사용된다. 손을 멈춘 뒤에도
+        최대 100 ms 분의 속도가 관절에 더 실린다는 뜻이고, 이것이 서보 단에서
+        지령 선행분으로 쌓인다.
+
+        그래서 한 발행 주기(``twist_hold_s``)까지만 그대로 믿고, 그 뒤로는 워치독
+        만료까지 선형으로 0 으로 보낸다. 정상 조작(20 ms 간격)에서는 항상 1.0 이라
+        조작감에 영향이 없고, 발행이 끊겼을 때만 동작한다.
+        """
+        age = (now - self.last_twist_time).nanoseconds / 1e9
+        if age <= self.twist_hold:
+            return 1.0
+        span = self.twist_timeout - self.twist_hold
+        if span <= 0.0:
+            return 0.0
+        return max(0.0, 1.0 - (age - self.twist_hold) / span)
 
     def _retreat_twist(self, now) -> np.ndarray | None:
         """후퇴 twist. 종료 조건에 도달했으면 ``None``.
@@ -251,6 +342,32 @@ class UsDiffIkNode(Node):
             self._retreat_announced = True
         return np.array([0.0, 0.0, -self.retreat_speed, 0.0, 0.0, 0.0])
 
+    def _remap_linear(self, twist: np.ndarray) -> np.ndarray:
+        """병진만 표류하지 않는 고정 프레임으로 옮긴다 (fr5_ik.teleop_frame 참조).
+
+        회전은 손대지 않는다. "손목을 비틀면 프로브가 비틀린다" 는 대응은 조작자가
+        프로브를 보면서 직접 확인·보정하는 축이고, 병진처럼 화면 밖으로 어긋나
+        버리는 종류가 아니다.
+
+        후퇴 twist 에는 적용하지 않는다 — 후퇴는 조작자 의도가 아니라 프로브 −z 라는
+        기하학적 정의이므로 프로브 프레임 그대로여야 한다.
+        """
+        if self.linear_frame != "latched" or not self.mapper.ready:
+            if self.linear_frame == "latched" and not self._warned_no_stylus:
+                self.get_logger().warn(
+                    "stylus_pose 가 아직 없어 병진을 예전(프로브 body) 기준으로 낸다. "
+                    "데드맨을 한 번 잡으면 기준이 잡힌다. 계속 이 상태라면 "
+                    "touch_twist 노드가 떠 있는지 확인하라."
+                )
+                self._warned_no_stylus = True
+            return twist
+
+        out = np.array(twist, dtype=float)
+        out[:3] = self.mapper.to_probe(
+            out[:3], self.solver.rotation_base_probe(self.q), self.rot_stylus
+        )
+        return out
+
     def _control_loop(self) -> None:
         now = self.get_clock().now()
 
@@ -277,7 +394,8 @@ class UsDiffIkNode(Node):
             if self.retreat_started is not None:
                 self.get_logger().info("twist 복귀 — 후퇴 해제")
             self.retreat_started = None
-            twist = self._clamp(self.twist_cmd)
+            twist = self._clamp(self.twist_cmd) * self._hold_fade(now)
+            twist = self._remap_linear(twist)
             self.retreat_pub.publish(Bool(data=False))
 
         try:

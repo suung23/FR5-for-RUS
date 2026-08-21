@@ -1,0 +1,7 @@
+{
+  "status": "blocked",
+  "reason": "manual lumen annotation not available",
+  "missing": 80,
+  "expected": 80,
+  "unblocks": "run Phase 3 annotation, then metrics/rasterise_manual.py"
+}

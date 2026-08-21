@@ -1,0 +1,15 @@
+# Regenerable image payloads (rebuild: annotation_audit/build_audit_subset.py).
+# Everything that is a *result* -- manifests, metrics, provenance -- stays tracked.
+annotation_audit/images/
+annotation_audit/images_blinded/
+annotation_audit/overlays/
+annotation_audit/original_masks/
+visualizations/
+predictions/*.png
+predictions/*.npz
+# Test-split image tensor (67 MB), rebuilt by temporal_analysis/run_test_inference.py.
+# The masks_*.npz beside it are model *results* and stay tracked -- they are ~0.5 MB.
+temporal_analysis/images_*.npz
+autolabel/masks/
+autolabel/overlays/
+autolabel/_current.png

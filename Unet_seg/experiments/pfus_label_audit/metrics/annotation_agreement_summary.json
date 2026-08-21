@@ -1,0 +1,5 @@
+{
+  "status": "blocked",
+  "reason": "no manual annotation present",
+  "expected_samples": 80
+}

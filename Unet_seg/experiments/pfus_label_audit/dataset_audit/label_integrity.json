@@ -1,0 +1,133 @@
+{
+  "num_patients": 110,
+  "motion_ratio": {
+    "min": 0.0,
+    "p05": 0.5641849999999999,
+    "p25": 1.262025,
+    "median": 1.7513,
+    "p75": 2.229125,
+    "max": 4.6718
+  },
+  "lowest_10": [
+    {
+      "patient_id": "P045",
+      "split": "train",
+      "num_frames": 80,
+      "empty_label_frames": 0,
+      "image_step_px": 0.099,
+      "label_step_px": 0.0,
+      "motion_ratio": 0.0,
+      "label_total_travel_px": 6.58,
+      "label_area_mean": 3331.0,
+      "label_area_cv": 0.0021
+    },
+    {
+      "patient_id": "P059",
+      "split": "train",
+      "num_frames": 47,
+      "empty_label_frames": 0,
+      "image_step_px": 0.0422,
+      "label_step_px": 0.0,
+      "motion_ratio": 0.0,
+      "label_total_travel_px": 3.14,
+      "label_area_mean": 2865.1,
+      "label_area_cv": 0.0017
+    },
+    {
+      "patient_id": "P078",
+      "split": "train",
+      "num_frames": 105,
+      "empty_label_frames": 0,
+      "image_step_px": 0.0398,
+      "label_step_px": 0.0,
+      "motion_ratio": 0.0,
+      "label_total_travel_px": 11.45,
+      "label_area_mean": 1491.6,
+      "label_area_cv": 0.0041
+    },
+    {
+      "patient_id": "P086",
+      "split": "train",
+      "num_frames": 61,
+      "empty_label_frames": 0,
+      "image_step_px": 0.0632,
+      "label_step_px": 0.0151,
+      "motion_ratio": 0.2394,
+      "label_total_travel_px": 6.31,
+      "label_area_mean": 1980.0,
+      "label_area_cv": 0.0017
+    },
+    {
+      "patient_id": "P050",
+      "split": "train",
+      "num_frames": 89,
+      "empty_label_frames": 0,
+      "image_step_px": 0.1163,
+      "label_step_px": 0.0602,
+      "motion_ratio": 0.5177,
+      "label_total_travel_px": 14.69,
+      "label_area_mean": 4313.2,
+      "label_area_cv": 0.0123
+    },
+    {
+      "patient_id": "P047",
+      "split": "train",
+      "num_frames": 73,
+      "empty_label_frames": 0,
+      "image_step_px": 0.1024,
+      "label_step_px": 0.0558,
+      "motion_ratio": 0.5447,
+      "label_total_travel_px": 8.75,
+      "label_area_mean": 2029.8,
+      "label_area_cv": 0.0351
+    },
+    {
+      "patient_id": "P018",
+      "split": "train",
+      "num_frames": 90,
+      "empty_label_frames": 0,
+      "image_step_px": 0.0975,
+      "label_step_px": 0.0573,
+      "motion_ratio": 0.588,
+      "label_total_travel_px": 18.41,
+      "label_area_mean": 6266.6,
+      "label_area_cv": 0.0197
+    },
+    {
+      "patient_id": "P001",
+      "split": "test",
+      "num_frames": 144,
+      "empty_label_frames": 0,
+      "image_step_px": 0.6798,
+      "label_step_px": 0.4613,
+      "motion_ratio": 0.6786,
+      "label_total_travel_px": 96.3,
+      "label_area_mean": 1114.1,
+      "label_area_cv": 0.1332
+    },
+    {
+      "patient_id": "P062",
+      "split": "train",
+      "num_frames": 84,
+      "empty_label_frames": 0,
+      "image_step_px": 0.1946,
+      "label_step_px": 0.1412,
+      "motion_ratio": 0.7256,
+      "label_total_travel_px": 49.06,
+      "label_area_mean": 1595.8,
+      "label_area_cv": 0.0559
+    },
+    {
+      "patient_id": "P017",
+      "split": "train",
+      "num_frames": 200,
+      "empty_label_frames": 0,
+      "image_step_px": 0.1017,
+      "label_step_px": 0.0877,
+      "motion_ratio": 0.8624,
+      "label_total_travel_px": 30.8,
+      "label_area_mean": 963.0,
+      "label_area_cv": 0.0885
+    }
+  ]
+}

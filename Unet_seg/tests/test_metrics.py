@@ -352,3 +352,55 @@ def test_device_report_is_informative_on_cpu() -> None:
     assert "cuda_available" in report
     if not report["cuda_available"]:
         assert "gpu_memory_note" in report
+
+
+def test_both_empty_transitions_are_excluded_not_scored_as_perfect() -> None:
+    """A silent model must not be credited with perfect temporal consistency."""
+    empty = np.zeros((64, 64), np.uint8)
+    records = build_sequence(num_frames=6)
+    for index in (2, 3, 4):
+        records[index].mask = empty
+        records[index].warped_previous_mask = empty if index > 2 else records[index].warped_previous_mask
+
+    metrics = compute_sequence_temporal_metrics(records)
+    assert metrics.num_absent_transitions == 2
+    assert metrics.absent_transition_rate == pytest.approx(2 / 5)
+    assert metrics.num_scored_transitions == 3
+    assert metrics.frame_classification["absent"] == 2
+
+
+def test_a_sequence_that_never_fires_reports_none_rather_than_one() -> None:
+    empty = np.zeros((32, 32), np.uint8)
+    records = [
+        TemporalFrameRecord(f"f{index}", mask=empty, warped_previous_mask=None if index == 0 else empty)
+        for index in range(5)
+    ]
+    metrics = compute_sequence_temporal_metrics(records)
+    assert metrics.warped_temporal_dice is None
+    assert metrics.warped_temporal_iou is None
+    assert metrics.num_scored_transitions == 0
+    assert metrics.mask_dropout_rate == pytest.approx(1.0)
+
+
+def test_losing_and_regaining_the_mask_scores_zero_not_excluded() -> None:
+    """Onset/offset are genuine inconsistencies and stay inside the average."""
+    mask = np.zeros((32, 32), np.uint8)
+    mask[8:24, 8:24] = 1
+    empty = np.zeros((32, 32), np.uint8)
+    records = [
+        TemporalFrameRecord("f0", mask=mask, warped_previous_mask=None),
+        TemporalFrameRecord("f1", mask=empty, warped_previous_mask=mask),   # offset
+        TemporalFrameRecord("f2", mask=mask, warped_previous_mask=empty),   # onset
+    ]
+    metrics = compute_sequence_temporal_metrics(records)
+    assert metrics.num_scored_transitions == 2
+    assert metrics.warped_temporal_dice == pytest.approx(0.0)
+    assert metrics.track_break_rate == pytest.approx(1.0)
+
+
+def test_uncompensated_warping_is_reported_as_such() -> None:
+    records = build_sequence(num_frames=4)
+    for record in records:
+        record.motion_compensated = False
+    assert compute_sequence_temporal_metrics(records).motion_compensated is False
+    assert compute_sequence_temporal_metrics(build_sequence(num_frames=4)).motion_compensated is True

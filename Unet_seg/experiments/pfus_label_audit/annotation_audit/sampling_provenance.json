@@ -1,0 +1,49 @@
+{
+  "split": "test",
+  "seed": 42,
+  "frames_per_patient": 5,
+  "num_patients": 16,
+  "num_samples": 80,
+  "selection": "farthest-point sampling in globally z-scored feature space, per patient",
+  "features": [
+    "gt_area_ratio",
+    "lumen_contrast",
+    "boundary_gradient",
+    "shadow_ratio",
+    "irregularity",
+    "global_contrast",
+    "area_change"
+  ],
+  "tertile_cuts": {
+    "gt_area_ratio": [
+      0.03404939852478675,
+      0.05031461674831882
+    ],
+    "lumen_contrast": [
+      10.562180938720706,
+      41.43874237060547
+    ],
+    "boundary_gradient": [
+      35.50434371948242,
+      52.85970275878906
+    ],
+    "shadow_ratio": [
+      0.022644040184632095,
+      0.11704213156527547
+    ],
+    "irregularity": [
+      1.3933476278202819,
+      1.6774870134731628
+    ],
+    "global_contrast": [
+      31.699031677246094,
+      34.56234985351563
+    ],
+    "area_change": [
+      0.0013166774599959134,
+      0.0044788734038698225
+    ]
+  },
+  "blind_to_model_predictions": true,
+  "rationale": "test split only, so Phase 6/7 model-vs-label comparison uses unseen data"
+}

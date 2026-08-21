@@ -1,0 +1,21 @@
+PFUS bladder -- Phase 1 patient-level leakage audit
+=======================================================
+
+Train patients (78): P002, P003, P004, P005, P006, P007, P008, P009, P013, P015, P016, P017, P018, P023, P024, P026, P027, P028, P030, P031, P033, P034, P035, P037, P038, P039, P044, P045, P046, P047, P048, P049, P050, P051, P052, P053, P054, P055, P056, P057, P058, P059, P060, P061, P062, P064, P065, P066, P067, P068, P069, P070, P072, P073, P074, P075, P077, P078, P079, P080, P081, P082, P084, P086, P087, P088, P091, P092, P093, P094, P096, P098, P099, P100, P102, P103, P105, P107
+Val patients (16): P010, P014, P022, P025, P029, P032, P036, P042, P063, P071, P076, P083, P090, P101, P104, P106
+Test patients (16): P000, P001, P011, P012, P019, P020, P021, P040, P041, P043, P085, P089, P095, P097, P108, P109
+
+train-val overlap: 0
+train-test overlap: 0
+val-test overlap: 0
+
+Leakage detected: NO
+
+split   patients   frames    min      q1  median      q3    max    mean      sd
+train         78    10359     46    98.0   124.5   162.5    229   132.8    46.1
+val           16     2476     85   120.0   146.5   189.2    229   154.8    49.0
+test          16     2017     73   100.0   121.5   144.8    200   126.1    36.8
+
+Sequences: 110 | sequences per patient: {1: 110}
+Sequences spanning >1 split: 0
+splits.json vs manifest consistent: True

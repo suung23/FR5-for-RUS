@@ -30,6 +30,9 @@ COLUMNS = [
     # 영점(zero calibration) 기준 상대 자세 — "처음 자세에서 얼마나 돌았는가".
     # 영점을 안 잡았으면 빈 값이다.
     "rel_roll", "rel_pitch", "rel_yaw",
+    # BNO085 보정 정확도 (0~3). **끝에 붙인다** — 이 CSV 를 이름이 아니라 위치로
+    # 읽는 소비자가 생겨도 앞쪽이 안 밀리도록.
+    "cal_acc", "cal_gyr", "cal_mag", "cal_rv",
 ]
 
 

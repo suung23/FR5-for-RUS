@@ -22,9 +22,24 @@ from scipy.spatial.transform import Rotation
 from sensor_msgs.msg import JointState
 from tf2_ros import TransformBroadcaster
 
+from fr5_control.joint_command_limiter import JointCommandLimiter
 from fr5_control.robot_backend import make_backend
 
 JOINT_NAMES = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
+
+#: fairino 컨트롤러 오류코드 중 이 노드가 실제로 마주치는 것들.
+#: 숫자만 찍으면 매번 문서를 뒤져야 해서 뜻을 여기 붙여 둔다.
+#: 출처: FAIRINO Error Code Comparison Table.
+SERVOJ_ERRORS = {
+    14: "Interface execution failed — 컨트롤러가 폴트 상태다 (보통 선행 오류의 후속 증상)",
+    29: "ServoJ joint overrun — 관절 지령이 적정 범위를 벗어났다",
+}
+
+#: fairino 문서가 정한 ServoJ ``cmdT`` 권장 범위 [s].
+#: 이전 코드는 dt 를 [0.002, 0.1] 로 묶어 그대로 cmdT 로 넘겼다. 상한 0.1 은
+#: 규격의 6 배라, 루프가 한 번만 크게 밀려도 규격 밖 지령이 나간다.
+CMD_T_MIN = 0.001
+CMD_T_MAX = 0.016
 
 
 class UsServoNode(Node):
@@ -39,8 +54,13 @@ class UsServoNode(Node):
         backend_kind = self.get_parameter("robot.backend").value
 
         self.max_joint_vel = float(self.get_parameter("safety.max_joint_vel_rad_s").value)
+        self.max_joint_accel = float(self.get_parameter("safety.max_joint_accel_rad_s2").value)
+        self.max_joint_decel = float(self.get_parameter("safety.max_joint_decel_rad_s2").value)
+        self.max_follow_error = float(self.get_parameter("safety.max_follow_error_deg").value)
         self.limits_lower = list(self.get_parameter("safety.joint_limits_deg.lower").value)
         self.limits_upper = list(self.get_parameter("safety.joint_limits_deg.upper").value)
+        self.resync_rate_deg_s = float(self.get_parameter("safety.idle_resync_rate_deg_s").value)
+        self.resync_gain = float(self.get_parameter("safety.idle_resync_gain_per_s").value)
         self.cmd_timeout = float(self.get_parameter("watchdog.joint_cmd_timeout_s").value)
         self.retreat_force = float(self.get_parameter("watchdog.retreat_until_force_n").value)
 
@@ -69,8 +89,21 @@ class UsServoNode(Node):
         self.get_logger().info(f"{self.robot_name} 연결 — {self.backend.name}")
 
         self.target_vel_rad = [0.0] * 6
-        self.commanded_deg = list(self.backend.joint_positions_deg())
-        self.home_deg = list(self.commanded_deg)
+        self._servo_faulted = False
+
+        # 지령 적분·속도 상한·정지 되감기는 전부 여기에 있다. 노드는 배선만 한다.
+        self.limiter = JointCommandLimiter(
+            start_deg=self.backend.joint_positions_deg(),
+            max_vel=self.max_joint_vel,
+            max_accel=self.max_joint_accel,
+            max_decel=self.max_joint_decel,
+            max_follow_error=self.max_follow_error,
+            limits_lower=self.limits_lower,
+            limits_upper=self.limits_upper,
+            resync_rate_deg_s=self.resync_rate_deg_s,
+            resync_gain=self.resync_gain,
+        )
+        self.home_deg = list(self.limiter.commanded_deg)
         self.cmd_id = 0
         self.get_logger().info(f"홈 자세 저장: {[round(v, 2) for v in self.home_deg]}")
 
@@ -98,6 +131,13 @@ class UsServoNode(Node):
             f"서보 {servo_hz:.0f} Hz · wrench {wrench_hz:.0f} Hz · "
             f"워치독 {self.cmd_timeout * 1000:.0f} ms · 최대 관절속도 {self.max_joint_vel} rad/s"
         )
+        # 정지 거동은 가속 상한이 아니라 이 두 값이 정한다. teleop 이 "멈춰도 더 간다"
+        # 로 느껴질 때 먼저 볼 곳이므로 기동 로그에 남긴다.
+        self.get_logger().info(
+            f"가속 {self.max_joint_accel} / 감속 {self.max_joint_decel} rad/s² · "
+            f"정지 되감기 {self.limiter.resync_rate_deg_s:.0f} °/s "
+            f"(게인 {self.resync_gain:.0f}/s, 추종오차 밴드 ±{self.max_follow_error}°)"
+        )
 
     # -- 설정 ------------------------------------------------------------
 
@@ -108,6 +148,11 @@ class UsServoNode(Node):
         self.declare_parameter("robot.backend", "mock")
 
         self.declare_parameter("safety.max_joint_vel_rad_s", 0.5)
+        self.declare_parameter("safety.max_joint_accel_rad_s2", 8.0)
+        self.declare_parameter("safety.max_joint_decel_rad_s2", 24.0)
+        self.declare_parameter("safety.idle_resync_rate_deg_s", 90.0)
+        self.declare_parameter("safety.idle_resync_gain_per_s", 12.0)
+        self.declare_parameter("safety.max_follow_error_deg", 5.0)
         self.declare_parameter("safety.joint_limits_deg.lower", [-175.0, -265.0, -160.0, -265.0, -175.0, -165.0])
         self.declare_parameter("safety.joint_limits_deg.upper", [175.0, 85.0, 160.0, 85.0, 175.0, 165.0])
 
@@ -133,6 +178,18 @@ class UsServoNode(Node):
             raise ValueError(f"관절 한계가 뒤집혀 있다: {self.limits_lower} / {self.limits_upper}")
         if self.max_joint_vel <= 0.0:
             raise ValueError("safety.max_joint_vel_rad_s 는 0보다 커야 한다")
+        if self.max_joint_accel <= 0.0:
+            raise ValueError("safety.max_joint_accel_rad_s2 는 0보다 커야 한다")
+        if self.max_joint_decel < self.max_joint_accel:
+            raise ValueError(
+                "safety.max_joint_decel_rad_s2 는 가속 상한 이상이어야 한다 "
+                f"({self.max_joint_decel} < {self.max_joint_accel}). 감속을 가속보다 "
+                "느리게 잡으면 정지가 가속보다 오래 걸린다 — 지금 고치려는 증상 그대로다."
+            )
+        if self.resync_gain <= 0.0 or self.resync_rate_deg_s <= 0.0:
+            raise ValueError("safety.idle_resync_* 는 0보다 커야 한다 (0 이면 되감기가 꺼진다)")
+        if self.max_follow_error <= 0.0:
+            raise ValueError("safety.max_follow_error_deg 는 0보다 커야 한다")
 
     # -- 제어 ------------------------------------------------------------
 
@@ -157,8 +214,10 @@ class UsServoNode(Node):
             now = self.get_clock().now()
             dt = (now - self.last_loop_time).nanoseconds / 1e9
             self.last_loop_time = now
-            # 타이머가 밀리거나 튀어도 한 스텝에 큰 각도가 실리지 않게 묶는다
-            dt = min(max(dt, 0.002), 0.1)
+            # 타이머가 밀리거나 튀어도 한 스텝에 큰 각도가 실리지 않게 묶는다.
+            # 상한은 fairino 의 cmdT 권장 상한이다 — 이 값이 그대로 cmdT 로 나가므로
+            # 규격 밖으로 나가면 컨트롤러가 지령을 거부한다 (오류 29).
+            dt = min(max(dt, CMD_T_MIN), CMD_T_MAX)
 
             since_cmd = (now - self.last_cmd_time).nanoseconds / 1e9
             if since_cmd > self.cmd_timeout:
@@ -166,6 +225,7 @@ class UsServoNode(Node):
                 if not self._stopped_by_watchdog and any(self.target_vel_rad):
                     self.get_logger().warn(
                         f"관절 지령 두절 {since_cmd * 1000:.0f} ms — 정지. "
+                        f"남은 지령 선행분은 되감아 버린다. "
                         f"후퇴는 us_diff_ik_node 가 수행한다."
                     )
                     self._stopped_by_watchdog = True
@@ -173,17 +233,51 @@ class UsServoNode(Node):
             else:
                 self._stopped_by_watchdog = False
 
-            for i in range(6):
-                velocity = max(min(self.target_vel_rad[i], self.max_joint_vel), -self.max_joint_vel)
-                candidate = self.commanded_deg[i] + math.degrees(velocity) * dt
-                self.commanded_deg[i] = max(
-                    min(candidate, self.limits_upper[i]), self.limits_lower[i]
+            # 폴트가 한 번 걸리면 지령을 계속 밀어넣지 않는다. 컨트롤러는 어차피 전부
+            # 거부하고, 그 사이에도 commanded_deg 는 적분을 계속해 실제와의 간격이
+            # 무한히 벌어진다 — 그 상태로 서보가 살아나면 그것이 곧 튀는 동작이다.
+            if self._servo_faulted:
+                self.target_vel_rad = [0.0] * 6
+                self.limiter.hard_reset(self.backend.joint_positions_deg())
+                return
+
+            actual_deg = self.backend.joint_positions_deg()
+            was_idle = self.limiter.idle
+
+            # 속도 상한 · 가속/감속 상한 · 관절 한계 · 추종오차 밴드, 그리고 정지 중
+            # 지령 되감기가 전부 여기서 일어난다 (joint_command_limiter 참조).
+            commanded_deg = self.limiter.step(self.target_vel_rad, actual_deg, dt)
+
+            # 정지로 넘어가는 순간의 선행분을 기록한다. 되감기가 없던 시절에는
+            # 이만큼이 손을 멈춘 뒤에 그대로 실행됐고, 그것이 곧 "멈춰도 더 간다" 였다.
+            # 이 값이 추종오차 밴드에 붙어 있으면 밴드가 포화한 것이다 — 그 구간에서
+            # 조작이 뻣뻣해진다. 밴드를 줄이거나 IK 출력을 줄여야 한다는 신호다.
+            if self.limiter.idle and not was_idle and self.limiter.lead_at_stop_deg > 0.5:
+                self.get_logger().info(
+                    f"정지 — 지령 선행분 {self.limiter.lead_at_stop_deg:.2f}° 되감는다"
+                    + (
+                        "  ← 추종오차 밴드 포화"
+                        if self.limiter.lead_at_stop_deg > 0.9 * self.max_follow_error
+                        else ""
+                    ),
+                    throttle_duration_sec=2.0,
                 )
 
             self.cmd_id += 1
-            error = self.backend.servo_j(self.commanded_deg, dt, self.cmd_id)
+            error = self.backend.servo_j(commanded_deg, dt, self.cmd_id)
             if error != 0:
-                self.get_logger().error(f"ServoJ 오류 {error}", throttle_duration_sec=1.0)
+                self._servo_faulted = True
+                meaning = SERVOJ_ERRORS.get(error, "미상 — FAIRINO Error Code Table 참조")
+                self.get_logger().error(
+                    f"ServoJ 오류 {error}: {meaning}. 서보 지령을 중단한다. "
+                    f"관절={[round(v, 2) for v in self.limiter.commanded_deg]} "
+                    f"속도={[round(v, 3) for v in self.limiter.applied_vel_rad]} "
+                    f"cmdT={dt * 1000:.1f} ms"
+                )
+                self.get_logger().error(
+                    "복구는 자동으로 하지 않는다 — 폴트 시점의 손 자세 그대로 서보가 "
+                    "살아나면 그것이 곧 급발진이다. 노드를 내렸다 다시 띄워라."
+                )
         except Exception as exc:
             self.get_logger().error(f"제어 루프 예외: {exc}", throttle_duration_sec=1.0)
 
@@ -279,9 +373,15 @@ class UsServoNode(Node):
                     f"이동한다. 먼저 후퇴시킨 뒤 다시 종료하라."
                 )
             else:
+                # 폴트 상태에서는 MoveJ 도 14 로 떨어진다. 지우고 나서 보낸다.
+                if self._servo_faulted:
+                    reset = self.backend.reset_error()
+                    self.get_logger().info(f"컨트롤러 폴트 해제 시도 — ResetAllError={reset}")
                 self.get_logger().info("홈 자세로 복귀 중...")
-                if self.backend.move_j(self.home_deg, vel=15.0) != 0:
-                    self.get_logger().error("MoveJ 실패")
+                move_error = self.backend.move_j(self.home_deg, vel=15.0)
+                if move_error != 0:
+                    meaning = SERVOJ_ERRORS.get(move_error, "미상")
+                    self.get_logger().error(f"MoveJ 실패 {move_error}: {meaning}")
         except Exception as exc:
             self.get_logger().error(f"종료 절차 예외: {exc}")
         finally:

@@ -1,0 +1,64 @@
+test patients: 16   excluded: 26 ['P000', 'P008', 'P009', 'P010', 'P013', 'P014', 'P015', 'P019', 'P022', 'P032', 'P035', 'P039', 'P046', 'P049', 'P053', 'P055', 'P060', 'P069', 'P075', 'P077', 'P080', 'P083', 'P084', 'P091', 'P099', 'P108']
+exclusion rule: label_appearance.contrast < 0: the labelled region is not darker than the tissue immediately around it, so it cannot be a urine-filled lumen. Model-blind -- derived from image and label only, never from a prediction.
+
+  standard/P000: 147 frames
+  standard/P001: 144 frames
+  standard/P011: 200 frames
+  standard/P012: 147 frames
+  standard/P019: 122 frames
+  standard/P020: 103 frames
+  standard/P021: 200 frames
+  standard/P040: 121 frames
+  standard/P041: 128 frames
+  standard/P043: 100 frames
+  standard/P085: 81 frames
+  standard/P089: 98 frames
+  standard/P095: 100 frames
+  standard/P097: 73 frames
+  standard/P108: 109 frames
+  standard/P109: 144 frames
+  slim/P000: 147 frames
+  slim/P001: 144 frames
+  slim/P011: 200 frames
+  slim/P012: 147 frames
+  slim/P019: 122 frames
+  slim/P020: 103 frames
+  slim/P021: 200 frames
+  slim/P040: 121 frames
+  slim/P041: 128 frames
+  slim/P043: 100 frames
+  slim/P085: 81 frames
+  slim/P089: 98 frames
+  slim/P095: 100 frames
+  slim/P097: 73 frames
+  slim/P108: 109 frames
+  slim/P109: 144 frames
+
+==============================================================================
+
+cohort=all  (16 patients)
+  metric                   standard                           slim                              
+  dice                     0.7525 ± 0.1730  [0.6603, 0.8251]  0.7221 ± 0.2400  [0.5929, 0.8226] 
+  iou                      0.6318 ± 0.1860  [0.5379, 0.7124]  0.6112 ± 0.2376  [0.4880, 0.7137] 
+  hd95                     13.0826 ± 9.9296  [8.9475, 18.4623] 13.7471 ± 11.6269  [8.9862, 20.2262]
+  assd                     4.7744 ± 3.8107  [3.3190, 6.9304]  5.1617 ± 4.9772  [3.2512, 8.0000] 
+  relative_area_error      0.2456 ± 0.1767  [0.1666, 0.3337]  0.2856 ± 0.2506  [0.1767, 0.4162] 
+  temporal_dice            0.9713 ± 0.0376  [0.9509, 0.9866]  0.9528 ± 0.0760  [0.9117, 0.9818] 
+  absent_transition_rate   0.0000 ± 0.0000  [0.0000, 0.0000]  0.0412 ± 0.1493  [0.0000, 0.1197] 
+  track_break_rate         0.0006 ± 0.0025  [0.0000, 0.0019]  0.0082 ± 0.0259  [0.0000, 0.0227] 
+  mask_dropout_rate        0.0003 ± 0.0013  [0.0000, 0.0009]  0.0453 ± 0.1544  [0.0000, 0.1291] 
+
+cohort=retained  (13 patients)
+  metric                   standard                           slim                              
+  dice                     0.7628 ± 0.1897  [0.6543, 0.8479]  0.7288 ± 0.2607  [0.5780, 0.8478] 
+  iou                      0.6499 ± 0.2005  [0.5366, 0.7425]  0.6257 ± 0.2548  [0.4793, 0.7436] 
+  hd95                     13.5485 ± 11.0073  [8.5514, 19.8533] 14.4579 ± 12.8545  [8.7479, 21.9267]
+  assd                     4.9971 ± 4.2242  [3.2345, 7.4884]  5.4939 ± 5.5026  [3.1590, 8.6664] 
+  relative_area_error      0.2251 ± 0.1826  [0.1371, 0.3261]  0.2984 ± 0.2774  [0.1643, 0.4532] 
+  temporal_dice            0.9699 ± 0.0416  [0.9452, 0.9881]  0.9508 ± 0.0837  [0.9010, 0.9851] 
+  absent_transition_rate   0.0000 ± 0.0000  [0.0000, 0.0000]  0.0507 ± 0.1653  [0.0000, 0.1427] 
+  track_break_rate         0.0008 ± 0.0028  [0.0000, 0.0023]  0.0101 ± 0.0286  [0.0000, 0.0257] 
+  mask_dropout_rate        0.0004 ± 0.0014  [0.0000, 0.0012]  0.0558 ± 0.1708  [0.0000, 0.1504] 
+
+wrote /home/rosotauser/FR5-for-RUS/Unet_seg/experiments/pfus_label_audit/final_metrics_frames.csv
+wrote /home/rosotauser/FR5-for-RUS/Unet_seg/experiments/pfus_label_audit/final_metrics.json

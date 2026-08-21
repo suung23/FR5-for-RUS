@@ -1,0 +1,142 @@
+{
+  "split": "test",
+  "resolution": 256,
+  "flow": "Farneback (cv2)",
+  "models": {
+    "standard": {
+      "n_patients": 16,
+      "method1_raw": {
+        "statistic": "patient-level mean",
+        "point": 0.9646002146206376,
+        "ci_low": 0.9426814391053363,
+        "ci_high": 0.9828036494520771,
+        "n_patients": 16,
+        "n_frames": 16,
+        "n_boot": 4000
+      },
+      "method2_flow_warped": {
+        "statistic": "patient-level mean",
+        "point": 0.9712609773226974,
+        "ci_low": 0.9507750136688025,
+        "ci_high": 0.986579050516044,
+        "n_patients": 16,
+        "n_frames": 16,
+        "n_boot": 4000
+      },
+      "mask_dropout_rate": {
+        "statistic": "patient-level mean",
+        "point": 0.0003125,
+        "ci_low": 0.0,
+        "ci_high": 0.0009375,
+        "n_patients": 16,
+        "n_frames": 16,
+        "n_boot": 4000
+      },
+      "worst_patients": [
+        {
+          "patient_id": "P021",
+          "tc_method2_mean": 0.8756408360584274,
+          "mask_dropout_rate": 0.005
+        },
+        {
+          "patient_id": "P043",
+          "tc_method2_mean": 0.8792334439293101,
+          "mask_dropout_rate": 0.0
+        },
+        {
+          "patient_id": "P000",
+          "tc_method2_mean": 0.9620618281182891,
+          "mask_dropout_rate": 0.0
+        },
+        {
+          "patient_id": "P001",
+          "tc_method2_mean": 0.969679444122593,
+          "mask_dropout_rate": 0.0
+        },
+        {
+          "patient_id": "P095",
+          "tc_method2_mean": 0.9758339383497474,
+          "mask_dropout_rate": 0.0
+        }
+      ],
+      "method2_excluding_both_empty": {
+        "statistic": "patient-level mean",
+        "point": 0.9712609754645715,
+        "ci_low": 0.9507750153926497,
+        "ci_high": 0.9865790462083907,
+        "n_patients": 16,
+        "n_frames": 2001,
+        "n_boot": 4000
+      },
+      "both_empty_transitions_excluded": 0
+    },
+    "slim": {
+      "n_patients": 16,
+      "method1_raw": {
+        "statistic": "patient-level mean",
+        "point": 0.9535949108136088,
+        "ci_low": 0.9147058915697084,
+        "ci_high": 0.9809476693687889,
+        "n_patients": 16,
+        "n_frames": 16,
+        "n_boot": 4000
+      },
+      "method2_flow_warped": {
+        "statistic": "patient-level mean",
+        "point": 0.9589577437370281,
+        "ci_low": 0.9232176949130055,
+        "ci_high": 0.983159383816005,
+        "n_patients": 16,
+        "n_frames": 16,
+        "n_boot": 4000
+      },
+      "mask_dropout_rate": {
+        "statistic": "patient-level mean",
+        "point": 0.045,
+        "ci_low": 0.0,
+        "ci_high": 0.128125,
+        "n_patients": 16,
+        "n_frames": 16,
+        "n_boot": 4000
+      },
+      "worst_patients": [
+        {
+          "patient_id": "P043",
+          "tc_method2_mean": 0.7170928674390383,
+          "mask_dropout_rate": 0.11
+        },
+        {
+          "patient_id": "P000",
+          "tc_method2_mean": 0.9232736160965284,
+          "mask_dropout_rate": 0.0
+        },
+        {
+          "patient_id": "P001",
+          "tc_method2_mean": 0.9407454531617188,
+          "mask_dropout_rate": 0.0
+        },
+        {
+          "patient_id": "P021",
+          "tc_method2_mean": 0.9457499492107431,
+          "mask_dropout_rate": 0.61
+        },
+        {
+          "patient_id": "P095",
+          "tc_method2_mean": 0.9556842499604736,
+          "mask_dropout_rate": 0.0
+        }
+      ],
+      "method2_excluding_both_empty": {
+        "statistic": "patient-level mean",
+        "point": 0.9527734206173337,
+        "ci_low": 0.9116301254540756,
+        "ci_high": 0.9817650759455678,
+        "n_patients": 16,
+        "n_frames": 1876,
+        "n_boot": 4000
+      },
+      "both_empty_transitions_excluded": 125
+    }
+  },
+  "note": "Both-empty transitions score TC=1.0 by convention; the 'excluding_both_empty' variant removes them so a model is not credited for stable silence. Slim's P021 contributes 119 such transitions."
+}

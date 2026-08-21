@@ -1,0 +1,31 @@
+[flow] Farneback over 16 sequences
+  P000: 146 transitions
+  P001: 143 transitions
+  P011: 199 transitions
+  P012: 146 transitions
+  P019: 121 transitions
+  P020: 102 transitions
+  P021: 199 transitions
+  P040: 120 transitions
+  P041: 127 transitions
+  P043: 99 transitions
+  P085: 80 transitions
+  P089: 97 transitions
+  P095: 99 transitions
+  P097: 72 transitions
+  P108: 108 transitions
+  P109: 143 transitions
+
+[standard]  16 patients
+  method1_raw            0.9646  95%CI [0.9427, 0.9828]
+  method2_flow_warped    0.9713  95%CI [0.9508, 0.9866]
+  mask_dropout_rate      0.0003  95%CI [0.0000, 0.0009]
+  worst by motion-compensated TC: P021=0.876, P043=0.879, P000=0.962, P001=0.970, P095=0.976
+
+[slim]  16 patients
+  method1_raw            0.9536  95%CI [0.9147, 0.9809]
+  method2_flow_warped    0.9590  95%CI [0.9232, 0.9832]
+  mask_dropout_rate      0.0450  95%CI [0.0000, 0.1281]
+  worst by motion-compensated TC: P043=0.717, P000=0.923, P001=0.941, P021=0.946, P095=0.956
+
+wrote /home/rosotauser/FR5-for-RUS/Unet_seg/experiments/pfus_label_audit/temporal_consistency.csv

@@ -22,3 +22,8 @@ tracer/
 imu_bench/.toolchain/
 imu_bench/.build/
 imu_bench/mag_cal.json
+
+# 수집 세션 원시 로그. 세션당 수백 MB 라 리포에 담지 않는다 — qc_track/.gitignore 와
+# 같은 정책이다 (보존은 archive 로 따로). 2026-08-21 에 152 MB / 101 MB CSV 두 개가
+# GitHub 하드 리밋(100 MB)에 걸려 push 가 거부되면서 규칙이 한쪽에만 있었음을 알았다.
+imu_bench/logs/

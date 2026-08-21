@@ -1,0 +1,70 @@
+{
+  "rule": "label_appearance.contrast < 0: the labelled region is not darker than the tissue immediately around it, so it cannot be a urine-filled lumen. Model-blind -- derived from image and label only, never from a prediction.",
+  "threshold": 0.0,
+  "measured_by": "dataset_audit/label_appearance.py",
+  "excluded": [
+    "P000",
+    "P008",
+    "P009",
+    "P010",
+    "P013",
+    "P014",
+    "P015",
+    "P019",
+    "P022",
+    "P032",
+    "P035",
+    "P039",
+    "P046",
+    "P049",
+    "P053",
+    "P055",
+    "P060",
+    "P069",
+    "P075",
+    "P077",
+    "P080",
+    "P083",
+    "P084",
+    "P091",
+    "P099",
+    "P108"
+  ],
+  "excluded_by_split": {
+    "test": [
+      "P000",
+      "P019",
+      "P108"
+    ],
+    "train": [
+      "P008",
+      "P009",
+      "P013",
+      "P015",
+      "P035",
+      "P039",
+      "P046",
+      "P049",
+      "P053",
+      "P055",
+      "P060",
+      "P069",
+      "P075",
+      "P077",
+      "P080",
+      "P084",
+      "P091",
+      "P099"
+    ],
+    "val": [
+      "P010",
+      "P014",
+      "P022",
+      "P032",
+      "P083"
+    ]
+  },
+  "num_excluded": 26,
+  "num_patients": 110,
+  "not_excluded_note": "P021 is NOT excluded: neither the label-motion audit (ratio 1.21, its image barely moves either) nor the appearance audit (contrast +9.6, texture 0.37) finds a defect in its label. Excluding it would be excluding a hard case."
+}

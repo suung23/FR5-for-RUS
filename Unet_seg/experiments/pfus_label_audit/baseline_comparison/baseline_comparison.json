@@ -1,0 +1,48 @@
+{
+  "standard_unet": {
+    "model": "standard_unet",
+    "params": 8635809,
+    "gflops_256": 32.66,
+    "dice_mean": 0.7313,
+    "dice_median": 0.7876,
+    "iou_mean": 0.6099,
+    "hd95_median_px": 10.48,
+    "assd_audit_px_256": 4.63,
+    "assd_audit_ci95": [
+      3.3,
+      6.74
+    ],
+    "missed_bladder_rate": 0.0005,
+    "component_failure_rate": 0.0,
+    "temporal_dice_uncompensated": 0.9646,
+    "mask_dropout_rate": 0.00031,
+    "inference_ms_mean_gpu": 1.131,
+    "end_to_end_ms_mean_gpu": 3.026,
+    "end_to_end_p95_gpu": 3.198,
+    "trained": true,
+    "notes": "40 epochs, seed 42, identical split/preprocessing/augmentation"
+  },
+  "slim_unet": {
+    "model": "slim_unet",
+    "params": 4705377,
+    "gflops_256": 21.79,
+    "dice_mean": 0.6977,
+    "dice_median": 0.8046,
+    "iou_mean": 0.5882,
+    "hd95_median_px": 10.16,
+    "assd_audit_px_256": 4.99,
+    "assd_audit_ci95": [
+      3.24,
+      7.65
+    ],
+    "missed_bladder_rate": 0.06644,
+    "component_failure_rate": 0.0,
+    "temporal_dice_uncompensated": 0.9536,
+    "mask_dropout_rate": 0.04531,
+    "inference_ms_mean_gpu": 0.822,
+    "end_to_end_ms_mean_gpu": 2.645,
+    "end_to_end_p95_gpu": 2.876,
+    "trained": true,
+    "notes": "40 epochs, seed 42, identical split/preprocessing/augmentation"
+  }
+}

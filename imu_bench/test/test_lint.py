@@ -29,7 +29,7 @@ FATAL = (
 
 def sources():
     out = []
-    for sub in ("host", "test"):
+    for sub in ("host", "test", "qc_track"):
         d = os.path.join(ROOT, sub)
         out += [os.path.join(d, f) for f in sorted(os.listdir(d)) if f.endswith(".py")]
     return out

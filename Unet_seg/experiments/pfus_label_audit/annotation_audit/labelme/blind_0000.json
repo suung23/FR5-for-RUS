@@ -1,0 +1,11 @@
+{
+  "version": "5.4.1",
+  "flags": {
+    "uncertain_boundary": false
+  },
+  "shapes": [],
+  "imagePath": "../images_blinded/blind_0000.png",
+  "imageData": null,
+  "imageHeight": 814,
+  "imageWidth": 1168
+}

@@ -1,0 +1,5 @@
+model,params,gflops_256,dice_mean,dice_median,iou_mean,hd95_median_px,assd_audit_px_256,assd_audit_ci95,missed_bladder_rate,component_failure_rate,temporal_dice_uncompensated,mask_dropout_rate,inference_ms_mean_gpu,end_to_end_ms_mean_gpu,end_to_end_p95_gpu,trained,notes
+standard_unet,8635809,32.66,0.7313,0.7876,0.6099,10.48,4.63,"[3.3, 6.74]",0.0005,0.0,0.9646,0.00031,1.131,3.026,3.198,True,"40 epochs, seed 42, identical split/preprocessing/augmentation"
+slim_unet,4705377,21.79,0.6977,0.8046,0.5882,10.16,4.99,"[3.24, 7.65]",0.06644,0.0,0.9536,0.04531,0.822,2.645,2.876,True,"40 epochs, seed 42, identical split/preprocessing/augmentation"
+unet_plus_plus,,,,,,,,,,,,,,,,False,not trained: CPU-only torch in this environment; see module docstring
+fpn_resnet50,,,,,,,,,,,,,,,,False,not trained: CPU-only torch in this environment; see module docstring

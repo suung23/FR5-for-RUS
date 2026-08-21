@@ -16,6 +16,8 @@ import json
 import logging
 from pathlib import Path
 
+import cv2
+
 
 from _common import parse_overrides, prepare_manifest  # noqa: E402  (path setup)
 
@@ -53,6 +55,12 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--device", default=None, help="Override the device")
     parser.add_argument("--max-sequences", type=int, default=None, help="Evaluate at most N sequences")
     parser.add_argument("--no-hd95", action="store_true", help="Skip the HD95 metric")
+    parser.add_argument(
+        "--no-flow-fallback",
+        action="store_true",
+        help="Do not compute Farneback flow when the manifest has none; temporal "
+             "metrics are then reported with motion_compensated=false",
+    )
     parser.add_argument("--set", dest="overrides", action="append", metavar="KEY=VALUE")
     return parser.parse_args()
 
@@ -99,6 +107,9 @@ def main() -> int:
     )
 
     compute_hd95 = bool(config.get("evaluation.compute_hd95", True)) and not args.no_hd95
+    # When the manifest carries no precomputed flow, fall back to Farneback so
+    # the temporal numbers are motion-compensated in fact and not only in name.
+    compute_flow = not args.no_flow_fallback
     spacing = float(config.get("evaluation.pixel_spacing", 1.0))
     latency = LatencyTracker(warmup=int(config.get("evaluation.warmup_frames", 3)))
 
@@ -115,6 +126,7 @@ def main() -> int:
 
         for (patient, sequence), records in sequences:
             previous_state = None
+            previous_image = None
             temporal_records: list[TemporalFrameRecord] = []
 
             for record in records:  # chronological order, never shuffled
@@ -124,6 +136,7 @@ def main() -> int:
                     target = resize_mask(load_mask(manifest.resolve(record.mask_path)), target_size)
 
                 flow_backward = None
+                flow_source = "none"
                 if record.flow_backward_path:
                     path = manifest.resolve(record.flow_backward_path)
                     if path is not None and path.is_file():
@@ -132,8 +145,18 @@ def main() -> int:
                             from rus_perception.data.video_dataset import resize_flow
 
                             flow_backward = resize_flow(pair.backward, target_size)
+                            flow_source = "precomputed"
                         except ValueError as exc:
                             logger.warning("Ignoring unusable flow %s: %s", path, exc)
+
+                if flow_backward is None and compute_flow and previous_image is not None:
+                    # Backward flow lives on the CURRENT grid and points into the
+                    # previous frame, so the argument order is (current, previous)
+                    # -- see rus_perception/flow/warp.py.
+                    flow_backward = cv2.calcOpticalFlowFarneback(
+                        image, previous_image, None, 0.5, 3, 21, 3, 5, 1.2, 0
+                    ).transpose(2, 0, 1)
+                    flow_source = "farneback"
 
                 state = predictor.predict_control_state(
                     image,
@@ -171,13 +194,18 @@ def main() -> int:
                 warped_previous_probability = None
                 previous_centroid = None
                 previous_area = None
+                motion_compensated = True
                 if previous_state is not None and previous_state.binary_mask is not None:
                     if flow_backward is not None:
                         warped_previous = warp_mask_with_flow(
                             previous_state.binary_mask, flow_backward
                         )
+                        motion_compensated = True
                     else:
+                        # Not compensated. Recorded as such: an earlier revision
+                        # published this branch's output as "warped".
                         warped_previous = previous_state.binary_mask
+                        motion_compensated = False
                     warped_previous_probability = previous_state.probability_map
                     if previous_state.centroid_x_normalized is not None:
                         previous_centroid = (
@@ -193,6 +221,7 @@ def main() -> int:
                         probability_map=state.probability_map,
                         warped_previous_mask=warped_previous,
                         warped_previous_probability=warped_previous_probability,
+                        motion_compensated=motion_compensated,
                         centroid=(
                             (state.centroid_x_normalized, state.centroid_y_normalized)
                             if state.centroid_x_normalized is not None
@@ -206,6 +235,7 @@ def main() -> int:
                     )
                 )
                 previous_state = state
+                previous_image = image
 
             sequence_metrics.append(
                 compute_sequence_temporal_metrics(

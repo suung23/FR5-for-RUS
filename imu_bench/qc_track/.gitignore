@@ -1,0 +1,5 @@
+# 수집물과 산출물. 보존은 archive 로 따로 한다 (raw 는 세션당 수백 MB 다).
+raw_data/
+raw_data_sim/
+runs/
+__pycache__/

@@ -1,0 +1,18 @@
+[standard] masks_standard_test_256.npz exists, skipping
+  [slim] P000: 147 frames
+  [slim] P001: 144 frames
+  [slim] P011: 200 frames
+  [slim] P012: 147 frames
+  [slim] P019: 122 frames
+  [slim] P020: 103 frames
+  [slim] P021: 200 frames
+  [slim] P040: 121 frames
+  [slim] P041: 128 frames
+  [slim] P043: 100 frames
+  [slim] P085: 81 frames
+  [slim] P089: 98 frames
+  [slim] P095: 100 frames
+  [slim] P097: 73 frames
+  [slim] P108: 109 frames
+  [slim] P109: 144 frames
+[slim] wrote masks_slim_test_256.npz

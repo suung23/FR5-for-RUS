@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="340" viewBox="0 0 720 340" role="img" aria-label="Stab(Π)의 동차행렬. y 행과 열이 항등으로 고정되고 남은 성분이 SE(2)를 이룬다.">
+  <title>SE(2)의 정의</title>
+  <style>
+    svg{--surface:#FFFFFF;--panel:#F4F8F7;--ink:#15211F;--ink2:#394A47;--muted:#697B78;--hair:#D5DEDC;
+        --in:#0B7A67;--in-soft:rgba(11,122,103,.10);--out:#B0452B;--out-soft:rgba(176,69,43,.10);
+        --sans:system-ui,"Noto Sans CJK KR","Noto Sans KR","Malgun Gothic","Apple SD Gothic Neo",sans-serif;
+        --mono:"DejaVu Sans Mono","JetBrains Mono",ui-monospace,monospace;}
+    @media (prefers-color-scheme:dark){
+      svg{--surface:#171F1D;--panel:#131A19;--ink:#E7EEEC;--ink2:#BDCAC7;--muted:#8A9C99;--hair:#2B3936;
+          --in:#4CD5B8;--in-soft:rgba(76,213,184,.15);--out:#F0906F;--out-soft:rgba(240,144,111,.15);}
+    }
+    .bg{fill:var(--surface)}
+    .s-fg{stroke:var(--ink)} .s-mut{stroke:var(--muted)} .s-hair{stroke:var(--hair)}
+    .s-in{stroke:var(--in)} .s-out{stroke:var(--out)}
+    .f-in{fill:var(--in-soft)} .f-out{fill:var(--out-soft)}
+    .f-surf{fill:var(--surface)} .f-panel{fill:var(--panel)}
+    .mk-fg{fill:var(--ink)} .mk-mut{fill:var(--muted)} .mk-in{fill:var(--in)} .mk-out{fill:var(--out)}
+    .t{font-family:var(--sans);font-size:12px;fill:var(--ink2)}
+    .tm{font-family:var(--mono);font-size:12.5px;fill:var(--ink)}
+    .tmu{font-family:var(--sans);font-size:11px;fill:var(--muted)}
+    .tin{fill:var(--in)} .tout{fill:var(--out)}
+    .tt{font-family:var(--mono);font-size:14px;font-weight:500}
+    .no-fill{fill:none}
+  </style>
+  <defs>
+    <marker id="ar-fg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-fg"/></marker>
+    <marker id="ar-mut" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-mut"/></marker>
+    <marker id="ar-in" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-in"/></marker>
+    <marker id="ar-out" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-out"/></marker>
+  </defs>
+  <rect class="bg" x="0" y="0" width="720" height="340"/>
+      <text x="154" y="38" class="tmu">g ∈ Stab(Π) ⊂ SE(3), probe 좌표 표현</text>
+
+      <!-- muted y row / col -->
+      <rect x="170" y="98" width="304" height="42" class="f-panel"/>
+      <rect x="246" y="56" width="76" height="168" class="f-panel"/>
+      <rect x="170" y="98" width="304" height="42" class="no-fill s-mut" stroke-width="1" stroke-dasharray="3 3"/>
+      <rect x="246" y="56" width="76" height="168" class="no-fill s-mut" stroke-width="1" stroke-dasharray="3 3"/>
+
+      <!-- SE(2) cells -->
+      <rect x="170" y="56" width="76" height="42" class="f-in"/>
+      <rect x="322" y="56" width="76" height="42" class="f-in"/>
+      <rect x="170" y="140" width="76" height="42" class="f-in"/>
+      <rect x="322" y="140" width="76" height="42" class="f-in"/>
+      <rect x="398" y="56" width="76" height="42" class="f-in"/>
+      <rect x="398" y="140" width="76" height="42" class="f-in"/>
+
+      <!-- brackets -->
+      <path d="M 164 50 L 154 50 L 154 230 L 164 230" class="no-fill s-fg" stroke-width="1.6"/>
+      <path d="M 480 50 L 490 50 L 490 230 L 480 230" class="no-fill s-fg" stroke-width="1.6"/>
+
+      <!-- entries -->
+      <text x="208" y="82" class="tm tin" text-anchor="middle">cos θ</text>
+      <text x="284" y="82" class="tm" text-anchor="middle" opacity=".45">0</text>
+      <text x="360" y="82" class="tm tin" text-anchor="middle">sin θ</text>
+      <text x="436" y="82" class="tm tin" text-anchor="middle">t_x</text>
+
+      <text x="208" y="124" class="tm" text-anchor="middle" opacity=".45">0</text>
+      <text x="284" y="124" class="tm" text-anchor="middle" opacity=".45">1</text>
+      <text x="360" y="124" class="tm" text-anchor="middle" opacity=".45">0</text>
+      <text x="436" y="124" class="tm" text-anchor="middle" opacity=".45">0</text>
+
+      <text x="208" y="166" class="tm tin" text-anchor="middle">−sin θ</text>
+      <text x="284" y="166" class="tm" text-anchor="middle" opacity=".45">0</text>
+      <text x="360" y="166" class="tm tin" text-anchor="middle">cos θ</text>
+      <text x="436" y="166" class="tm tin" text-anchor="middle">t_z</text>
+
+      <text x="208" y="208" class="tm" text-anchor="middle" opacity=".45">0</text>
+      <text x="284" y="208" class="tm" text-anchor="middle" opacity=".45">0</text>
+      <text x="360" y="208" class="tm" text-anchor="middle" opacity=".45">0</text>
+      <text x="436" y="208" class="tm" text-anchor="middle" opacity=".45">1</text>
+
+      <!-- row/col labels -->
+      <text x="146" y="82" class="tmu" text-anchor="end">x</text>
+      <text x="146" y="124" class="tmu tout" text-anchor="end">y</text>
+      <text x="146" y="166" class="tmu" text-anchor="end">z</text>
+      <text x="208" y="246" class="tmu" text-anchor="middle">x</text>
+      <text x="284" y="246" class="tmu tout" text-anchor="middle">y</text>
+      <text x="360" y="246" class="tmu" text-anchor="middle">z</text>
+      <text x="436" y="246" class="tmu" text-anchor="middle">t</text>
+
+      <!-- annotation -->
+      <line x1="492" y1="119" x2="512" y2="119" class="s-mut" stroke-width="1.1" marker-end="url(#ar-mut)"/>
+      <text x="518" y="112" class="t">y 행·열 = 항등</text>
+      <text x="518" y="130" class="tmu">평면 불변의 대수적 정의</text>
+
+      <line x1="492" y1="76" x2="512" y2="76" class="s-in" stroke-width="1.1" marker-end="url(#ar-in)"/>
+      <text x="518" y="80" class="t tin">≅ SE(2)</text>
+
+      <text x="322" y="292" class="tm" text-anchor="middle">자유 성분 3개 — 회전 θ 하나, 병진 t_x · t_z 둘</text>
+      <text x="322" y="314" class="tmu" text-anchor="middle">이것이 &quot;영상면 위에 유도되는 SE(2)&quot;입니다</text>
+    </svg>

@@ -1,0 +1,307 @@
+<title>저용적 방광 필터링</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=Noto+Sans+KR:wght@400;500;700&display=swap">
+<style>
+:root{
+  --ground:#F5F8F8; --surface:#FFFFFF; --surface-2:#EAF0F1; --line:#D2DEE0; --line-soft:#E3EBEC;
+  --ink:#0F1719; --ink-2:#3D4E52; --muted:#6B8087;
+  --keep:#0E8C9C; --keep-soft:rgba(14,140,156,.13); --drop:#7C8F95; --drop-soft:rgba(124,143,149,.13);
+  --warn:#B0781A; --warn-soft:rgba(176,120,26,.11);
+  --grid:#DCE6E8;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#0E1417; --surface:#151D21; --surface-2:#1C262A; --line:#2B383D; --line-soft:#222D32;
+    --ink:#E6EEF0; --ink-2:#B4C5C9; --muted:#8095A0;
+    --keep:#22C1D4; --keep-soft:rgba(34,193,212,.16); --drop:#7B8E95; --drop-soft:rgba(123,142,149,.16);
+    --warn:#D9A03F; --warn-soft:rgba(217,160,63,.13);
+    --grid:#263338;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0E1417; --surface:#151D21; --surface-2:#1C262A; --line:#2B383D; --line-soft:#222D32;
+  --ink:#E6EEF0; --ink-2:#B4C5C9; --muted:#8095A0;
+  --keep:#22C1D4; --keep-soft:rgba(34,193,212,.16); --drop:#7B8E95; --drop-soft:rgba(123,142,149,.16);
+  --warn:#D9A03F; --warn-soft:rgba(217,160,63,.13);
+  --grid:#263338;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:"IBM Plex Sans","Noto Sans KR",system-ui,sans-serif;
+  font-size:15.5px; line-height:1.65; -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1120px; margin:0 auto; padding:0 28px}
+h1,h2,h3{font-family:"IBM Plex Sans Condensed","Noto Sans KR","IBM Plex Sans",system-ui,sans-serif; text-wrap:balance; margin:0}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace; font-variant-numeric:tabular-nums}
+.eyebrow{font-family:"IBM Plex Mono",monospace; font-size:11.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted)}
+
+header{border-bottom:1px solid var(--line); background:var(--surface)}
+.head{display:flex; flex-wrap:wrap; gap:28px; align-items:flex-end; justify-content:space-between; padding:44px 0 30px}
+.head h1{font-size:clamp(30px,4.6vw,46px); font-weight:700; letter-spacing:-.015em; line-height:1.1}
+.head p{margin:10px 0 0; color:var(--ink-2); max-width:58ch}
+.runmeta{display:flex; flex-direction:column; gap:5px; font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--muted); text-align:right}
+.runmeta b{color:var(--ink-2); font-weight:500}
+
+section{padding:52px 0; border-bottom:1px solid var(--line-soft)}
+section:last-of-type{border-bottom:none}
+.shead{display:flex; align-items:baseline; gap:14px; margin-bottom:6px}
+.shead h2{font-size:25px; font-weight:600; letter-spacing:-.01em}
+.lede{color:var(--ink-2); margin:0 0 26px; max-width:70ch}
+p{max-width:72ch}
+
+.summary{background:var(--surface); border:1px solid var(--line); border-radius:3px; padding:26px 28px; display:grid; gap:22px; margin:34px 0 0}
+.stop{display:flex; flex-wrap:wrap; align-items:center; gap:13px}
+.chip{font-family:"IBM Plex Mono",monospace; font-size:12px; letter-spacing:.06em; padding:5px 11px; border-radius:2px; border:1px solid}
+.chip.keep{color:var(--keep); border-color:var(--keep); background:var(--keep-soft)}
+.chip.drop{color:var(--drop); border-color:var(--line); background:var(--drop-soft)}
+.chip.pend{color:var(--warn); border-color:var(--warn); background:var(--warn-soft)}
+.stop strong{font-family:"IBM Plex Sans Condensed","Noto Sans KR",sans-serif; font-size:19px; font-weight:600}
+.figs{display:grid; grid-template-columns:repeat(auto-fit,minmax(148px,1fr)); gap:20px; border-top:1px solid var(--line-soft); padding-top:20px}
+.fig .k{font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted)}
+.fig .v{font-family:"IBM Plex Mono",monospace; font-size:26px; font-weight:500; letter-spacing:-.02em; margin-top:3px; font-variant-numeric:tabular-nums}
+.fig .s{font-size:12.5px; color:var(--muted); margin-top:2px}
+
+table{width:100%; border-collapse:collapse; font-size:14px}
+.tscroll{overflow-x:auto; border:1px solid var(--line); border-radius:3px; background:var(--surface)}
+th,td{text-align:left; padding:9px 14px; border-bottom:1px solid var(--line-soft); white-space:nowrap}
+thead th{font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); font-weight:500; background:var(--surface-2)}
+tbody tr:last-child td{border-bottom:none}
+td.num{font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums; text-align:right}
+tr.hl td{background:var(--keep-soft)}
+.tag{font-family:"IBM Plex Mono",monospace; font-size:10.5px; letter-spacing:.07em; padding:2px 7px; border-radius:2px; border:1px solid}
+.tag.k{color:var(--keep); border-color:var(--keep); background:var(--keep-soft)}
+.tag.d{color:var(--drop); border-color:var(--line); background:var(--drop-soft)}
+
+.chartbox{background:var(--surface); border:1px solid var(--line); border-radius:3px; padding:22px 24px 16px}
+.chartscroll{overflow-x:auto}
+.legend{display:flex; flex-wrap:wrap; gap:18px; font-size:12.5px; color:var(--ink-2); margin-top:14px; padding-top:14px; border-top:1px solid var(--line-soft)}
+.legend span{display:flex; align-items:center; gap:7px}
+.sw{width:11px; height:11px; border-radius:2px; display:inline-block}
+.cap{font-size:12.5px; color:var(--muted); margin-top:12px; max-width:74ch}
+
+.note{border-left:2px solid var(--warn); background:var(--warn-soft); padding:16px 20px; border-radius:0 3px 3px 0; margin:22px 0 0}
+.note h3{font-size:15px; font-weight:600; margin-bottom:5px}
+.note p{margin:0; font-size:14.5px; color:var(--ink-2)}
+
+.cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:16px; margin-top:8px}
+.card{background:var(--surface); border:1px solid var(--line); border-radius:3px; padding:18px 20px}
+.card h3{font-size:14px; font-weight:600; margin-bottom:7px}
+.card p{font-size:13.5px; color:var(--ink-2); margin:0}
+.card code{font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--keep); word-break:break-all}
+
+.steps{display:grid; gap:2px; counter-reset:s}
+.step{background:var(--surface); border:1px solid var(--line); border-radius:3px; padding:16px 20px; display:grid; grid-template-columns:auto 1fr; gap:16px; align-items:start}
+.step .n{font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--muted); padding-top:2px}
+.step h3{font-size:14.5px; font-weight:600; margin-bottom:4px}
+.step p{font-size:13.5px; color:var(--ink-2); margin:0}
+pre{font-family:"IBM Plex Mono",monospace; font-size:12.5px; background:var(--surface-2); border:1px solid var(--line-soft); border-radius:3px; padding:14px 16px; overflow-x:auto; margin:14px 0 0; line-height:1.6}
+footer{padding:34px 0 54px; color:var(--muted); font-size:12.5px}
+a{color:var(--keep)}
+@media (prefers-reduced-motion:no-preference){.step,.card{transition:border-color .15s ease}}
+</style>
+
+<header><div class="wrap"><div class="head">
+  <div>
+    <div class="eyebrow">RUS Perception · PFUS Bladder</div>
+    <h1>저용적 방광 필터링</h1>
+    <p>HoLEP 술중 방광은 지속관류로 hydro-extension 상태다. 수축된 방광은 배포 도메인 밖이므로 PFUS 데이터셋에서 저용적 환자를 제거했다. 그 과정과 결과를 기록한다.</p>
+  </div>
+  <div class="runmeta">
+    <div>작성 <b>2026-08-24</b></div>
+    <div>대상 <b>PFUS · 110명 · 14,852 프레임</b></div>
+    <div>필터 단위 <b>환자 (시퀀스 통째)</b></div>
+    <div>임계값 <b>median ≥ 1,500 px @256²</b></div>
+  </div>
+</div></div></header>
+
+<div class="wrap">
+
+<div class="summary">
+  <div class="stop">
+    <span class="chip keep">유지 74명</span>
+    <span class="chip drop">제거 36명</span>
+    <span class="chip pend">학습 진행 중</span>
+    <strong>14,852 → 9,768 프레임 (65.8%)</strong>
+  </div>
+  <div class="figs">
+    <div class="fig"><div class="k">train</div><div class="v">54<span style="font-size:15px;color:var(--muted)">명</span></div><div class="s">10,359 → 6,955 프레임</div></div>
+    <div class="fig"><div class="k">val</div><div class="v">10<span style="font-size:15px;color:var(--muted)">명</span></div><div class="s">2,476 → 1,653 프레임</div></div>
+    <div class="fig"><div class="k">test</div><div class="v">10<span style="font-size:15px;color:var(--muted)">명</span></div><div class="s">2,017 → 1,160 프레임</div></div>
+    <div class="fig"><div class="k">중앙 면적</div><div class="v">+35%</div><div class="s">1,917 → 2,580 px</div></div>
+  </div>
+</div>
+
+<section>
+  <div class="shead"><span class="eyebrow">01</span><h2>왜 자르는가</h2></div>
+  <p class="lede">FR5 프로빙 루프의 배포 대상은 HoLEP 술중 영상이다. 지속관류가 시술 내내 방광을 팽창시켜 두므로, 수축되거나 비어 있는 방광은 컨트롤러가 실제로 마주칠 일이 없는 상태다. 그런 프레임에 모델 용량을 쓰는 것은 배포 도메인 밖에 투자하는 것이다.</p>
+  <p>이전 평가에서 test 프레임의 62%가 2,000 px 미만 저용적이었고 이 구간의 Dice가 0.70으로 가장 낮았다. 평균을 끌어내리는 구간이 동시에 도메인 밖 구간이라는 점이 이번 필터의 근거다.</p>
+</section>
+
+<section>
+  <div class="shead"><span class="eyebrow">02</span><h2>무엇을 쟀는가</h2></div>
+  <p class="lede">14,852개 마스크를 전부 디코딩해 전경 픽셀 비율을 구했다. 면적은 <b>비율</b>로 저장하고 보고는 256×256 작업 해상도 기준 픽셀로 환산했다 — 원본 프레임이 환자마다 몇 픽셀씩 다르기 때문에 비율이 유일하게 해상도 독립적인 단위다.</p>
+  <pre>area_ratio = mask.mean()            # 프레임별 전경 비율
+px_at_256  = area_ratio × 65,536    # 보고용 환산
+환자 대표값 = 그 환자의 라벨된 프레임들의 <b>median</b></pre>
+  <p style="margin-top:18px">라벨이 없는 프레임은 <span class="mono">nan</span>으로 두어 통계에서 빠진다. 빈 방광으로 집계되면 환자 대표값이 인위적으로 내려가기 때문이다.</p>
+</section>
+
+<section>
+  <div class="shead"><span class="eyebrow">03</span><h2>진단 — 면적은 프레임이 아니라 환자의 속성이다</h2></div>
+  <p class="lede">이것이 필터 <b>단위</b>를 결정한 관측이다. 한 환자의 시퀀스 안에서 방광 크기는 거의 변하지 않는다. 정적 검사이므로 당연한 결과지만, "저용적 프레임을 버린다"는 계획을 "저용적 환자를 버린다"로 바꿔 놓는다.</p>
+
+  <div class="figs" style="border:none; padding:0; margin-bottom:26px; max-width:640px">
+    <div class="fig"><div class="k">환자 <b>내부</b> IQR 중앙값</div><div class="v">161<span style="font-size:15px;color:var(--muted)"> px</span></div><div class="s">한 환자 시퀀스 안의 변동</div></div>
+    <div class="fig"><div class="k">환자 <b>간</b> 표준편차</div><div class="v">1,767<span style="font-size:15px;color:var(--muted)"> px</span></div><div class="s">11배 — 변동은 환자 사이에 있다</div></div>
+  </div>
+
+  <div class="chartbox">
+    <div class="chartscroll"><svg id="strip" role="img" aria-label="환자 110명의 방광 면적 분포. 각 세로선은 한 환자의 프레임별 최소–최대 범위, 점은 median. 1,500 px 기준선 위가 유지, 아래가 제거."></svg></div>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--keep)"></i>유지 74명</span>
+      <span><i class="sw" style="background:var(--drop)"></i>제거 36명</span>
+      <span><i class="sw" style="background:var(--warn);height:2px;border-radius:0"></i>임계값 1,500 px</span>
+      <span style="color:var(--muted)">세로선 = 환자 내 최소–최대, 점 = median</span>
+    </div>
+    <p class="cap">세로선이 거의 점으로 보이는 것이 위 관측의 시각적 증거다. 환자 대표값은 553 px에서 9,954 px까지 18배 흩어져 있는데, 그 안에서 개별 환자의 프레임은 서로 붙어 있다. 프레임 단위로 자르면 임계값 근처 환자의 시퀀스만 중간에서 끊겨 temporal pair가 깨지고 split 통계가 왜곡될 뿐, 실질적으로 다른 프레임이 걸러지지 않는다.</p>
+  </div>
+
+  <div class="note">
+    <h3>그래서 필터 단위는 환자다</h3>
+    <p>임계값 미달 환자는 시퀀스째 제거된다. <span class="mono">split</span> 컬럼은 그대로 보존해 — 환자를 split 사이로 옮기지 않는다. 재분할하면 이전 평가 수치와의 비교가 조용히 무효가 되기 때문에 스크립트가 이를 구조적으로 막는다.</p>
+  </div>
+</section>
+
+<section>
+  <div class="shead"><span class="eyebrow">04</span><h2>임계값 1,500 px</h2></div>
+  <p class="lede">환자 median이 1,500 px @256² (면적비 0.022888) 이상인 환자를 남긴다. 이 값은 데이터의 자연스러운 틈이 아니라 <b>다양성과 도메인 근접성의 균형점</b>으로 선택했다 — 더 올리면 도메인 정합도는 오르지만 환자 수가 무너진다.</p>
+  <div class="tscroll"><table>
+    <thead><tr><th>임계값</th><th class="num">유지 환자</th><th class="num">train</th><th class="num">val</th><th class="num">test</th><th class="num">프레임</th><th>판단</th></tr></thead>
+    <tbody id="sens"></tbody>
+  </table></div>
+  <p class="cap">1,500과 1,550은 완전히 같은 결과를 낸다 — 경계선 환자 P078(1,491, 제거)과 P027(1,550, 유지) 사이 59 px가 비어 있다. 다만 그 바깥은 조밀해서 ±100 px를 움직이면 환자 3~5명이 이동한다. 넓은 안전지대가 아니라 좁은 평지 위에 놓인 값이며, 2,500 이상은 test가 4명까지 줄어 Dice를 어떻게 찍든 그 숫자가 현실과 부딪히면 살아남지 못한다.</p>
+</section>
+
+<section>
+  <div class="shead"><span class="eyebrow">05</span><h2>실행</h2></div>
+  <p class="lede">핵심 로딩 코드는 건드리지 않았다. <span class="mono">load_manifest</span>가 미지 컬럼을 무시하므로, 필터링된 manifest를 별도 산출물로 만드는 쪽이 provenance가 남고 원본이 그대로 보존된다.</p>
+  <div class="steps">
+    <div class="step"><div class="n">01</div><div><h3>scripts/filter_manifest_by_area.py</h3><p>마스크에서 환자별 median 면적을 계산해 임계값 미달 환자를 시퀀스째 제거한다. split이 통째로 비면 학습도 평가도 불가능하므로 에러를 낸다. <span class="mono">--dry-run</span>으로 먼저 확인할 수 있다.</p></div></div>
+    <div class="step"><div class="n">02</div><div><h3>manifest_hydro.csv</h3><p>9,768 프레임 / 74명. 원본의 상대 경로를 그대로 유지하므로 <span class="mono">data.root</span>는 원본 데이터셋 디렉터리를 가리킨다.</p></div></div>
+    <div class="step"><div class="n">03</div><div><h3>manifest_hydro_report.json</h3><p>유지·제거된 환자 전원과 각자의 median 면적. 어떤 환자가 왜 빠졌는지 나중에 되짚을 수 있는 유일한 기록이다.</p></div></div>
+    <div class="step"><div class="n">04</div><div><h3>configs/pfus_bladder_hydro.yaml</h3><p>manifest·경로·출력 디렉터리만 다르고 나머지는 <span class="mono">pfus_bladder.yaml</span>과 완전히 동일하다. early stopping·손실 가중·temporal은 의도적으로 넣지 않았다 — 섞으면 이번 변경의 효과를 분리할 수 없다.</p></div></div>
+  </div>
+  <pre>python scripts/filter_manifest_by_area.py \
+    --manifest ~/datasets/pfus/manifest.csv \
+    --output   ~/datasets/pfus/manifest_hydro.csv \
+    --min-patient-area-ratio 0.022888 \
+    --report   ~/datasets/pfus/manifest_hydro_report.json</pre>
+</section>
+
+<section>
+  <div class="shead"><span class="eyebrow">06</span><h2>결과</h2></div>
+  <p class="lede">프레임의 34%가 빠졌지만 환자 다양성은 54명으로 유지된다. 분포는 오른쪽으로 옮겨갔고, 하위 꼬리가 잘렸다.</p>
+
+  <div class="tscroll" style="margin-bottom:26px"><table>
+    <thead><tr><th>프레임 면적 분포</th><th class="num">n</th><th class="num">p10</th><th class="num">median</th><th class="num">p90</th><th class="num">mean</th></tr></thead>
+    <tbody>
+      <tr><td>필터 전</td><td class="num">14,852</td><td class="num">989</td><td class="num">1,917</td><td class="num">4,987</td><td class="num">2,540</td></tr>
+      <tr class="hl"><td><b>필터 후</b></td><td class="num">9,768</td><td class="num">1,616</td><td class="num">2,580</td><td class="num">5,715</td><td class="num">3,277</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3 style="font-size:16px; font-weight:600; margin-bottom:10px">test 16명의 운명</h3>
+  <p class="cap" style="margin:0 0 12px">평가 대상이 16명에서 10명으로 줄었다. 이 리포트 이후의 모든 test 수치는 이 10명 기준이며, 이전 평가의 16명 / 2,017 프레임과 직접 비교할 수 없다.</p>
+  <div class="tscroll"><table>
+    <thead><tr><th>환자</th><th class="num">median px</th><th class="num">최소</th><th class="num">최대</th><th class="num">프레임</th><th>결과</th><th>비고</th></tr></thead>
+    <tbody id="testtab"></tbody>
+  </table></div>
+</section>
+
+<section>
+  <div class="shead"><span class="eyebrow">07</span><h2>이 수치와 함께 다녀야 하는 한계</h2></div>
+  <p class="lede">필터는 벤치마크를 배포 도메인 쪽으로 옮긴다. 도달시키지는 않는다. 아래 세 가지는 이 필터로 생긴 어떤 Dice 개선에도 붙어 다녀야 한다.</p>
+  <div class="cards">
+    <div class="card"><h3>PFUS는 HoLEP 도메인에 닿지 않는다</h3><p>면적비 10%를 넘는 프레임이 전체의 4.6%뿐이고 최대값이 16%다. 완전 관류된 방광은 이 분포의 오른쪽 바깥에 있다. 진짜 해법은 여전히 HoLEP 도메인 데이터다.</p></div>
+    <div class="card"><h3>면적과 환자가 교란돼 있다</h3><p>면적이 사실상 환자 속성이므로, Dice가 오르더라도 "큰 방광이 쉬워서"인지 "제거된 환자가 어려워서"인지 이 데이터로는 구분할 수 없다. 기존 모델을 동일한 필터링 test set으로도 평가해야 두 효과가 분리된다.</p></div>
+    <div class="card"><h3>P021은 살아남았다</h3><p>이전 평가에서 마스크 dropout 134건 중 123건을 낸 최악의 환자인데 median 2,007 px로 test 중앙값보다 크다. 그 실패는 용적 문제가 아니었고 이번 필터로 사라지지 않는다 — 라벨 품질 확인이 여전히 다음 과제다.</p></div>
+  </div>
+  <div class="note">
+    <h3>평가는 3-way로 설계했다</h3>
+    <p>A) 신규 모델 · 필터링 test — 헤드라인. B) 기존 <span class="mono">pfus_bladder</span> 모델 · <b>동일한 필터링 test</b> — 대조군. C) 기존 모델 · 전체 test — 기존 수치 0.7313. <b>B−C</b>가 test set이 쉬워진 효과, <b>A−B</b>가 학습 데이터 필터의 순수 기여다. B가 이미 높게 나온다면 이번 변경의 실질 기여는 거의 없고 숫자만 오른 것이 된다.</p>
+  </div>
+</section>
+
+<footer>
+  필터 스크립트 <span class="mono">scripts/filter_manifest_by_area.py</span> · 산출물 <span class="mono">~/datasets/pfus/manifest_hydro.{csv,_report.json}</span> · 설정 <span class="mono">configs/pfus_bladder_hydro.yaml</span><br>
+  면적은 모두 256×256 작업 해상도 환산 픽셀. 임계값 1,500 px = 면적비 0.022888. 학습·평가 결과는 별도 리포트.
+</footer>
+</div>
+
+<script>
+const D = {"patients":[{"id":"P000","split":"test","n":147,"med":553.1,"q1":459.8,"q3":572.7,"lo":341.6,"hi":651.2},{"id":"P001","split":"test","n":144,"med":1126.2,"q1":955.0,"q3":1252.2,"lo":883.5,"hi":1311.1},{"id":"P002","split":"train","n":97,"med":3389.0,"q1":3341.3,"q3":3621.6,"lo":3309.4,"hi":4282.0},{"id":"P003","split":"train","n":200,"med":1361.7,"q1":1261.9,"q3":1423.7,"lo":1181.3,"hi":1613.5},{"id":"P004","split":"train","n":67,"med":4562.9,"q1":4132.2,"q3":5103.7,"lo":3513.5,"hi":5300.3},{"id":"P005","split":"train","n":98,"med":3671.1,"q1":3549.6,"q3":3810.7,"lo":3263.1,"hi":4133.1},{"id":"P006","split":"train","n":132,"med":1071.4,"q1":971.6,"q3":1101.4,"lo":939.5,"hi":1154.1},{"id":"P007","split":"train","n":135,"med":2306.3,"q1":2057.1,"q3":2431.6,"lo":1994.2,"hi":2610.4},{"id":"P008","split":"train","n":183,"med":991.9,"q1":954.1,"q3":1014.8,"lo":714.1,"hi":1087.8},{"id":"P009","split":"train","n":139,"med":1619.3,"q1":1550.0,"q3":1678.2,"lo":1491.7,"hi":1706.5},{"id":"P010","split":"val","n":176,"med":1198.5,"q1":1125.7,"q3":1245.5,"lo":1043.1,"hi":1273.4},{"id":"P011","split":"test","n":200,"med":886.0,"q1":845.9,"q3":927.9,"lo":802.7,"hi":1139.9},{"id":"P012","split":"test","n":147,"med":2346.1,"q1":2299.8,"q3":2389.6,"lo":2264.8,"hi":2538.8},{"id":"P013","split":"train","n":216,"med":1343.0,"q1":1281.7,"q3":1449.2,"lo":1213.9,"hi":1647.2},{"id":"P014","split":"val","n":229,"med":1622.9,"q1":1583.6,"q3":1657.9,"lo":1538.2,"hi":1708.0},{"id":"P015","split":"train","n":129,"med":1212.8,"q1":1175.2,"q3":1268.1,"lo":1034.2,"hi":1464.8},{"id":"P016","split":"train","n":139,"med":2732.2,"q1":2561.3,"q3":2808.1,"lo":2406.2,"hi":2859.6},{"id":"P017","split":"train","n":200,"med":961.8,"q1":871.4,"q3":1038.1,"lo":851.9,"hi":1133.5},{"id":"P018","split":"train","n":90,"med":6259.2,"q1":6149.4,"q3":6384.0,"lo":6086.5,"hi":6518.7},{"id":"P019","split":"test","n":122,"med":1333.8,"q1":1243.6,"q3":1414.0,"lo":1140.9,"hi":1570.8},{"id":"P020","split":"test","n":103,"med":1963.7,"q1":1915.0,"q3":2031.2,"lo":1819.4,"hi":2142.7},{"id":"P021","split":"test","n":200,"med":2007.1,"q1":1989.3,"q3":2047.2,"lo":1977.5,"hi":2087.0},{"id":"P022","split":"val","n":216,"med":1676.9,"q1":1320.9,"q3":1768.2,"lo":1053.0,"hi":1843.9},{"id":"P023","split":"train","n":131,"med":5643.6,"q1":5635.4,"q3":5664.4,"lo":5605.2,"hi":6544.0},{"id":"P024","split":"train","n":131,"med":5643.6,"q1":5635.4,"q3":5664.4,"lo":5605.2,"hi":6544.0},{"id":"P025","split":"val","n":211,"med":1562.4,"q1":1410.0,"q3":1598.0,"lo":1248.1,"hi":1731.6},{"id":"P026","split":"train","n":101,"med":1612.5,"q1":1561.8,"q3":1661.6,"lo":1361.6,"hi":1713.5},{"id":"P027","split":"train","n":123,"med":1550.0,"q1":1513.2,"q3":1616.3,"lo":1475.8,"hi":1808.7},{"id":"P028","split":"train","n":139,"med":2155.3,"q1":2149.0,"q3":2312.6,"lo":2140.5,"hi":2486.5},{"id":"P029","split":"val","n":105,"med":3906.3,"q1":3821.1,"q3":3981.1,"lo":3709.7,"hi":4085.5},{"id":"P030","split":"train","n":168,"med":2423.2,"q1":2322.3,"q3":2481.5,"lo":2177.9,"hi":2556.3},{"id":"P031","split":"train","n":100,"med":4085.1,"q1":3894.4,"q3":4134.7,"lo":3568.5,"hi":4188.0},{"id":"P032","split":"val","n":228,"med":2840.8,"q1":2630.9,"q3":2997.9,"lo":2458.7,"hi":3236.2},{"id":"P033","split":"train","n":188,"med":1623.1,"q1":1606.8,"q3":1950.6,"lo":1570.6,"hi":2088.3},{"id":"P034","split":"train","n":158,"med":1985.9,"q1":1892.3,"q3":2164.3,"lo":1766.1,"hi":2367.1},{"id":"P035","split":"train","n":161,"med":1121.7,"q1":1049.4,"q3":1150.5,"lo":886.1,"hi":1177.1},{"id":"P036","split":"val","n":104,"med":1330.4,"q1":1065.3,"q3":1385.0,"lo":856.1,"hi":1496.4},{"id":"P037","split":"train","n":111,"med":732.3,"q1":705.1,"q3":816.3,"lo":671.7,"hi":900.5},{"id":"P038","split":"train","n":174,"med":964.1,"q1":935.0,"q3":1010.8,"lo":898.1,"hi":1270.6},{"id":"P039","split":"train","n":98,"med":992.5,"q1":978.8,"q3":1006.4,"lo":960.9,"hi":1124.9},{"id":"P040","split":"test","n":121,"med":3133.4,"q1":2967.0,"q3":3351.4,"lo":2799.8,"hi":3432.9},{"id":"P041","split":"test","n":128,"med":8982.0,"q1":8649.4,"q3":9476.7,"lo":8358.5,"hi":9987.9},{"id":"P042","split":"val","n":90,"med":1357.2,"q1":1314.8,"q3":1399.6,"lo":1265.5,"hi":1500.2},{"id":"P043","split":"test","n":100,"med":1306.5,"q1":1224.4,"q3":1366.0,"lo":1083.9,"hi":1727.6},{"id":"P044","split":"train","n":212,"med":2529.8,"q1":2359.4,"q3":2545.9,"lo":2208.2,"hi":2557.0},{"id":"P045","split":"train","n":80,"med":3328.3,"q1":3326.8,"q3":3330.9,"lo":3318.5,"hi":3341.2},{"id":"P046","split":"train","n":46,"med":3254.7,"q1":3251.7,"q3":3484.5,"lo":3246.8,"hi":3820.6},{"id":"P047","split":"train","n":73,"med":2016.0,"q1":1980.6,"q3":2036.2,"lo":1939.2,"hi":2282.0},{"id":"P048","split":"train","n":94,"med":4049.6,"q1":3962.4,"q3":4059.4,"lo":3664.0,"hi":4071.3},{"id":"P049","split":"train","n":108,"med":2173.6,"q1":2050.0,"q3":2289.4,"lo":1864.3,"hi":2432.3},{"id":"P050","split":"train","n":89,"med":4311.2,"q1":4275.9,"q3":4356.0,"lo":4215.0,"hi":4426.7},{"id":"P051","split":"train","n":112,"med":1683.2,"q1":1638.0,"q3":1729.5,"lo":1554.4,"hi":1793.7},{"id":"P052","split":"train","n":94,"med":1240.2,"q1":1097.2,"q3":1350.1,"lo":1018.9,"hi":1443.3},{"id":"P053","split":"train","n":183,"med":1183.8,"q1":1089.4,"q3":1217.8,"lo":930.3,"hi":1341.6},{"id":"P054","split":"train","n":171,"med":7985.1,"q1":7946.6,"q3":8010.1,"lo":7878.6,"hi":8054.7},{"id":"P055","split":"train","n":229,"med":1257.0,"q1":1255.7,"q3":1338.3,"lo":1168.4,"hi":1628.8},{"id":"P056","split":"train","n":207,"med":7517.7,"q1":7426.0,"q3":7582.6,"lo":7056.3,"hi":7676.3},{"id":"P057","split":"train","n":98,"med":3037.9,"q1":2788.3,"q3":3047.7,"lo":2567.0,"hi":3059.5},{"id":"P058","split":"train","n":217,"med":2974.4,"q1":2946.7,"q3":2990.0,"lo":2834.4,"hi":3408.8},{"id":"P059","split":"train","n":47,"med":2862.9,"q1":2860.1,"q3":2865.7,"lo":2857.3,"hi":2868.6},{"id":"P060","split":"train","n":163,"med":1698.5,"q1":1339.5,"q3":1856.7,"lo":1239.8,"hi":1878.4},{"id":"P061","split":"train","n":98,"med":1993.2,"q1":1949.4,"q3":2043.6,"lo":1927.1,"hi":2084.5},{"id":"P062","split":"train","n":84,"med":1598.1,"q1":1507.3,"q3":1687.7,"lo":1271.8,"hi":1724.7},{"id":"P063","split":"val","n":85,"med":3210.0,"q1":2974.7,"q3":3289.3,"lo":2760.6,"hi":3301.5},{"id":"P064","split":"train","n":200,"med":4457.0,"q1":4128.1,"q3":4584.4,"lo":3721.1,"hi":4747.9},{"id":"P065","split":"train","n":200,"med":4786.1,"q1":4618.2,"q3":4949.7,"lo":4472.3,"hi":5344.4},{"id":"P066","split":"train","n":221,"med":1705.5,"q1":1696.3,"q3":1718.8,"lo":1686.3,"hi":1807.1},{"id":"P067","split":"train","n":207,"med":4560.8,"q1":4509.9,"q3":5693.8,"lo":4485.4,"hi":6140.6},{"id":"P068","split":"train","n":160,"med":2483.3,"q1":2467.3,"q3":2525.4,"lo":2447.2,"hi":2747.3},{"id":"P069","split":"train","n":97,"med":2226.4,"q1":2084.9,"q3":2323.0,"lo":1932.3,"hi":2798.3},{"id":"P070","split":"train","n":99,"med":5915.8,"q1":5339.1,"q3":6085.5,"lo":4857.1,"hi":6119.1},{"id":"P071","split":"val","n":146,"med":4177.1,"q1":3889.0,"q3":4200.2,"lo":3606.3,"hi":4208.5},{"id":"P072","split":"train","n":100,"med":855.2,"q1":851.8,"q3":880.6,"lo":847.6,"hi":911.7},{"id":"P073","split":"train","n":145,"med":1205.3,"q1":1133.2,"q3":1266.5,"lo":1066.1,"hi":1323.2},{"id":"P074","split":"train","n":209,"med":2392.6,"q1":2352.3,"q3":2449.1,"lo":2207.2,"hi":2510.1},{"id":"P075","split":"train","n":160,"med":856.3,"q1":842.1,"q3":988.1,"lo":822.5,"hi":1233.1},{"id":"P076","split":"val","n":126,"med":3703.6,"q1":3468.7,"q3":3828.3,"lo":3248.6,"hi":3885.3},{"id":"P077","split":"train","n":154,"med":1029.0,"q1":951.0,"q3":1069.3,"lo":885.9,"hi":1164.7},{"id":"P078","split":"train","n":105,"med":1490.9,"q1":1487.0,"q3":1494.6,"lo":1483.4,"hi":1509.4},{"id":"P079","split":"train","n":107,"med":1105.6,"q1":1072.3,"q3":1172.2,"lo":1062.8,"hi":1257.1},{"id":"P080","split":"train","n":89,"med":1051.9,"q1":879.3,"q3":1109.8,"lo":795.4,"hi":1206.6},{"id":"P081","split":"train","n":95,"med":1032.8,"q1":1028.8,"q3":1106.0,"lo":1022.8,"hi":1383.6},{"id":"P082","split":"train","n":99,"med":1592.4,"q1":1534.8,"q3":1725.4,"lo":1478.3,"hi":2063.5},{"id":"P083","split":"val","n":130,"med":958.0,"q1":921.5,"q3":968.2,"lo":910.7,"hi":988.9},{"id":"P084","split":"train","n":122,"med":1171.2,"q1":1117.4,"q3":1334.2,"lo":1065.8,"hi":1566.6},{"id":"P085","split":"test","n":81,"med":3049.5,"q1":2816.5,"q3":3113.3,"lo":2592.8,"hi":3139.2},{"id":"P086","split":"train","n":61,"med":1980.2,"q1":1978.3,"q3":1980.2,"lo":1970.7,"hi":1982.2},{"id":"P087","split":"train","n":125,"med":3677.8,"q1":3672.0,"q3":3881.9,"lo":3657.0,"hi":4207.2},{"id":"P088","split":"train","n":79,"med":3232.7,"q1":3194.8,"q3":3424.8,"lo":3018.1,"hi":3620.4},{"id":"P089","split":"test","n":98,"med":2169.2,"q1":1942.3,"q3":2411.1,"lo":1936.7,"hi":2536.2},{"id":"P090","split":"val","n":125,"med":3982.5,"q1":3859.3,"q3":4104.2,"lo":3738.6,"hi":4462.7},{"id":"P091","split":"train","n":118,"med":3207.4,"q1":3020.6,"q3":4666.5,"lo":2847.4,"hi":6136.3},{"id":"P092","split":"train","n":124,"med":2717.6,"q1":2712.4,"q3":2722.9,"lo":2697.8,"hi":2737.6},{"id":"P093","split":"train","n":79,"med":3682.2,"q1":3489.6,"q3":3864.2,"lo":3297.6,"hi":4017.9},{"id":"P094","split":"train","n":143,"med":4996.8,"q1":4375.0,"q3":5282.2,"lo":4137.7,"hi":5589.1},{"id":"P095","split":"test","n":100,"med":1789.7,"q1":1512.4,"q3":1905.3,"lo":1459.7,"hi":2024.2},{"id":"P096","split":"train","n":204,"med":2169.3,"q1":2016.8,"q3":2386.7,"lo":1947.3,"hi":2734.2},{"id":"P097","split":"test","n":73,"med":4295.6,"q1":4205.0,"q3":4509.6,"lo":3612.1,"hi":5062.2},{"id":"P098","split":"train","n":108,"med":1465.4,"q1":1214.4,"q3":1561.5,"lo":964.8,"hi":1653.1},{"id":"P099","split":"train","n":109,"med":1345.5,"q1":1295.3,"q3":1390.8,"lo":1284.9,"hi":1481.7},{"id":"P100","split":"train","n":130,"med":9954.2,"q1":9777.6,"q3":10178.2,"lo":9485.9,"hi":10513.4},{"id":"P101","split":"val","n":147,"med":1140.4,"q1":1107.4,"q3":1168.2,"lo":1072.9,"hi":1196.5},{"id":"P102","split":"train","n":137,"med":1783.3,"q1":1778.9,"q3":1788.1,"lo":1766.9,"hi":1794.4},{"id":"P103","split":"train","n":92,"med":1800.7,"q1":1584.1,"q3":1895.4,"lo":1400.5,"hi":1996.9},{"id":"P104","split":"val","n":176,"med":937.2,"q1":647.1,"q3":1027.4,"lo":607.4,"hi":1212.7},{"id":"P105","split":"train","n":115,"med":2885.8,"q1":2881.3,"q3":2889.0,"lo":2872.1,"hi":2896.1},{"id":"P106","split":"val","n":182,"med":5530.4,"q1":5214.6,"q3":6675.6,"lo":4937.2,"hi":6894.9},{"id":"P107","split":"train","n":153,"med":1965.4,"q1":1917.1,"q3":2001.2,"lo":1796.2,"hi":2057.7},{"id":"P108","split":"test","n":109,"med":1577.3,"q1":1523.3,"q3":1620.3,"lo":1376.7,"hi":1643.7},{"id":"P109","split":"test","n":144,"med":1487.8,"q1":1458.8,"q3":1541.1,"lo":1105.0,"hi":1729.7}],"threshold":{"px":1500.0,"ratio":0.022888},"sensitivity":{"1300":{"total":84,"train":59,"val":12,"test":13,"frames":11066},"1400":{"total":77,"train":56,"val":10,"test":11,"frames":10125},"1450":{"total":77,"train":56,"val":10,"test":11,"frames":10125},"1500":{"total":74,"train":54,"val":10,"test":10,"frames":9768},"1550":{"total":74,"train":54,"val":10,"test":10,"frames":9768},"1600":{"total":69,"train":51,"val":9,"test":9,"frames":9142},"1700":{"total":62,"train":46,"val":7,"test":9,"frames":7994}},"dist":{"before":{"n":14852,"p10":989,"p50":1917,"p90":4987,"mean":2540},"after":{"n":9768,"p10":1616,"p50":2580,"p90":5715,"mean":3277}},"spread":{"within_iqr_median":161,"between_std":1767},"coverage":{"gt8":9.0,"gt10":4.6,"gt12":2.9,"max_ratio":16.0}};
+
+function el(t,a){const e=document.createElementNS("http://www.w3.org/2000/svg",t);for(const k in a)e.setAttribute(k,a[k]);return e}
+
+(function strip(){
+  const svg=document.getElementById("strip");
+  const pts=[...D.patients].sort((a,b)=>a.med-b.med);
+  const W=Math.max(940,pts.length*8.4), H=360, mL=54, mR=14, mT=14, mB=34;
+  const pw=W-mL-mR, ph=H-mT-mB;
+  const ymax=10500;
+  const Y=v=>mT+ph-(v/ymax)*ph;
+  svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
+  svg.setAttribute("width",W); svg.setAttribute("height",H);
+
+  [0,2000,4000,6000,8000,10000].forEach(v=>{
+    svg.appendChild(el("line",{x1:mL,x2:W-mR,y1:Y(v),y2:Y(v),stroke:"var(--grid)","stroke-width":1}));
+    const t=el("text",{x:mL-10,y:Y(v)+4,"text-anchor":"end",fill:"var(--muted)","font-size":11,"font-family":"IBM Plex Mono, monospace"});
+    t.textContent=v.toLocaleString(); svg.appendChild(t);
+  });
+
+  const step=pw/pts.length;
+  pts.forEach((p,i)=>{
+    const x=mL+step*(i+.5), keep=p.med>=D.threshold.px;
+    const c=keep?"var(--keep)":"var(--drop)";
+    svg.appendChild(el("line",{x1:x,x2:x,y1:Y(p.hi),y2:Y(p.lo),stroke:c,"stroke-width":2.2,"stroke-linecap":"round",opacity:keep?.55:.4}));
+    svg.appendChild(el("circle",{cx:x,cy:Y(p.med),r:2.6,fill:c}));
+    const ttl=el("title"); ttl.textContent=`${p.id} · ${p.split} · median ${Math.round(p.med).toLocaleString()} px · ${p.n}프레임 · ${keep?"유지":"제거"}`;
+    svg.lastChild.appendChild(ttl);
+  });
+
+  const ty=Y(D.threshold.px);
+  svg.appendChild(el("line",{x1:mL,x2:W-mR,y1:ty,y2:ty,stroke:"var(--warn)","stroke-width":1.6,"stroke-dasharray":"5 4"}));
+  const lb=el("text",{x:W-mR,y:ty-8,"text-anchor":"end",fill:"var(--warn)","font-size":11.5,"font-family":"IBM Plex Mono, monospace"});
+  lb.textContent="1,500 px — 아래 36명 제거"; svg.appendChild(lb);
+
+  const ax=el("text",{x:mL,y:H-10,fill:"var(--muted)","font-size":11,"font-family":"IBM Plex Mono, monospace"});
+  ax.textContent="환자 110명 · median 면적 오름차순"; svg.appendChild(ax);
+  const ay=el("text",{x:mL-10,y:mT-2,"text-anchor":"end",fill:"var(--muted)","font-size":10.5,"font-family":"IBM Plex Mono, monospace"});
+  ay.textContent="px@256²"; svg.appendChild(ay);
+})();
+
+(function sens(){
+  const tb=document.getElementById("sens");
+  const notes={1300:"저용적 tail 잔존",1400:"—",1450:"—",1500:"채택 · 다양성과 도메인의 균형",1550:"1,500과 동일 결과",1600:"—",1700:"train 46명, 다양성 손실 시작"};
+  Object.entries(D.sensitivity).forEach(([thr,v])=>{
+    const tr=document.createElement("tr");
+    if(+thr===1500) tr.className="hl";
+    tr.innerHTML=`<td class="mono">${(+thr).toLocaleString()}</td><td class="num">${v.total}</td><td class="num">${v.train}</td><td class="num">${v.val}</td><td class="num">${v.test}</td><td class="num">${v.frames.toLocaleString()}</td><td style="color:var(--muted);font-size:13px">${notes[thr]||"—"}</td>`;
+    tb.appendChild(tr);
+  });
+})();
+
+(function testtab(){
+  const tb=document.getElementById("testtab");
+  const notes={P041:"test 최대 용적",P021:"이전 평가 최악 — 용적은 정상",P043:"이전 평가 차악",P000:"test 최소 용적"};
+  D.patients.filter(p=>p.split==="test").sort((a,b)=>b.med-a.med).forEach(p=>{
+    const keep=p.med>=D.threshold.px, tr=document.createElement("tr");
+    if(keep) tr.className="hl";
+    tr.innerHTML=`<td class="mono">${p.id}</td><td class="num">${Math.round(p.med).toLocaleString()}</td><td class="num">${Math.round(p.lo).toLocaleString()}</td><td class="num">${Math.round(p.hi).toLocaleString()}</td><td class="num">${p.n}</td>`+
+      `<td><span class="tag ${keep?"k":"d"}">${keep?"유지":"제거"}</span></td><td style="color:var(--muted);font-size:13px">${notes[p.id]||""}</td>`;
+    tb.appendChild(tr);
+  });
+})();
+</script>

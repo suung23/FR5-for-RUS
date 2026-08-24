@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="680" height="372" viewBox="0 0 680 372" role="img" aria-label="B-mode 영상의 픽셀 좌표. 원점은 좌상단이 아니라 배열 중심 투영이며, 두 원점은 u0, v0만큼 떨어져 있다.">
+  <title>영상면과 픽셀 좌표</title>
+  <style>
+    svg{--surface:#FFFFFF;--panel:#F4F8F7;--ink:#15211F;--ink2:#394A47;--muted:#697B78;--hair:#D5DEDC;
+        --in:#0B7A67;--in-soft:rgba(11,122,103,.10);--out:#B0452B;--out-soft:rgba(176,69,43,.10);
+        --sans:system-ui,"Noto Sans CJK KR","Noto Sans KR","Malgun Gothic","Apple SD Gothic Neo",sans-serif;
+        --mono:"DejaVu Sans Mono","JetBrains Mono",ui-monospace,monospace;}
+    @media (prefers-color-scheme:dark){
+      svg{--surface:#171F1D;--panel:#131A19;--ink:#E7EEEC;--ink2:#BDCAC7;--muted:#8A9C99;--hair:#2B3936;
+          --in:#4CD5B8;--in-soft:rgba(76,213,184,.15);--out:#F0906F;--out-soft:rgba(240,144,111,.15);}
+    }
+    .bg{fill:var(--surface)}
+    .s-fg{stroke:var(--ink)} .s-mut{stroke:var(--muted)} .s-hair{stroke:var(--hair)}
+    .s-in{stroke:var(--in)} .s-out{stroke:var(--out)}
+    .f-in{fill:var(--in-soft)} .f-out{fill:var(--out-soft)}
+    .f-surf{fill:var(--surface)} .f-panel{fill:var(--panel)}
+    .mk-fg{fill:var(--ink)} .mk-mut{fill:var(--muted)} .mk-in{fill:var(--in)} .mk-out{fill:var(--out)}
+    .t{font-family:var(--sans);font-size:12px;fill:var(--ink2)}
+    .tm{font-family:var(--mono);font-size:12.5px;fill:var(--ink)}
+    .tmu{font-family:var(--sans);font-size:11px;fill:var(--muted)}
+    .tin{fill:var(--in)} .tout{fill:var(--out)}
+    .tt{font-family:var(--mono);font-size:14px;font-weight:500}
+    .no-fill{fill:none}
+  </style>
+  <defs>
+    <marker id="ar-fg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-fg"/></marker>
+    <marker id="ar-mut" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-mut"/></marker>
+    <marker id="ar-in" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-in"/></marker>
+    <marker id="ar-out" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-out"/></marker>
+  </defs>
+  <rect class="bg" x="0" y="0" width="680" height="372"/>
+      <rect x="120" y="50" width="360" height="240" class="f-panel s-hair" stroke-width="1"/>
+      <path d="M 240 78 L 360 78 L 448 256 Q 300 284 152 256 Z" class="f-in s-in" stroke-width="1.2" opacity=".85"/>
+      <line x1="240" y1="78" x2="360" y2="78" class="s-in" stroke-width="4"/>
+
+      <!-- top-left origin -->
+      <rect x="120" y="50" width="9" height="9" class="mk-mut"/>
+      <text x="136" y="44" class="tmu">ControlState 원점 (좌상단)</text>
+
+      <!-- offsets -->
+      <line x1="120" y1="34" x2="300" y2="34" class="s-mut" stroke-width="1.1" marker-start="url(#ar-mut)" marker-end="url(#ar-mut)"/>
+      <text x="210" y="28" class="tmu" text-anchor="middle">u₀</text>
+      <line x1="104" y1="50" x2="104" y2="78" class="s-mut" stroke-width="1.1" marker-start="url(#ar-mut)" marker-end="url(#ar-mut)"/>
+      <text x="96" y="68" class="tmu" text-anchor="end">v₀</text>
+
+      <!-- axes from probe origin -->
+      <line x1="300" y1="78" x2="466" y2="78" class="s-fg" stroke-width="1.7" marker-end="url(#ar-fg)"/>
+      <line x1="300" y1="78" x2="300" y2="312" class="s-fg" stroke-width="1.7" marker-end="url(#ar-fg)"/>
+      <circle cx="300" cy="78" r="3.6" class="mk-fg"/>
+      <text x="300" y="332" class="tm" text-anchor="middle">v  ←→  z</text>
+      <text x="474" y="82" class="tm">u ←→ x</text>
+      <text x="300" y="98" class="tmu" text-anchor="middle">프로브 원점의 투영</text>
+
+      <!-- point -->
+      <line x1="368" y1="78" x2="368" y2="196" class="s-mut" stroke-width="1" stroke-dasharray="3 3"/>
+      <line x1="300" y1="196" x2="368" y2="196" class="s-mut" stroke-width="1" stroke-dasharray="3 3"/>
+      <circle cx="368" cy="196" r="4" class="mk-fg"/>
+      <text x="380" y="193" class="tm">P</text>
+      <text x="380" y="209" class="tmu">= (u, v) px</text>
+
+      <text x="512" y="126" class="tm">x = s·u</text>
+      <text x="512" y="148" class="tm">z = s·v</text>
+      <line x1="512" y1="162" x2="612" y2="162" class="s-hair" stroke-width="1"/>
+      <text x="512" y="182" class="tmu">s [mm/px] — 상수</text>
+      <text x="512" y="198" class="tmu">미지 깊이 Z 없음</text>
+    </svg>

@@ -192,7 +192,7 @@ Phase 1에서 `ForceSensorAutoComputeLoad` 기반 페이로드 식별 절차를 
 
 # 4. 좌표계 정의
 
-## 4.1 프레임 ✅
+## 4.1 프레임 
 
 | 프레임 | 정의 |
 |---|---|
@@ -210,7 +210,7 @@ Phase 1에서 `ForceSensorAutoComputeLoad` 기반 페이로드 식별 절차를 
 - `rz` = 영상면 회전
 - `z`, `rx`, `ry` = 힘 축 (§7)
 
-## 4.2 툴 변환 — 단일화 필요 ⏳
+## 4.2 툴 변환 — 단일화 필요 
 
 현재 J6→툴 오프셋이 **파일마다 다릅니다**:
 
@@ -1284,8 +1284,12 @@ from rus_perception.control import compute_control_quality, compute_raw_quality
 
 ## 14.2 설계 ❓
 
-1. **policy 모델 형태** — world model / IBVS interaction matrix / behavior cloning. **미결**
-   - 3-DoF로 축소되어(쟁점 7) 난이도가 크게 낮아진 상태에서 재검토
+1. **policy 모델 형태** — 🟡 **제안 완료 2026-08-23** → `docs/POLICY_LEARNING_MATH.md`
+   - ACT(CVAE + action chunking) + `Q̂`·`F̂_n` 보조 헤드, 실행시 QP arbiter
+   - chunk 길이 `k`는 IMU 오차 법칙 `ε = c·τ^1.5`이 결정 → 🟡 `k = 8` (1.6 s @ 5 Hz)
+   - ⚠️ 순진한 BC는 원리적으로 실패함을 확인 (±d 대칭 ⇒ 이봉 분포 ⇒ 회귀 헤드는 0 학습).
+     ACT의 테스트시 `z = 0` 관례를 쓸 수 없고 `Q̂`로 모드를 선택해야 함
+   - ⏳ 선결: §14.3 시간 동기, US 프레임률 확정(§11 표 30 Hz vs 실측 8 fps 불일치)
 2. **`Q_raw` 4개 지표의 타당성** — §6.2. Phase 3에서 실증 필요
 3. **`target_area_ratio = 0.15`** — §6.3. 실제 방광 영상으로 재설정
 

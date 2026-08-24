@@ -153,9 +153,14 @@ def main() -> int:
                     # Backward flow lives on the CURRENT grid and points into the
                     # previous frame, so the argument order is (current, previous)
                     # -- see rus_perception/flow/warp.py.
+                    #
+                    # Farneback already returns H x W x 2, which is the layout
+                    # FlowPair.backward, resize_flow() and extract_control_state()
+                    # all use. Do not transpose it to C x H x W: this branch feeds
+                    # the same variable as the precomputed branch above.
                     flow_backward = cv2.calcOpticalFlowFarneback(
                         image, previous_image, None, 0.5, 3, 21, 3, 5, 1.2, 0
-                    ).transpose(2, 0, 1)
+                    )
                     flow_source = "farneback"
 
                 state = predictor.predict_control_state(

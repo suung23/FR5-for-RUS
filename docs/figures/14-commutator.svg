@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="700" height="312" viewBox="0 0 700 312" role="img" aria-label="면외 운동 두 개의 교환자는 면내 롤이 된다. 따라서 면외 집합은 부분군이 아니다.">
+  <title>면외는 부분군이 아니다</title>
+  <style>
+    svg{--surface:#FFFFFF;--panel:#F4F8F7;--ink:#15211F;--ink2:#394A47;--muted:#697B78;--hair:#D5DEDC;
+        --in:#0B7A67;--in-soft:rgba(11,122,103,.10);--out:#B0452B;--out-soft:rgba(176,69,43,.10);
+        --sans:system-ui,"Noto Sans CJK KR","Noto Sans KR","Malgun Gothic","Apple SD Gothic Neo",sans-serif;
+        --mono:"DejaVu Sans Mono","JetBrains Mono",ui-monospace,monospace;}
+    @media (prefers-color-scheme:dark){
+      svg{--surface:#171F1D;--panel:#131A19;--ink:#E7EEEC;--ink2:#BDCAC7;--muted:#8A9C99;--hair:#2B3936;
+          --in:#4CD5B8;--in-soft:rgba(76,213,184,.15);--out:#F0906F;--out-soft:rgba(240,144,111,.15);}
+    }
+    .bg{fill:var(--surface)}
+    .s-fg{stroke:var(--ink)} .s-mut{stroke:var(--muted)} .s-hair{stroke:var(--hair)}
+    .s-in{stroke:var(--in)} .s-out{stroke:var(--out)}
+    .f-in{fill:var(--in-soft)} .f-out{fill:var(--out-soft)}
+    .f-surf{fill:var(--surface)} .f-panel{fill:var(--panel)}
+    .mk-fg{fill:var(--ink)} .mk-mut{fill:var(--muted)} .mk-in{fill:var(--in)} .mk-out{fill:var(--out)}
+    .t{font-family:var(--sans);font-size:12px;fill:var(--ink2)}
+    .tm{font-family:var(--mono);font-size:12.5px;fill:var(--ink)}
+    .tmu{font-family:var(--sans);font-size:11px;fill:var(--muted)}
+    .tin{fill:var(--in)} .tout{fill:var(--out)}
+    .tt{font-family:var(--mono);font-size:14px;font-weight:500}
+    .no-fill{fill:none}
+  </style>
+  <defs>
+    <marker id="ar-fg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-fg"/></marker>
+    <marker id="ar-mut" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-mut"/></marker>
+    <marker id="ar-in" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-in"/></marker>
+    <marker id="ar-out" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-out"/></marker>
+  </defs>
+  <rect class="bg" x="0" y="0" width="700" height="312"/>
+      <!-- start -->
+      <rect x="80" y="120" width="80" height="46" class="f-panel s-mut" stroke-width="1.4"/>
+      <line x1="103" y1="143" x2="137" y2="143" class="s-fg" stroke-width="3"/>
+      <text x="120" y="184" class="tmu" text-anchor="middle">시작</text>
+
+      <!-- branches -->
+      <path d="M 172 136 Q 240 108 316 90" class="no-fill s-out" stroke-width="1.6" marker-end="url(#ar-out)"/>
+      <path d="M 172 152 Q 240 182 316 200" class="no-fill s-out" stroke-width="1.6" marker-end="url(#ar-out)"/>
+      <text x="242" y="102" class="tm tout" text-anchor="middle">ω_x 다음 ω_z</text>
+      <text x="242" y="228" class="tm tout" text-anchor="middle">ω_z 다음 ω_x</text>
+
+      <!-- ends -->
+      <rect x="330" y="60" width="80" height="46" class="f-in s-in" stroke-width="1.4"/>
+      <line x1="353" y1="83" x2="387" y2="83" class="s-fg" stroke-width="3" transform="rotate(-19 370 83)"/>
+      <rect x="330" y="176" width="80" height="46" class="f-in s-in" stroke-width="1.4"/>
+      <line x1="353" y1="199" x2="387" y2="199" class="s-fg" stroke-width="3" transform="rotate(19 370 199)"/>
+
+      <!-- difference -->
+      <path d="M 422 83 Q 466 141 422 199" class="no-fill s-in" stroke-width="1.6" marker-start="url(#ar-in)" marker-end="url(#ar-in)"/>
+      <text x="478" y="132" class="t tin">차이 = 면내 롤 ω_y</text>
+      <text x="478" y="150" class="tmu">평면 자체는 같은 Π</text>
+
+      <line x1="60" y1="256" x2="640" y2="256" class="s-hair" stroke-width="1"/>
+      <text x="350" y="284" class="tm" text-anchor="middle">[ ω_x , ω_z ] = −ω_y  ∈  𝔰𝔱𝔞𝔟(Π)</text>
+      <text x="350" y="304" class="tmu" text-anchor="middle">면외 생성원 둘의 괄호가 면내로 떨어진다 — 면외 집합은 닫혀 있지 않다</text>
+    </svg>

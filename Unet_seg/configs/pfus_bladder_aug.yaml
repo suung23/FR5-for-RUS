@@ -1,0 +1,52 @@
+# configs/pfus_bladder_qc.yaml with the photometric augmentation ranges widened
+# by ~20%. Everything else -- data, splits, model, optimizer, schedule, loss --
+# is unchanged, so this run isolates the photometric range and nothing else.
+#
+# Target: the three weakest patients in the QC evaluation are P043 (0.4606),
+# P000 (0.6277) and P001 (0.6933), and all three are low-contrast or
+# near-collapsed acquisitions. P043's imaged sector sits at mean intensity 0.288
+# against 0.242 for the well-segmented P020 and P041 -- it is over-gained, and
+# its bladder is not rendered anechoic at all (2.4% of the ground-truth interior
+# falls below 0.15, against 71-95% for patients the model handles). Widening the
+# brightness / contrast / gamma ranges is the augmentation that maps onto that
+# failure directly.
+#
+#   brightness   0.15  -> 0.18          (+20%)
+#   contrast     0.15  -> 0.18          (+20%)
+#   gamma_range  [0.80, 1.25] -> [0.76, 1.30]
+#                                       (the deviation from 1.0 -- 0.20 below and
+#                                        0.25 above -- scaled by 1.2)
+#
+# The two noise terms are deliberately NOT widened. gaussian_noise_std and
+# speckle_noise_std model acquisition noise, not gain and dynamic range, so they
+# do not address the low-contrast failure and changing them at the same time
+# would confound this measurement. speckle_noise_std also feeds the photometric
+# reliability signal that gates the temporal loss (see the augmentation config's
+# `independent_photometric` note), so it should move in its own experiment.
+#
+# Geometric ranges are untouched for the same reason, and horizontal_flip stays
+# at 0: the pelvic-floor midsagittal view has fixed left/right anatomy.
+
+defaults: pfus_bladder_qc.yaml
+
+experiment:
+  name: pfus_bladder_aug
+  output_dir: runs/pfus_bladder_aug
+  seed: 42
+
+augmentation:
+  enabled: true
+  horizontal_flip: 0.0
+  vertical_flip: 0.0
+  rotation_degrees: 7.0
+  scale_range: [0.9, 1.1]
+  translate_ratio: 0.05
+  brightness: 0.18            # was 0.15
+  contrast: 0.18              # was 0.15
+  gamma_range: [0.76, 1.30]   # was [0.80, 1.25]
+  gaussian_noise_std: 0.01    # unchanged on purpose
+  speckle_noise_std: 0.02     # unchanged on purpose
+  independent_photometric: false
+
+train:
+  checkpoint_dir: checkpoints/pfus_bladder_aug

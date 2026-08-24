@@ -1,0 +1,61 @@
+# Standard U-Net on the hydro-extension-domain subset of PFUS.
+#
+# Identical to configs/pfus_bladder.yaml in EVERY respect except the manifest,
+# so the two runs isolate the effect of the low-volume filter and nothing else.
+# Do not fold early stopping, loss reweighting or temporal terms in here --
+# those are separate experiments and would confound this one.
+#
+# The subset is produced by:
+#
+#   python scripts/filter_manifest_by_area.py \
+#       --manifest ~/datasets/pfus/manifest.csv \
+#       --output   ~/datasets/pfus/manifest_hydro.csv \
+#       --min-patient-area-ratio 0.022888 \
+#       --report   ~/datasets/pfus/manifest_hydro_report.json
+#
+# Rationale: during HoLEP the bladder is held hydro-extended by continuous
+# irrigation for the whole procedure, so a collapsed bladder is outside the
+# deployment domain. 0.022888 is 1,500 px at the 256 x 256 working resolution;
+# it keeps 74/110 patients (train 54, val 10, test 10 / 9,768 frames).
+#
+# The filter is per PATIENT, not per frame: on PFUS the median within-patient
+# area IQR is ~161 px while patient medians span 553 - 9,954 px, so bladder
+# volume is a patient property and a per-frame cut would only shred borderline
+# sequences. See the script's module docstring.
+#
+# TWO CAVEATS that must travel with any number produced by this config:
+#
+#   1. PFUS does not actually reach the HoLEP domain. Only 4.6% of its frames
+#      exceed a 10% area ratio and the maximum is 16%; a fully irrigated bladder
+#      sits to the right of that. This filter moves toward the domain, it does
+#      not arrive there. Real HoLEP-domain data remains the actual fix.
+#   2. Area and patient identity are near-perfectly confounded here, so a Dice
+#      gain over pfus_bladder cannot be attributed to "large bladders are
+#      easier" rather than "the dropped patients were harder". P021 -- the worst
+#      patient in the previous evaluation -- has a median of 2,007 px and is
+#      KEPT, so its failures are not a volume effect and survive this change.
+#
+# Scores from this config are only comparable with scores from the same subset.
+# The `test` split here is 10 patients / 1,160 frames, not the 16 / 2,017 the
+# earlier evaluation report used.
+
+defaults: pfus_bladder.yaml
+
+experiment:
+  name: pfus_bladder_hydro
+  output_dir: runs/pfus_bladder_hydro
+  seed: 42
+
+data:
+  manifest: /home/rosotauser/datasets/pfus/manifest_hydro.csv
+  root: /home/rosotauser/datasets/pfus   # the filtered manifest keeps the source's
+                                         # relative paths, so the root stays the
+                                         # ORIGINAL dataset directory
+
+split:
+  strategy: manifest             # the filter preserves the split column verbatim;
+                                 # re-splitting would move patients and void the
+                                 # comparison with pfus_bladder
+
+train:
+  checkpoint_dir: checkpoints/pfus_bladder_hydro

@@ -1,0 +1,70 @@
+# Standard U-Net on PFUS with the full patient cohort and P021 removed.
+#
+# This is configs/pfus_bladder.yaml with ONE change: the manifest excludes P021.
+# The hydro-extension volume filter (configs/pfus_bladder_hydro.yaml) is
+# deliberately NOT applied here -- it was measured and reverted. Its net effect
+# on Dice, isolated against the same test set, was +0.003; it cost 34% of the
+# frames and 24 of 78 training patients to buy that, and it made P021 worse
+# rather than better. docs/filter_report_hydro.html records the measurement.
+#
+# Why P021 is out, and why that is not circular
+# ---------------------------------------------
+# P021 is the worst patient in every evaluation so far (Dice 0.10-0.28 against
+# 0.75-0.93 for the rest of test), so dropping it on that basis alone would be
+# fitting the test set. It is dropped on independent grounds:
+#
+#   - Visual review of its raw B-mode finds no coherent anechoic bladder at all;
+#     the ground truth is a flat 11-vertex polygon laid over uniform speckle.
+#     docs/qc_p021.png is the record, with P020 alongside for contrast.
+#   - Its label is effectively static: the polygon centroid travels 7.7 px in x
+#     and 2.9 px in y across 200 frames (P041 travels 42 and 37), and 51 of 199
+#     consecutive frames repeat the previous frame's coordinates exactly.
+#   - Two checkpoints trained on different patient subsets (110 and 74) agree
+#     with each other on a different location and disagree with the label.
+#
+# Whether the annotation is misplaced or the bladder is genuinely unimaged
+# cannot be settled from this dataset. Either way those frames support neither
+# supervision nor evaluation.
+#
+# NO automated label-quality gate is applied, on purpose. Five candidate
+# statistics were tried and every one of them ranked a visually-correct patient
+# at or below P021: boundary/background gradient ratio (P048 1.01 vs P021 0.93),
+# interior-to-ring contrast (P048 0.058 vs 0.046), ground-truth-to-anechoic-
+# component overlap (P020 0.061 and P012 0.030 vs 0.050), label-to-image motion
+# ratio (P020 1.384 vs 1.332), and interior-brighter-than-surround, which flagged
+# P000 and P019 purely because eroding a thin sliver mask samples bladder wall
+# instead of lumen. A gate on any of them would drop good patients. P048, P000
+# and P019 were each reviewed by eye and KEPT.
+#
+# P021 sits only in the test split, so train and val are byte-identical to
+# pfus_bladder.yaml: checkpoints/pfus_bladder/best.pt is already the model this
+# config describes, and re-training is unnecessary unless the recipe changes.
+# The test split is 15 patients / 1,817 frames, so its numbers are NOT
+# comparable with the 16-patient / 2,017-frame figures in
+# docs/eval_report_pfus_bladder.html.
+#
+# The manifest is produced by:
+#
+#   python scripts/filter_manifest_by_area.py \
+#       --manifest ~/datasets/pfus/manifest.csv \
+#       --output   ~/datasets/pfus/manifest_qc.csv \
+#       --exclude-patients P021 \
+#       --report   ~/datasets/pfus/manifest_qc_report.json
+
+defaults: pfus_bladder.yaml
+
+experiment:
+  name: pfus_bladder_qc
+  output_dir: runs/pfus_bladder_qc
+  seed: 42
+
+data:
+  manifest: /home/rosotauser/datasets/pfus/manifest_qc.csv
+  root: /home/rosotauser/datasets/pfus   # the filtered manifest keeps the source's
+                                         # relative paths
+
+split:
+  strategy: manifest             # the exclusion preserves the split column verbatim
+
+train:
+  checkpoint_dir: checkpoints/pfus_bladder_qc

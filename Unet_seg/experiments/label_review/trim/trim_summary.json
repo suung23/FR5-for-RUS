@@ -1,0 +1,23 @@
+[
+ {
+  "patient_id": "P043",
+  "n": 100,
+  "keep_median": 0.435,
+  "applied": 85,
+  "skipped": 15
+ },
+ {
+  "patient_id": "P060",
+  "n": 163,
+  "keep_median": 0.697,
+  "applied": 155,
+  "skipped": 8
+ },
+ {
+  "patient_id": "P051",
+  "n": 112,
+  "keep_median": 0.578,
+  "applied": 109,
+  "skipped": 3
+ }
+]

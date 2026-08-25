@@ -3,12 +3,17 @@ import type { TransportKind } from './types';
 /**
  * Environment-driven configuration.
  *
- * The default transport is `simulation`, deliberately. The robot at
- * 192.168.58.3 is a Fairino FR5 whose controller speaks its own XML-RPC/UDP
- * protocol; it does not serve a websocket or a ROS bridge unless something on
- * this network was set up to publish one. Defaulting to a live transport would
- * mean opening sockets against lab hardware on the strength of a guess, so a
- * real link has to be asked for explicitly through the environment.
+ * The default transport is the **telemetry bridge** — `ros2 run fr5_control
+ * telemetry_bridge` on this workstation, serving ws://localhost:8765. The
+ * console is a monitor for a real session, so its resting state has to be
+ * "waiting for the robot", never a robot that moves on its own.
+ *
+ * The FR5 controller itself speaks only XML-RPC/UDP and serves no websocket,
+ * which is what the bridge exists to solve: it subscribes to the Phase 0
+ * stack's own topics and republishes them in this contract.
+ *
+ * `simulation` is still available but must be asked for explicitly. It exists
+ * for reviewing the interface without hardware, and every panel labels it.
  *
  * This application is receive-only. No transport here has a send path, and the
  * adapter exposes none. Motion commands stay with the ROS stack that owns the
@@ -48,7 +53,7 @@ function num(key: string, fallback: number): number {
 }
 
 function transportKind(): TransportKind {
-  const raw = str('VITE_ROBOT_TELEMETRY_TRANSPORT', 'simulation').toLowerCase();
+  const raw = str('VITE_ROBOT_TELEMETRY_TRANSPORT', 'websocket').toLowerCase();
   if (
     raw === 'websocket' ||
     raw === 'http' ||
@@ -57,22 +62,27 @@ function transportKind(): TransportKind {
   ) {
     return raw;
   }
-  // An unrecognised value must not silently fall through to a live socket.
+  // An unrecognised value must not silently start generating data — that is
+  // exactly the failure where an operator watches a robot that is not there.
   console.warn(
-    `Unknown VITE_ROBOT_TELEMETRY_TRANSPORT "${raw}" — falling back to simulation.`,
+    `Unknown VITE_ROBOT_TELEMETRY_TRANSPORT "${raw}" — falling back to websocket.`,
   );
-  return 'simulation';
+  return 'websocket';
 }
 
 export function loadConfig(): AppConfig {
   const robotHost = str('VITE_ROBOT_HOST', '192.168.58.3');
   const transport = transportKind();
 
-  // Only used when the operator picked a live transport without naming a URL.
+  // The bridge runs on the workstation that has the ROS stack, not on the
+  // robot. Pointing the default at the robot's own IP would look reasonable
+  // and never connect.
   const impliedUrl =
     transport === 'http'
-      ? `http://${robotHost}:8080/telemetry`
-      : `ws://${robotHost}:9090`;
+      ? `http://localhost:8080/telemetry`
+      : transport === 'rosbridge'
+        ? `ws://localhost:9090`
+        : `ws://localhost:8765`;
 
   return {
     robotHost,

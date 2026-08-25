@@ -1,0 +1,53 @@
+.body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.body canvas {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: block;
+}
+
+.veil {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* A caption rule under the viewport carrying the drawing conventions, the way an
+   engineering view carries its scale. Keeps the legend out of the 3D image itself. */
+.scaleBar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 22px;
+  padding: 0 var(--pad);
+  border-top: 1px solid var(--rule);
+  background: var(--white);
+  overflow: hidden;
+}
+
+.scaleItem {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.scaleSpacer {
+  flex: 1 1 auto;
+}
+
+.caveat {
+  font-size: 9px;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  white-space: nowrap;
+}

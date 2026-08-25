@@ -9,7 +9,9 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "console": "bash scripts/run-on-console.sh dev",
+    "console:built": "bash scripts/run-on-console.sh built"
   },
   "dependencies": {
     "@react-three/drei": "^9.122.0",

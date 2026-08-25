@@ -1,4 +1,4 @@
-"""병진 프레임 매핑 시험 — 표류가 실제로 사라지는지 (2026-08-21).
+"""teleop 프레임 매핑 시험 — 표류가 실제로 사라지는지 (2026-08-21, 회전 2026-08-25).
 
 2026-08-21 실측에서 "스타일러스 +X 밀기" 방향이 한 세션에 10° → 104° 로 표류했다
 (최대 135°, 데드맨 재파지로도 복구 안 됨). 여기서는 그 메커니즘을 그대로 재현한
@@ -13,7 +13,7 @@ import math
 import numpy as np
 import pytest
 
-from fr5_ik.teleop_frame import LinearFrameMapper, axis_mapping
+from fr5_ik.teleop_frame import TeleopFrameMapper, axis_mapping
 
 TIP_ROLL = 90.0
 A = axis_mapping(TIP_ROLL)
@@ -88,7 +88,7 @@ def replay(seconds: float):
         ``(옛 경로 최대 표류°, 새 경로 최대 표류°)``.
     """
     session = Session()
-    mapper = LinearFrameMapper(TIP_ROLL)
+    mapper = TeleopFrameMapper(TIP_ROLL)
     mapper.engage(session.rot_base_probe, session.rot_stylus)
 
     def command():
@@ -137,7 +137,7 @@ def test_latched_mapping_does_not_drift():
 def test_mapping_is_identity_at_the_moment_of_engage():
     """파지를 시작하는 순간에는 기존 매핑과 정확히 같다 — 축이 갑자기 안 바뀐다."""
     session = Session()
-    mapper = LinearFrameMapper(TIP_ROLL)
+    mapper = TeleopFrameMapper(TIP_ROLL)
     mapper.engage(session.rot_base_probe, session.rot_stylus)
 
     for command in (PUSH_X, np.array([0.03, -0.01, 0.02]), np.zeros(3)):
@@ -148,7 +148,7 @@ def test_mapping_is_identity_at_the_moment_of_engage():
 def test_magnitude_is_preserved():
     """방향만 바꾼다. 속도 크기가 바뀌면 안전 클램프의 의미가 흐려진다."""
     session = Session()
-    mapper = LinearFrameMapper(TIP_ROLL)
+    mapper = TeleopFrameMapper(TIP_ROLL)
     mapper.engage(session.rot_base_probe, session.rot_stylus)
 
     for rate in hand_profile(5.0):
@@ -163,7 +163,7 @@ def test_magnitude_is_preserved():
 def test_session_latch_survives_regrip():
     """기본값에서는 재파지해도 기준이 그대로다 — 파지마다 축이 바뀌지 않는다."""
     session = Session()
-    mapper = LinearFrameMapper(TIP_ROLL)
+    mapper = TeleopFrameMapper(TIP_ROLL)
     assert mapper.engage(session.rot_base_probe, session.rot_stylus) is True
     latched = mapper.latched.copy()
 
@@ -176,7 +176,7 @@ def test_session_latch_survives_regrip():
 def test_relatch_on_engage_resets_the_reference():
     """켜 두면 파지마다 다시 잡는다 — 조작자가 자리를 옮겼을 때를 위한 선택지."""
     session = Session()
-    mapper = LinearFrameMapper(TIP_ROLL, relatch_on_engage=True)
+    mapper = TeleopFrameMapper(TIP_ROLL, relatch_on_engage=True)
     mapper.engage(session.rot_base_probe, session.rot_stylus)
     latched = mapper.latched.copy()
 
@@ -189,7 +189,7 @@ def test_relatch_on_engage_resets_the_reference():
 def test_falls_back_to_passthrough_before_first_engage():
     """기준을 잡기 전에는 손대지 않는다 — stylus_pose 가 없어도 기존 거동으로 돈다."""
     session = Session()
-    mapper = LinearFrameMapper(TIP_ROLL)
+    mapper = TeleopFrameMapper(TIP_ROLL)
     assert not mapper.ready
     out = mapper.to_probe(PUSH_X, session.rot_base_probe, session.rot_stylus)
     assert out == pytest.approx(PUSH_X)
@@ -200,3 +200,104 @@ def test_tip_roll_must_match_touch_node():
     assert axis_mapping(0.0) == pytest.approx(np.diag([1.0, -1.0, -1.0]))
     # tip_roll 90 에서 스타일러스 +X 는 프로브 +y (elevational) 로 간다 — 실측 로그와 동일
     assert axis_mapping(90.0) @ np.array([1.0, 0.0, 0.0]) == pytest.approx([0.0, 1.0, 0.0])
+
+
+# -- 회전 (2026-08-25) -------------------------------------------------------
+#
+# 회전은 처음에 손대지 않았다. 근거는 조작자가 프로브를 보면서 보정하는 축이라
+# 병진처럼 어긋나지 않는다는 것이었고, 실기 조작에서 그 전제가 틀렸다는 보고가
+# 나왔다. 회전 경로를 펼치면 병진과 같은 형태이므로 표류 메커니즘도 같다.
+
+
+def test_axis_mapping_is_a_proper_rotation():
+    """``det(A) = +1``. 각속도에 같은 변환을 써도 되는 근거 전체가 여기에 있다.
+
+    각속도는 유사벡터라 반사가 섞이면 벡터와 다르게 변환된다. 누군가 ``A`` 를 축
+    교환으로 "단순화" 하면 행렬식이 −1 이 되고, 병진은 멀쩡한데 **회전만 거울상**
+    이 된다 — 화면으로는 알아채기 어려운 종류의 오류다.
+    """
+    assert np.linalg.det(A) == pytest.approx(1.0)
+    assert A.T @ A == pytest.approx(np.eye(3), abs=1e-12)
+
+
+def test_body_frame_rotation_drifts_like_translation():
+    """회전 지령도 같은 조건에서 어긋난다. 병진만의 문제가 아니었다."""
+    worst_old, _ = replay(30.0)
+    assert worst_old > 20.0
+
+
+def test_latched_rotation_does_not_drift():
+    """같은 30 초 동안 고정 프레임 쪽은 제자리에 있다."""
+    _, worst_new = replay(30.0)
+    assert worst_new < 1e-6
+
+
+def test_rotation_magnitude_is_preserved():
+    """각속도 크기는 안 변한다 — 프레임만 바꾸는 변환이므로 회전 속도가 달라지면 안 된다."""
+    session = Session()
+    mapper = TeleopFrameMapper(TIP_ROLL)
+    mapper.engage(session.rot_base_probe, session.rot_stylus)
+    for rate in hand_profile(4.0):
+        session.step(rate)
+        cmd = A @ session.rot_stylus.T @ np.array([0.3, -0.2, 0.5])
+        out = mapper.to_probe(cmd, session.rot_base_probe, session.rot_stylus)
+        assert np.linalg.norm(out) == pytest.approx(np.linalg.norm(cmd))
+
+
+def test_rotation_sense_is_preserved():
+    """오른손 회전이 오른손 회전으로 남는다.
+
+    ``det = -1`` 인 변환을 쓰면 크기도 방향축도 그럴듯한데 도는 **방향만** 뒤집힌다.
+    두 축의 외적이 세 번째 축으로 가는지 보면 그것이 걸린다.
+    """
+    session = Session()
+    mapper = TeleopFrameMapper(TIP_ROLL)
+    mapper.engage(session.rot_base_probe, session.rot_stylus)
+    for _ in range(20):
+        session.step(0.6)
+
+    def mapped(vector):
+        cmd = A @ session.rot_stylus.T @ vector
+        return mapper.to_probe(cmd, session.rot_base_probe, session.rot_stylus)
+
+    x = mapped(np.array([1.0, 0.0, 0.0]))
+    y = mapped(np.array([0.0, 1.0, 0.0]))
+    z = mapped(np.array([0.0, 0.0, 1.0]))
+    assert np.cross(x, y) == pytest.approx(z, abs=1e-9)
+
+
+def test_translation_and_rotation_share_one_latch():
+    """둘이 같은 기준을 쓴다 — 따로 잡으면 축이 서로 어긋난다.
+
+    손을 대각선으로 밀며 비틀 때, 병진의 '오른쪽' 과 회전의 '오른쪽' 사이 각이
+    조작 내내 일정해야 한다. 두 매퍼를 따로 두면 이 각이 시간에 따라 벌어진다.
+    """
+    session = Session()
+    mapper = TeleopFrameMapper(TIP_ROLL)
+    mapper.engage(session.rot_base_probe, session.rot_stylus)
+
+    intent_linear = np.array([1.0, 0.0, 0.0])
+    intent_angular = np.array([0.0, 1.0, 0.0])
+
+    def separation():
+        lin = mapper.to_probe(
+            A @ session.rot_stylus.T @ intent_linear,
+            session.rot_base_probe, session.rot_stylus,
+        )
+        ang = mapper.to_probe(
+            A @ session.rot_stylus.T @ intent_angular,
+            session.rot_base_probe, session.rot_stylus,
+        )
+        return angle_between(lin, ang)
+
+    reference = separation()
+    for rate in hand_profile(20.0):
+        session.step(rate)
+        assert separation() == pytest.approx(reference, abs=1e-6)
+
+
+def test_rotation_falls_back_to_passthrough_before_first_engage():
+    """기준을 잡기 전에는 지령을 그대로 낸다 — 조용히 0 을 내면 안 된다."""
+    mapper = TeleopFrameMapper(TIP_ROLL)
+    cmd = np.array([0.1, -0.2, 0.3])
+    assert mapper.to_probe(cmd, np.eye(3), np.eye(3)) == pytest.approx(cmd)

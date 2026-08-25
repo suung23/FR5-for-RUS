@@ -46,7 +46,9 @@ export class HttpPollTransport implements Transport {
       const now = Date.now();
       const frame = parseTelemetry(await res.json(), now);
       if (frame) {
-        sink.onTelemetry({ ...frame, connected: true });
+        // A 200 response says the endpoint answered, not that the robot is
+        // there. Keep whatever the payload declared.
+        sink.onTelemetry(frame);
         sink.onStatus({ phase: 'connected', attempts: 0, error: undefined, lastFrameAt: now });
         this.attempts = 0;
       }

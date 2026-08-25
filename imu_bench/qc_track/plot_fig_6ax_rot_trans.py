@@ -232,11 +232,6 @@ def build(res, out_base, zoom_s=2.5):
     style(d2)
     tag(d2, "(f)", dx=-0.24)
 
-    fig.suptitle("6-axis IMU (no magnetometer) — rotation and translation error, "
-                 "FR5 teleoperated probing",
-                 x=0.062, ha="left", fontsize=15, fontweight="bold", color=INK,
-                 y=0.972)
-
     os.makedirs(os.path.dirname(out_base), exist_ok=True)
     png, svg, pdf = out_base + ".png", out_base + ".svg", out_base + ".pdf"
     fig.savefig(png, dpi=300, facecolor="white")

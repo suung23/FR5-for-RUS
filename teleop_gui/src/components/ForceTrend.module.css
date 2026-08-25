@@ -1,0 +1,83 @@
+.body {
+  padding: 2px 2px 0;
+  overflow: hidden;
+}
+
+.empty {
+  margin: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+/* Tabs are underlined, not boxed — the active one carries a 2px navy rule that
+   sits on the header's own bottom border. */
+.tab {
+  border: none;
+  background: transparent;
+  padding: 4px 9px 3px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.tab:hover {
+  background: transparent;
+  color: var(--black);
+}
+
+.tabActive,
+.tabActive:hover {
+  color: var(--navy);
+  border-bottom-color: var(--navy);
+  background: transparent;
+}
+
+.tabs .plate__aside {
+  margin-left: 8px;
+}
+
+.key {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 14px;
+  padding: 0 var(--pad);
+  height: 20px;
+  align-items: center;
+  border-top: 1px solid var(--rule);
+}
+
+.keyItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--black);
+}
+
+.keyLine {
+  width: 16px;
+  height: 0;
+  border-top-width: 2px;
+  border-top-style: solid;
+}
+
+.solid-black { border-top-color: var(--black); }
+.solid-grey { border-top-color: var(--muted); }
+.solid-navy { border-top-color: var(--navy); border-top-width: 3px; }

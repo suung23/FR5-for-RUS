@@ -1,6 +1,20 @@
 import type { Transport, TransportSink } from '../types';
 import { parseTelemetry, parseWrench } from './parse';
 
+type FrameKind = 'telemetry' | 'wrench' | 'unknown';
+
+/** Declared frame type, or an inference from the payload's shape. */
+function frameKind(payload: unknown): FrameKind {
+  if (payload && typeof payload === 'object') {
+    const declared = (payload as Record<string, unknown>).type;
+    if (declared === 'telemetry' || declared === 'wrench') return declared;
+    if ('force' in (payload as object) && !('jointPositions' in (payload as object))) {
+      return 'wrench';
+    }
+  }
+  return 'unknown';
+}
+
 /**
  * Plain websocket transport.
  *
@@ -65,10 +79,33 @@ export class WebSocketTransport implements Transport {
       } catch {
         return; // A single bad frame is not worth tearing the link down.
       }
-      const wrench = parseWrench(payload, now);
-      if (wrench) sink.onWrench(wrench);
-      const frame = parseTelemetry(payload, now);
-      if (frame) sink.onTelemetry({ ...frame, connected: true });
+      // One socket carries two kinds of frame. Dispatch on the declared type,
+      // and fall back to the shape only for servers that do not tag.
+      //
+      // Guessing from shape alone is what went wrong here first: a wrench
+      // frame has no joint fields, so parsing it as telemetry too produced a
+      // valid-looking frame with everything absent, and at 50 Hz that wiped
+      // the joint state between every telemetry update.
+      const kind = frameKind(payload);
+
+      if (kind !== 'telemetry') {
+        const wrench = parseWrench(payload, now);
+        if (wrench) {
+          sink.onWrench(wrench);
+          sink.onStatus({ lastFrameAt: now });
+          if (kind === 'wrench') return;
+        }
+      }
+
+      if (kind !== 'wrench') {
+        const frame = parseTelemetry(payload, now);
+        // Do NOT force `connected: true` here. The socket being open says the
+        // bridge is reachable, not that the robot is. The bridge reports
+        // `connected: false` when joint state has gone stale, and overriding
+        // that made the console show ROBOT CONNECTED with no robot behind it —
+        // the exact failure this display exists to prevent.
+        if (frame) sink.onTelemetry(frame);
+      }
       sink.onStatus({ lastFrameAt: now });
     };
 

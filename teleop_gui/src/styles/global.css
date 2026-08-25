@@ -1,217 +1,278 @@
 /*
- * Visual language: a control-room instrument panel, not a dashboard template.
+ * Visual system: FAIRINO-style operational console.
  *
- * Decisions worth keeping:
+ * Three colours carry the entire interface — black, white, deep navy — with two
+ * neutral greys for rules and de-emphasised text. Nothing is coloured for
+ * decoration, and no state is signalled by colour alone.
  *
- * - One cool near-black ground with layered surfaces rather than boxed cards.
- *   Panels are separated by hairlines and elevation, not by borders on every
- *   side, so the eye is not asked to parse a grid of rectangles.
- * - Colour is reserved for state. Nothing is coloured for decoration, so when
- *   amber or red appears it means something without needing a legend.
- * - Numbers are tabular and monospaced everywhere. A reading that shifts
- *   horizontally as digits change is a reading that is hard to watch.
- * - Type is small and dense on purpose. This is a panel a physician glances
- *   at while their attention is on the patient, not a page to be read.
+ * Severity is expressed structurally instead:
+ *
+ *   normal    plain row, hairline rule
+ *   warning   2px black left edge + a bordered WARN tag
+ *   alarm     inverted block, white on black, + an ALARM tag
+ *
+ * That survives a monochrome pendant screen, a photocopy, and colour-blind
+ * vision, which a red/amber/green scheme does not.
+ *
+ * Everything is square. Panels are white plates butted against a black canvas
+ * and separated by 1px rules, so the console reads as one instrument rather
+ * than a scatter of cards.
  */
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 
-  --ground: #0a0d12;
-  --surface-1: #11161d;
-  --surface-2: #161c25;
-  --surface-3: #1d2530;
-  --hairline: #232c38;
-  --hairline-strong: #303b4a;
+  --black: #000000;
+  --white: #ffffff;
+  --navy: #10233f;
+  --rule: #d6d9de;
+  --muted: #6b7280;
 
-  --ink: #e6edf6;
-  --ink-muted: #8d9bb0;
-  --ink-faint: #5c6982;
+  /* Density. An operator glances at this while looking at the patient, so rows
+     are tight and type is small but never below legibility. */
+  --row: 22px;
+  --pad: 8px;
+  --panel-gap: 1px;
 
-  /* State palette. Deliberately desaturated so the critical red is the only
-     thing on screen that can shout. */
-  --nominal: #4ec9a7;
-  --nominal-dim: #1e3f39;
-  --caution: #e0a44a;
-  --caution-dim: #3d3020;
-  --critical: #e5615e;
-  --critical-dim: #3d2124;
-  --info: #6ba3d6;
-  --accent: #7cc4e8;
-
-  --trace-x: #6ba3d6;
-  --trace-y: #b58ad4;
-  --trace-z: #4ec9a7;
-  --trace-n: #e6edf6;
-
-  --radius: 6px;
-  --gap: 12px;
-
-  --font-ui: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
-  --font-num: 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', ui-monospace, monospace;
+  --font-ui: 'Inter', 'Segoe UI', 'Helvetica Neue', system-ui, sans-serif;
+  --font-num: 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', ui-monospace, 'Courier New', monospace;
 }
 
 * {
   box-sizing: border-box;
+  border-radius: 0 !important;
 }
 
 html,
 body,
+/* The root element paints opaque black in its own right. Relying on `body`
+   alone leaves a window whose background depends on the compositor's idea of
+   an unpainted surface, which on some setups is transparent. */
 #root {
   height: 100%;
   margin: 0;
+  background: var(--black);
 }
 
 body {
-  background: var(--ground);
-  color: var(--ink);
+  background: var(--black);
+  color: var(--black);
   font-family: var(--font-ui);
-  font-size: 13px;
-  line-height: 1.45;
+  font-size: 12px;
+  line-height: 1.35;
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
-  /* Electron: let the header double as the drag region. */
   user-select: none;
-}
-
-/* A faint vertical gradient keeps the large dark field from reading as flat
-   black on an OLED panel without introducing a visible seam. */
-#root {
-  background:
-    radial-gradient(120% 80% at 50% 0%, #121821 0%, var(--ground) 60%);
 }
 
 .num {
   font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
-  font-feature-settings: 'tnum' 1, 'zero' 1;
-  letter-spacing: -0.01em;
+  font-feature-settings: 'tnum' 1;
+  letter-spacing: -0.02em;
 }
 
-.label {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--ink-faint);
-}
+/* ---- plate ---------------------------------------------------------------
+   A white information surface. Header is a thin navy-ruled bar; the body is
+   plain white. No shadow, no radius, no gradient. */
 
-/* Panels are surfaces with a single top hairline and a soft inner highlight,
-   which reads as a physical plate rather than a web card. */
-.panel {
-  background: linear-gradient(180deg, var(--surface-2) 0%, var(--surface-1) 100%);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.03),
-    0 1px 2px rgba(0, 0, 0, 0.4);
+.plate {
+  background: var(--white);
   display: flex;
   flex-direction: column;
   min-height: 0;
   min-width: 0;
+  border: 1px solid var(--rule);
 }
 
-.panel__head {
+.plate__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--hairline);
+  height: 24px;
+  padding: 0 var(--pad);
+  border-bottom: 1px solid var(--navy);
   flex: 0 0 auto;
+  background: var(--white);
 }
 
-.panel__body {
-  padding: 12px;
-  min-height: 0;
+.plate__title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--navy);
+  white-space: nowrap;
+}
+
+.plate__aside {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.plate__body {
   flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
-.panel__body--flush {
-  padding: 0;
+/* ---- field rows ---------------------------------------------------------- */
+
+.field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  height: var(--row);
+  padding: 0 var(--pad);
+  border-bottom: 1px solid var(--rule);
 }
 
-/* Status dot used in the header and on each panel that has a live source. */
-.dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex: 0 0 auto;
-  background: var(--ink-faint);
+.field:last-child {
+  border-bottom: none;
 }
 
-.dot--nominal {
-  background: var(--nominal);
-  box-shadow: 0 0 0 3px var(--nominal-dim);
+.field__label {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
 }
 
-.dot--caution {
-  background: var(--caution);
-  box-shadow: 0 0 0 3px var(--caution-dim);
+.field__value {
+  font-size: 12px;
+  color: var(--black);
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.dot--critical {
-  background: var(--critical);
-  box-shadow: 0 0 0 3px var(--critical-dim);
-  animation: pulse 1.4s ease-in-out infinite;
+.field--warn {
+  border-left: 2px solid var(--black);
+  padding-left: calc(var(--pad) - 2px);
 }
 
-.dot--unknown {
-  background: var(--ink-faint);
-  box-shadow: 0 0 0 3px #22282f;
+.field--alarm {
+  background: var(--black);
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
+.field--alarm .field__label {
+  color: var(--white);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .dot--critical {
-    animation: none;
-  }
+.field--alarm .field__value {
+  color: var(--white);
 }
+
+/* ---- status tag ----------------------------------------------------------
+   A bordered rectangle with a word in it. Deliberately not a pill, and never
+   the only thing carrying the state. */
+
+.tag {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border: 1px solid var(--black);
+  color: var(--black);
+  background: var(--white);
+  white-space: nowrap;
+}
+
+.tag--strong {
+  background: var(--black);
+  color: var(--white);
+}
+
+.tag--navy {
+  border-color: var(--navy);
+  color: var(--navy);
+}
+
+.tag--off {
+  border-color: var(--rule);
+  color: var(--muted);
+}
+
+/* ---- controls ------------------------------------------------------------ */
 
 button {
   font: inherit;
-  color: inherit;
-  background: var(--surface-3);
-  border: 1px solid var(--hairline-strong);
-  border-radius: 4px;
-  padding: 4px 10px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--black);
+  background: var(--white);
+  border: 1px solid var(--navy);
+  padding: 3px 10px;
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease;
 }
 
 button:hover {
-  background: #26303d;
-  border-color: #3d4a5c;
+  background: var(--navy);
+  color: var(--white);
 }
 
 button:active {
-  background: #1c242e;
+  background: var(--black);
+  border-color: var(--black);
+  color: var(--white);
 }
 
 button:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--black);
   outline-offset: 1px;
 }
 
+button[aria-pressed='true'] {
+  background: var(--navy);
+  color: var(--white);
+}
+
+button:disabled {
+  border-color: var(--rule);
+  color: var(--muted);
+  cursor: default;
+}
+
+button:disabled:hover {
+  background: var(--white);
+  color: var(--muted);
+}
+
+/* ---- scrollbars ---------------------------------------------------------- */
+
 ::-webkit-scrollbar {
-  width: 9px;
-  height: 9px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: var(--white);
+  border-left: 1px solid var(--rule);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--hairline-strong);
-  border-radius: 5px;
-  border: 2px solid var(--surface-1);
+  background: var(--rule);
+  border: 2px solid var(--white);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #43506180;
+  background: var(--muted);
+}
+
+/* Recharts leaves inline focus rings on the surface; suppress them so the
+   plate edge stays the only rule in view. */
+.recharts-wrapper:focus,
+.recharts-surface:focus {
+  outline: none;
 }

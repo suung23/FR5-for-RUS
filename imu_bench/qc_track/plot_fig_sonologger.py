@@ -22,7 +22,8 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt                                 # noqa: E402
-from matplotlib.patches import FancyBboxPatch, FancyArrowPatch  # noqa: E402
+from matplotlib.patches import (FancyBboxPatch, FancyArrowPatch,  # noqa: E402
+                                Polygon, Ellipse)
 from PIL import Image                                           # noqa: E402
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -100,6 +101,29 @@ def txt(ax, x, y, s, size=9.5, color=INK, weight="normal", ha="left", va="center
             zorder=5)
 
 
+def monitor_icon(ax, x, y, w, h):
+    """임상용 초음파 모니터 도식 — 베젤·화면·받침. x 와 y 의 눈금이 달라 비율을
+    눈으로 맞춘다 (이 축은 등축이 아니다)."""
+    ax.add_patch(FancyBboxPatch((x, y + 0.22 * h), w, 0.78 * h,
+                                boxstyle="round,pad=0,rounding_size=0.3",
+                                fc="#2B2F34", ec="#2B2F34", lw=0.8, zorder=4))
+    sx, sy = x + 0.09 * w, y + 0.30 * h
+    sw, sh = 0.82 * w, 0.62 * h
+    ax.add_patch(FancyBboxPatch((sx, sy), sw, sh, boxstyle="square,pad=0",
+                                fc="#0A0A0A", ec="none", zorder=5))
+    fan = [(sx + 0.44 * sw, sy + sh), (sx + 0.56 * sw, sy + sh),
+           (sx + 0.80 * sw, sy + 0.18 * sh), (sx + 0.20 * sw, sy + 0.18 * sh)]
+    ax.add_patch(Polygon(fan, closed=True, fc="#8C9298", ec="none", zorder=6))
+    ax.add_patch(Ellipse((sx + 0.5 * sw, sy + 0.46 * sh), 0.30 * sw, 0.28 * sh,
+                         fc="#0A0A0A", ec="#E8E8E8", lw=0.7, zorder=7))
+    ax.add_patch(FancyBboxPatch((x + 0.42 * w, y + 0.08 * h), 0.16 * w, 0.16 * h,
+                                boxstyle="square,pad=0", fc="#6E7378", ec="none",
+                                zorder=4))
+    ax.add_patch(FancyBboxPatch((x + 0.28 * w, y + 0.02 * h), 0.44 * w, 0.07 * h,
+                                boxstyle="square,pad=0", fc="#6E7378", ec="none",
+                                zorder=4))
+
+
 # ---------------------------------------------------------------- (b) 구조도
 def draw_architecture(ax):
     ax.set_xlim(0, 100); ax.set_ylim(0, 100); ax.axis("off")
@@ -113,11 +137,10 @@ def draw_architecture(ax):
     txt(ax, 20, yb - 3.5, "rotation vector + magnetometer   ~100 Hz", 9.5, INK)
     txt(ax, 20, yb - 10, "host fusion uses 6 axes (magnetometer off)", 9, SUB)
 
-    box(ax, 18, yo - hb / 2, 24, hb, ORNG_FILL, ORNG_EDGE)
-    txt(ax, 20, yo + 10, "GE 4C-RS convex array probe", 11, INK, "bold")
-    txt(ax, 20, yo + 2.5, "wideband convex array · Voluson P6", 9.5, INK)
-    txt(ax, 20, yo - 3.5, "256 × 256 candidate frames   ~8 fps", 9.5, INK)
-    txt(ax, 20, yo - 10, "raw bytes stored; scan conversion not yet verified", 9, SUB)
+    box(ax, 18, yo - hb / 2, 18, hb, ORNG_FILL, ORNG_EDGE)
+    txt(ax, 19.2, yo + 9, "GE 4C-RS convex array probe", 10, INK, "bold")
+    txt(ax, 19.2, yo + 1.5, "Connected to GE Voluson P6", 9.2, INK)
+    txt(ax, 19.2, yo - 4.5, "Ultrasound display output", 9.2, INK)
 
     # 전송 경로
     box(ax, 47, yb - 9, 19, 18, "white", BLUE_EDGE)
@@ -125,26 +148,34 @@ def draw_architecture(ax):
     txt(ax, 48.5, yb - 2.2, "/dev/ttyACM0", 9.5, INK)
     txt(ax, 48.5, yb - 6.6, "115 200 baud", 9, SUB)
 
-    box(ax, 47, yo - 9, 19, 18, "white", ORNG_EDGE)
-    txt(ax, 48.5, yo + 3.4, "Wi-Fi TCP", 10.5, INK, "bold")
-    txt(ax, 48.5, yo - 2.2, "192.168.1.1 : 5002 / 5003", 9.5, INK)
-    txt(ax, 48.5, yo - 6.6, "probe access point", 9, SUB)
+    box(ax, 39, yo - hb / 2, 15, hb, "white", ORNG_EDGE)
+    txt(ax, 40.1, yo + 12, "GE Voluson P6 monitor", 10, INK, "bold")
+    txt(ax, 40.1, yo + 7, "Probe image display", 9.0, INK)
+    txt(ax, 40.1, yo + 2.6, "HDMI video output", 9.0, INK)
+    monitor_icon(ax, 43.0, yo - 13.5, 7.0, 13.0)
+
+    box(ax, 57, yo - 13, 13, 26, "white", ORNG_EDGE)
+    txt(ax, 58.1, yo + 9, "HDMI capture", 10, INK, "bold")
+    txt(ax, 58.1, yo + 3, "HDMI input → USB video", 8.8, INK)
+    txt(ax, 58.1, yo - 2.5, "Captured display frames", 8.8, INK)
+    txt(ax, 58.1, yo - 7.5, "~8 fps", 8.8, SUB)
 
     ax.plot([0, 10], [50, 50], color=GREY, lw=1.6, zorder=3)
     ax.plot([10, 10], [yo, yb], color=GREY, lw=1.6, zorder=3)
     arrow(ax, (10, yb), (18, yb), GREY)
     arrow(ax, (10, yo), (18, yo), GREY)
     arrow(ax, (42, yb), (47, yb), BLUE)
-    arrow(ax, (42, yo), (47, yo), ORANGE)
+    arrow(ax, (36, yo), (39, yo), ORANGE)
+    arrow(ax, (54, yo), (57, yo), ORANGE)
 
     # 호스트 타임스탬프 — 두 레인을 하나로
-    box(ax, 70, 8, 13, 84, GREY_FILL, GREY_EDGE)
-    ax.text(76.5, 50, "host receive stamp\n" + r"$t \leftarrow$ time.time()"
+    box(ax, 73, 8, 12, 84, GREY_FILL, GREY_EDGE)
+    ax.text(79.0, 50, "host receive stamp\n" + r"$t \leftarrow$ time.time()"
             + "\n" + r"$\rightarrow$  pc_unix",
             fontsize=10.5, color=INK, fontweight="bold", ha="center", va="center",
             zorder=5, linespacing=1.6)
-    arrow(ax, (66, yb), (70, yb), BLUE)
-    arrow(ax, (66, yo), (70, yo), ORANGE)
+    arrow(ax, (66, yb), (73, yb), BLUE)
+    arrow(ax, (70, yo), (73, yo), ORANGE)
 
     # 세션 저장소
     box(ax, 87, 8, 13, 84, "white", GREY_EDGE)
@@ -164,7 +195,7 @@ def draw_architecture(ax):
     ax.plot([88.4, 99], [26, 26], color=GREY_EDGE, lw=0.8, zorder=5)
     txt(ax, 89.4, 20, "join key", 9, SUB)
     txt(ax, 89.4, 15, "pc_unix", 10.5, INK, "bold")
-    arrow(ax, (83, 50), (87, 50), GREY)
+    arrow(ax, (85, 50), (87, 50), GREY)
 
     # 범례
     ax.plot([18, 22], [98, 98], color=BLUE, lw=2.4, zorder=5)
@@ -197,8 +228,8 @@ def draw_timeline(ax):
                                     fc=ORNG_FILL, ec=ORNG_EDGE, lw=1.1, zorder=3))
         ax.plot([x, x], [24, 36], color=ORNG_EDGE, lw=0.9, zorder=3)
     txt(ax, x0 - 2, 19, "US", 9, ORNG_EDGE, "bold", ha="right")
-    txt(ax, x0, 4, "ultrasound frames   ·   ~8 fps   ·   each stamped when its "
-                   "last block arrives", 9.5, INK)
+    txt(ax, x0, 4, "display frames   ·   ~8 fps   ·   timestamped on host arrival",
+        9.5, INK)
     return fx
 
 
@@ -207,24 +238,22 @@ def build():
     fig.patch.set_facecolor("white")
     W, H = fig.get_size_inches()
 
-    fig.text(0.035, 0.963, "Sonologger — synchronized ultrasound and IMU acquisition",
-             fontsize=17, fontweight="bold", color=INK, ha="left", va="center")
-
     # ---------------- (a) 계측 프로브 제작 -------------------------------
     fig.text(0.035, 0.928, "(a)", fontsize=12.5, fontweight="bold", color=INK,
              ha="left", va="center")
     fig.text(0.062, 0.928, "Instrumented probe build", fontsize=12.5,
              fontweight="bold", color=INK, ha="left", va="center")
 
-    # 배경을 지운 컷아웃을 쓴다 (make_cutouts.py 가 만든다)
+    # 배경을 지우지 않은 원본 사진을 쓴다 (관심영역만 크롭)
     cells = [
-        ("cut_photo_probe_survey.png", None, 0,
-         "1  Dimensional survey", "GE 4C-RS convex array · measured with rule + protractor"),
-        ("cut_photo_probe_cad.png", None, 0,
+        ("photo_probe_survey.png", (0.27, 0.03, 1.00, 0.72), 0,
+         "1  Dimensional survey",
+         "GE 4C-RS convex array · steel rule + digital protractor"),
+        ("photo_probe_cad.png", (0.26, 0.12, 0.98, 0.81), 0,
          "2  CAD reconstruction", "Fusion 360 mesh · ultrasound_probe v5"),
-        ("cut_photo_probe_shell.png", None, 90,
+        ("photo_probe_shell.png", (0.14, 0.05, 0.86, 0.70), 90,
          "3  Printed clamp shell", "hinged split shell + sensor bracket"),
-        ("cut_photo_imu_mount.png", None, 0,
+        ("photo_imu_mount.png", (0.14, 0.08, 0.86, 0.92), 0,
          "4  IMU on bracket", "BNO085 breakout (GY-BN008X), I²C to MCU"),
     ]
     x_lo, x_hi, gap = 0.035, 0.985, 0.020
@@ -232,8 +261,7 @@ def build():
     for i, (name, crop, rot, title, sub) in enumerate(cells):
         cx0 = x_lo + i * (cw + gap)
         # 제목·설명은 그림 좌표에 고정한다 — 사진마다 크기가 달라도 줄이 맞아야 한다
-        photo_ax(fig, [cx0, 0.663, cx0 + cw, 0.872], load(name, crop, rot), None,
-                 frame=False)
+        photo_ax(fig, [cx0, 0.663, cx0 + cw, 0.872], load(name, crop, rot), None)
         fig.text(cx0 + cw / 2, 0.897, title, fontsize=10.5, color=INK,
                  fontweight="bold", ha="center", va="center")
         fig.text(cx0 + cw / 2, 0.646, sub, fontsize=9, color=SUB,
@@ -273,7 +301,7 @@ def build():
 
     us = load("us_frame_example.png")
     ax_us = photo_ax(fig, [0.640, 0.052, 0.752, 0.180], us, None)
-    ax_us.text(0.5, -0.06, "acquired frame, 256 × 256 uint8",
+    ax_us.text(0.5, -0.06, "captured display frame",
                transform=ax_us.transAxes, ha="center", va="top", fontsize=9, color=SUB)
     fig.patches.append(FancyArrowPatch(
         (0.035 + 0.575 * fx[-1] / 100, 0.045 + 0.145 * 0.24), (0.637, 0.115),
@@ -281,16 +309,14 @@ def build():
         color=ORNG_EDGE, lw=1.3, shrinkA=2, shrinkB=2, zorder=6,
         connectionstyle="arc3,rad=-0.22"))
 
-    fig.text(0.790, 0.183, "Alignment is by arrival time.", fontsize=10,
+    fig.text(0.790, 0.183, "Arrival-time alignment", fontsize=10,
              color=INK, ha="left", va="top", fontweight="bold")
     fig.text(0.790, 0.152,
-             "The IMU path is USB, microsecond-scale.\n"
-             "The ultrasound path adds Wi-Fi TCP and\n"
-             "in-probe acquisition delay. Clock skew is\n"
-             "correctable afterwards; the fixed end-to-end\n"
-             "ultrasound latency is not removed here —\n"
-             "it remains to be measured.",
-             fontsize=9.2, color=SUB, ha="left", va="top", linespacing=1.6)
+             "IMU:  USB serial\n"
+             "Ultrasound:  monitor display → HDMI capture\n"
+             "Host timestamps both streams at arrival\n"
+             "Display and capture latency measured separately",
+             fontsize=9.2, color=SUB, ha="left", va="top", linespacing=1.7)
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     png, svg, pdf = OUT + ".png", OUT + ".svg", OUT + ".pdf"

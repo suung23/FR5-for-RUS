@@ -1,0 +1,108 @@
+.strip {
+  display: flex;
+  align-items: stretch;
+  height: 30px;
+  background: var(--black);
+  color: var(--white);
+  flex: 0 0 auto;
+  -webkit-app-region: drag;
+}
+
+.strip button {
+  -webkit-app-region: no-drag;
+}
+
+.system {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  border-right: 1px solid var(--muted);
+  white-space: nowrap;
+}
+
+/* Label and value sit on one line separated by a colon rule, the way a pendant
+   status bar does. The value is what changes, so it carries the weight. */
+.field {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border-right: 1px solid var(--muted);
+  white-space: nowrap;
+}
+
+.fieldLabel {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--rule);
+}
+
+.fieldValue {
+  font-family: var(--font-num);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--white);
+}
+
+/* A bad value is boxed, not coloured — the strip is already black, so an
+   inverted plate is the strongest available emphasis. */
+.fieldValueBad {
+  background: var(--white);
+  color: var(--black);
+  padding: 1px 5px;
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+.meta,
+.clock {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: 10px;
+  color: var(--rule);
+  border-left: 1px solid var(--muted);
+  white-space: nowrap;
+}
+
+.meta .num {
+  color: var(--white);
+  font-size: 11px;
+  margin-right: 3px;
+}
+
+.clock {
+  font-size: 11px;
+  color: var(--white);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border-left: 1px solid var(--muted);
+}
+
+.actions button {
+  background: var(--black);
+  color: var(--white);
+  border-color: var(--rule);
+}
+
+.actions button:hover {
+  background: var(--white);
+  color: var(--black);
+}
+
+.actions button[aria-pressed='true'] {
+  background: var(--white);
+  color: var(--black);
+}

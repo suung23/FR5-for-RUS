@@ -25,7 +25,7 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, Float32MultiArray
 
 from fr5_ik.dls_solver import DlsSolver
-from fr5_ik.teleop_frame import LinearFrameMapper
+from fr5_ik.teleop_frame import TeleopFrameMapper
 
 JOINT_NAMES = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
 
@@ -93,8 +93,9 @@ class UsDiffIkNode(Node):
 
         # 병진 기준 프레임. "latched" 가 표류를 없애는 쪽, "probe" 가 예전 거동이다.
         self.linear_frame = str(self.get_parameter("teleop.linear_frame").value)
+        self.angular_frame = str(self.get_parameter("teleop.angular_frame").value)
         self.engage_gap = float(self.get_parameter("teleop.engage_gap_s").value)
-        self.mapper = LinearFrameMapper(
+        self.mapper = TeleopFrameMapper(
             tip_roll_deg=float(self.get_parameter("teleop.tip_roll_deg").value),
             relatch_on_engage=bool(self.get_parameter("teleop.relatch_on_engage").value),
         )
@@ -153,8 +154,9 @@ class UsDiffIkNode(Node):
         # 병진 기준이 무엇인지 안 찍으면, 축이 어긋났을 때 원인을 조작감으로만
         # 판단하게 된다 — 2026-08-21 에 실제로 그렇게 시간을 썼다.
         self.get_logger().info(
-            f"병진 기준 프레임: {self.linear_frame}"
-            + ("  (데드맨 첫 파지에 고정 → 표류 없음)" if self.linear_frame == "latched"
+            f"기준 프레임: 병진 {self.linear_frame} · 회전 {self.angular_frame}"
+            + ("  (데드맨 첫 파지에 고정 → 표류 없음)"
+               if self.linear_frame == "latched" and self.angular_frame == "latched"
                else "  ← 예전 거동이다. 손 자세가 돌면 축이 따라 돈다")
         )
 
@@ -188,6 +190,12 @@ class UsDiffIkNode(Node):
         # 조용히 90° 틀어지므로, 여기서 따로 기본값을 만들지 않는다.
         self.declare_parameter("teleop.tip_roll_deg", 90.0)
         self.declare_parameter("teleop.linear_frame", "latched")
+        # 회전도 같은 고정 프레임을 쓸지. "latched" 또는 "body".
+        #
+        # 조작 중에 바뀌면 지령 방향이 한 주기에 튀므로, 값은 **다음 파지에서만**
+        # 반영한다. 데드맨을 놓았다 다시 잡으면 적용되고, 그 사이에 로봇이 예상 못 한
+        # 방향으로 움직이는 일은 없다.
+        self.declare_parameter("teleop.angular_frame", "body")
         self.declare_parameter("teleop.relatch_on_engage", False)
         self.declare_parameter("teleop.engage_gap_s", 0.3)
 
@@ -265,9 +273,18 @@ class UsDiffIkNode(Node):
         if gap is not None and gap <= self.engage_gap and self.mapper.ready:
             return  # 파지가 이어지는 중
 
+        # 파지 경계에서만 다시 읽는다. 조작 중 `ros2 param set` 을 해도 손을 놓았다
+        # 잡기 전까지는 축이 바뀌지 않으므로, 비교하다가 로봇이 튀는 일이 없다.
+        previous_angular = self.angular_frame
+        self.angular_frame = str(self.get_parameter("teleop.angular_frame").value)
+        if self.angular_frame != previous_angular:
+            self.get_logger().info(
+                f"회전 기준 프레임 변경: {previous_angular} → {self.angular_frame}"
+            )
+
         if self.mapper.engage(self.solver.rotation_base_probe(self.q), self.rot_stylus):
             self.get_logger().info(
-                f"병진 기준 프레임 고정 (파지 {self.mapper.engage_count}회차). "
+                f"기준 프레임 고정 (파지 {self.mapper.engage_count}회차). "
                 f"이 순간의 축이 세션 내내 유지된다 — "
                 f"손 자세가 돌아도 '오른쪽'은 계속 같은 방향이다."
             )
@@ -342,30 +359,37 @@ class UsDiffIkNode(Node):
             self._retreat_announced = True
         return np.array([0.0, 0.0, -self.retreat_speed, 0.0, 0.0, 0.0])
 
-    def _remap_linear(self, twist: np.ndarray) -> np.ndarray:
-        """병진만 표류하지 않는 고정 프레임으로 옮긴다 (fr5_ik.teleop_frame 참조).
+    def _remap_twist(self, twist: np.ndarray) -> np.ndarray:
+        """지령을 표류하지 않는 고정 프레임으로 옮긴다 (fr5_ik.teleop_frame 참조).
 
-        회전은 손대지 않는다. "손목을 비틀면 프로브가 비틀린다" 는 대응은 조작자가
-        프로브를 보면서 직접 확인·보정하는 축이고, 병진처럼 화면 밖으로 어긋나
-        버리는 종류가 아니다.
+        병진과 회전을 각각 켤 수 있다 (``teleop.linear_frame`` ·
+        ``teleop.angular_frame``). 둘은 **같은 ``R_latch``** 를 공유하므로, 손을
+        대각선으로 움직일 때 병진과 회전이 서로 다른 "오른쪽" 을 갖는 일이 없다.
 
         후퇴 twist 에는 적용하지 않는다 — 후퇴는 조작자 의도가 아니라 프로브 −z 라는
         기하학적 정의이므로 프로브 프레임 그대로여야 한다.
         """
-        if self.linear_frame != "latched" or not self.mapper.ready:
-            if self.linear_frame == "latched" and not self._warned_no_stylus:
+        want_linear = self.linear_frame == "latched"
+        want_angular = self.angular_frame == "latched"
+        if not (want_linear or want_angular):
+            return twist
+
+        if not self.mapper.ready:
+            if not self._warned_no_stylus:
                 self.get_logger().warn(
-                    "stylus_pose 가 아직 없어 병진을 예전(프로브 body) 기준으로 낸다. "
+                    "stylus_pose 가 아직 없어 예전(프로브 body) 기준으로 낸다. "
                     "데드맨을 한 번 잡으면 기준이 잡힌다. 계속 이 상태라면 "
                     "touch_twist 노드가 떠 있는지 확인하라."
                 )
                 self._warned_no_stylus = True
             return twist
 
+        rot_base_probe = self.solver.rotation_base_probe(self.q)
         out = np.array(twist, dtype=float)
-        out[:3] = self.mapper.to_probe(
-            out[:3], self.solver.rotation_base_probe(self.q), self.rot_stylus
-        )
+        if want_linear:
+            out[:3] = self.mapper.to_probe(out[:3], rot_base_probe, self.rot_stylus)
+        if want_angular:
+            out[3:] = self.mapper.to_probe(out[3:], rot_base_probe, self.rot_stylus)
         return out
 
     def _control_loop(self) -> None:
@@ -395,7 +419,7 @@ class UsDiffIkNode(Node):
                 self.get_logger().info("twist 복귀 — 후퇴 해제")
             self.retreat_started = None
             twist = self._clamp(self.twist_cmd) * self._hold_fade(now)
-            twist = self._remap_linear(twist)
+            twist = self._remap_twist(twist)
             self.retreat_pub.publish(Bool(data=False))
 
         try:

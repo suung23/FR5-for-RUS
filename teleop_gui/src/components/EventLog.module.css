@@ -1,0 +1,160 @@
+.strip {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  height: 92px;
+  background: var(--white);
+  border-top: 1px solid var(--rule);
+}
+
+.logHead {
+  flex: 0 0 auto;
+  width: 148px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 0 var(--pad);
+  border-right: 1px solid var(--rule);
+}
+
+.logTitle {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  color: var(--navy);
+}
+
+.logCount {
+  font-family: var(--font-num);
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.list {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--rule);
+}
+
+.list li {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  height: 23px;
+  padding: 0 var(--pad);
+  border-bottom: 1px solid var(--rule);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.list li:last-child {
+  border-bottom: none;
+}
+
+.alarm {
+  background: var(--black);
+}
+
+.alarm .time,
+.alarm .source,
+.alarm .text {
+  color: var(--white);
+}
+
+.alarm .severity {
+  background: var(--white);
+  color: var(--black);
+  border-color: var(--white);
+}
+
+.empty {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  align-items: center !important;
+}
+
+.time {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.severity {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border: 1px solid var(--black);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  color: var(--black);
+}
+
+.source {
+  flex: 0 0 auto;
+  width: 54px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 10.5px;
+  color: var(--black);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meta {
+  flex: 0 0 auto;
+  width: 316px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 6px var(--pad) 7px;
+}
+
+.metaItem {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.metaLabel {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
+.metaValue {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--black);
+}
+
+.metaStale {
+  background: var(--black);
+  color: var(--white);
+  padding: 0 4px;
+}
+
+.research {
+  font-size: 8.5px;
+  line-height: 1.4;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--black);
+  border-top: 1px solid var(--black);
+  padding-top: 4px;
+}

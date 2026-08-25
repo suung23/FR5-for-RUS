@@ -44,12 +44,28 @@ export interface RobotTelemetry {
  * it in a separate record rather than folding it into `RobotTelemetry` keeps
  * that fact visible instead of implying a single synchronised source.
  */
+export type WrenchSource = 'px6d_serial' | 'controller' | 'simulation' | 'none';
+
 export interface WrenchSample {
   timestamp: number;
   /** Newtons, `[Fx, Fy, Fz]`. */
   force: [number, number, number];
   /** Newton-metres, `[Mx, My, Mz]`. */
   torque: [number, number, number];
+  /**
+   * Where the numbers came from.
+   *
+   * The panel used to be labelled "PX6D" unconditionally, which was untrue
+   * whenever the wrench arrived on the controller topic — and on this cell it
+   * usually did, because the PX6D is the USB variant and never reaches the
+   * controller at all. A force reading whose origin is guessed is worse than
+   * no reading.
+   */
+  source?: WrenchSource;
+  /** CRC mismatches since the stream synchronised. Direct serial only. */
+  crcErrors?: number;
+  /** Frames per second measured at the sensor. Direct serial only. */
+  sensorHz?: number;
 }
 
 export type TransportKind = 'websocket' | 'http' | 'rosbridge' | 'simulation';

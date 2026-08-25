@@ -1,0 +1,178 @@
+.body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.trackRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px var(--pad) 0;
+  flex: 0 0 auto;
+}
+
+.trackLabel {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  width: 42px;
+  flex: 0 0 auto;
+}
+
+.track {
+  position: relative;
+  flex: 1 1 auto;
+  height: 26px;
+  border: 1px solid var(--black);
+  background: var(--white);
+  overflow: hidden;
+}
+
+.trackEmpty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+/* Approach is the open state; contact is filled. Hatching would be an option
+   but at this height it turns to moire, so a solid fill plus the printed word
+   carries it. */
+.bandApproach,
+.bandContact {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.bandApproach {
+  background: var(--white);
+  border-right: 1px solid var(--rule);
+}
+
+.bandContact {
+  background: var(--black);
+  border-left: 1px solid var(--black);
+  border-right: 1px solid var(--black);
+}
+
+.bandText {
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+}
+
+.bandApproach .bandText {
+  color: var(--muted);
+}
+
+.bandContact .bandText {
+  color: var(--white);
+}
+
+.axis {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px var(--pad) 8px 58px;
+  font-family: var(--font-num);
+  font-size: 9px;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.axisMid {
+  transform: translateX(-50%);
+}
+
+.readout {
+  margin: 0;
+  border-top: 1px solid var(--rule);
+  flex: 0 0 auto;
+}
+
+.readout dt,
+.readout dd {
+  margin: 0;
+}
+
+.rowValue {
+  font-size: 11px;
+}
+
+/* Every band in the buffer, most recent first. Fills the panel with the detail
+   the track can only show as a shape. */
+.bands {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  border-top: 1px solid var(--navy);
+}
+
+.bandsHead {
+  display: flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 var(--pad);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  color: var(--navy);
+  border-bottom: 1px solid var(--rule);
+  background: var(--white);
+  position: sticky;
+  top: 0;
+}
+
+.bandTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.bandTable tr {
+  border-bottom: 1px solid var(--rule);
+}
+
+.bandTable th {
+  text-align: left;
+  padding: 4px var(--pad);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  width: 96px;
+}
+
+.bandTable td {
+  text-align: right;
+  padding: 4px var(--pad);
+}
+
+.bandContactRow th {
+  color: var(--white);
+}
+
+.bandContactRow {
+  background: var(--black);
+  color: var(--white);
+}
+
+.bandEmpty {
+  padding: 10px var(--pad);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}

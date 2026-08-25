@@ -38,9 +38,29 @@ rate control 에서 그 관계는 유지되지 않는다. 스타일러스 자세
 새 매핑이 기존 매핑과 **정확히 같아서**, 조작자가 파지를 시작할 때 느끼는 축은 지금과
 동일하고 그 뒤로 어긋나지만 않는다.
 
-회전은 건드리지 않는다. ``w_base = R_base_probe(t) · w_cmd`` 그대로다 — "손목을 비틀면
-프로브가 비틀린다" 는 대응은 프로브를 보면서 조작자가 직접 확인·보정하는 축이고,
-병진처럼 화면 밖으로 어긋나 버리는 종류가 아니다.
+회전에도 같은 것을 쓴다 (2026-08-25)
+------------------------------------
+처음에는 회전을 건드리지 않았다. 근거는 "손목을 비틀면 프로브가 비틀린다" 는 대응이
+프로브를 보면서 조작자가 직접 확인·보정하는 축이라 병진처럼 화면 밖으로 어긋나지
+않는다는 것이었다. **그 전제가 틀렸다** — 실기 조작에서 회전이 어긋난다는 보고가
+나왔다.
+
+회전 경로를 펼쳐 보면 병진과 같은 형태다::
+
+    w_base = R_base_probe(t) · A · R_stylus(t)ᵀ · w_world
+
+시간에 의존하는 회전 두 개가 그대로 있고, 그 사이를 지나는 것도 같다 —
+``angular_scale`` · ``angular_deadzone`` · 클램프 · 필터 · DLS 감쇠. 데드존이
+정류기로 동작하는 것까지 동일하다. 즉 표류 메커니즘이 병진과 다르지 않다.
+
+**각속도에 같은 변환을 써도 되는 이유.** 각속도는 유사벡터(pseudovector)이므로 반사가
+섞이면 벡터와 다르게 변환된다. 그러나 여기 등장하는 세 행렬은 모두 ``det = +1`` 인
+진짜 회전이다 (``A = Rz · diag(+1,-1,-1)`` 는 ``det = +1``, 이것이 §10.4 에서 축 교환
+대신 ``Rz`` 를 쓴 이유다). 진짜 회전에 대해서는 유사벡터도 벡터와 똑같이 변환되므로
+``to_probe`` 를 병진·회전 양쪽에 그대로 쓸 수 있다.
+
+병진과 회전은 **같은 ``R_latch``** 를 공유한다. 따로 잡으면 두 축이 서로 다른 순간에
+고정되어, 손을 대각선으로 움직일 때 병진과 회전이 서로 다른 "오른쪽"을 갖는다.
 """
 from __future__ import annotations
 
@@ -48,7 +68,7 @@ import math
 
 import numpy as np
 
-__all__ = ["axis_mapping", "LinearFrameMapper"]
+__all__ = ["axis_mapping", "TeleopFrameMapper", "LinearFrameMapper"]
 
 
 def axis_mapping(tip_roll_deg: float) -> np.ndarray:
@@ -67,8 +87,8 @@ def axis_mapping(tip_roll_deg: float) -> np.ndarray:
     return rot_z @ np.diag([1.0, -1.0, -1.0])
 
 
-class LinearFrameMapper:
-    """병진 지령을 표류하지 않는 고정 프레임으로 옮긴다.
+class TeleopFrameMapper:
+    """teleop 지령(병진·회전)을 표류하지 않는 고정 프레임으로 옮긴다.
 
     Args:
         tip_roll_deg: ``teleop.tip_roll_deg``. teleop 노드와 **같은 값**이어야 한다.
@@ -115,45 +135,52 @@ class LinearFrameMapper:
 
     def to_probe(
         self,
-        linear_cmd: np.ndarray,
+        cmd: np.ndarray,
         rot_base_probe: np.ndarray,
         rot_stylus: np.ndarray,
     ) -> np.ndarray:
-        """프로브 프레임 병진 지령을, 고정 프레임 해석과 같아지도록 다시 쓴다.
+        """프로브 프레임 지령을, 고정 프레임 해석과 같아지도록 다시 쓴다.
+
+        병진과 회전 모두에 쓴다. 각속도가 유사벡터임에도 같은 식이 성립하는 이유는
+        모듈 문서를 볼 것 — 관여하는 세 행렬이 전부 ``det = +1`` 이다.
 
         하류(``DlsSolver``)는 여전히 프로브 프레임 twist 를 받으므로, 결과를 프로브
         프레임으로 되돌려 준다. 클램프·추종오차 진단이 전부 프로브 축 기준이라
         그쪽 의미를 흐트러뜨리지 않기 위해서다.
 
         Args:
-            linear_cmd: teleop 이 보낸 병진 3개 (프로브 프레임 의도).
+            cmd: teleop 이 보낸 3개 벡터 (프로브 프레임 의도). 병진 또는 회전.
             rot_base_probe: 현재 base → 프로브 회전.
             rot_stylus: 현재 스타일러스 자세 (장치 world 기준).
 
         Returns:
-            프로브 프레임 병진 3개. ``ready`` 가 거짓이면 입력을 그대로 돌려준다.
+            프로브 프레임 3개 벡터. ``ready`` 가 거짓이면 입력을 그대로 돌려준다.
         """
-        linear_cmd = np.asarray(linear_cmd, dtype=float).reshape(3)
+        cmd = np.asarray(cmd, dtype=float).reshape(3)
         if self.latched is None:
-            return linear_cmd
+            return cmd
 
         rot_base_probe = np.asarray(rot_base_probe, dtype=float)
         rot_stylus = np.asarray(rot_stylus, dtype=float)
 
         # 1) 지령을 장치 world 프레임으로 되돌린다 (A 가 직교라 전치가 곧 역행렬)
-        linear_world = rot_stylus @ self.mapping.T @ linear_cmd
+        world = rot_stylus @ self.mapping.T @ cmd
         # 2) 고정 행렬 하나로 base 에 싣는다 — 여기에 시간 의존 항이 없다
-        linear_base = self.latched @ linear_world
+        base = self.latched @ world
         # 3) 하류가 기대하는 프로브 프레임으로
-        return rot_base_probe.T @ linear_base
+        return rot_base_probe.T @ base
 
     def to_base(
         self,
-        linear_cmd: np.ndarray,
+        cmd: np.ndarray,
         rot_stylus: np.ndarray,
     ) -> np.ndarray:
         """같은 지령을 base 프레임으로. 진단·시험에서 "실제로 어디로 가는가" 용이다."""
-        linear_cmd = np.asarray(linear_cmd, dtype=float).reshape(3)
+        cmd = np.asarray(cmd, dtype=float).reshape(3)
         if self.latched is None:
-            return linear_cmd
-        return self.latched @ np.asarray(rot_stylus, dtype=float) @ self.mapping.T @ linear_cmd
+            return cmd
+        return self.latched @ np.asarray(rot_stylus, dtype=float) @ self.mapping.T @ cmd
+
+
+#: 옛 이름. 이 매퍼는 이제 회전에도 쓰이므로 ``TeleopFrameMapper`` 가 맞는 이름이다.
+LinearFrameMapper = TeleopFrameMapper

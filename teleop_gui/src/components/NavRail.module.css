@@ -1,0 +1,120 @@
+.rail {
+  width: 148px;
+  flex: 0 0 auto;
+  background: var(--white);
+  border-right: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.railHead {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--pad);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--navy);
+  border-bottom: 1px solid var(--navy);
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Full-width rows, square, separated by hairlines. Overriding the global button
+   style here because these are navigation rows rather than actions. */
+.item {
+  position: relative;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  padding: 7px 10px 7px 9px;
+  border: none;
+  border-bottom: 1px solid var(--rule);
+  border-left: 3px solid transparent;
+  background: var(--white);
+  text-transform: none;
+  letter-spacing: normal;
+  cursor: pointer;
+}
+
+.item:hover {
+  background: var(--rule);
+  color: var(--black);
+}
+
+.itemActive,
+.itemActive:hover {
+  background: var(--navy);
+  border-left-color: var(--black);
+}
+
+.itemLabel {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--black);
+}
+
+.itemNote {
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-top: 1px;
+}
+
+.itemActive .itemLabel {
+  color: var(--white);
+}
+
+.itemActive .itemNote {
+  color: var(--rule);
+}
+
+/* Count of open warnings. A bordered square, not a pill. */
+.count {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  min-width: 17px;
+  height: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+  font-family: var(--font-num);
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--black);
+  color: var(--white);
+  border: 1px solid var(--black);
+}
+
+.itemActive .count {
+  background: var(--white);
+  color: var(--navy);
+  border-color: var(--white);
+}
+
+.foot {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border-top: 1px solid var(--black);
+}
+
+.footLine {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--black);
+}

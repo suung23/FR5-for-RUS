@@ -4,6 +4,7 @@ import type {
   SafetyState,
   TcpPose,
   WrenchSample,
+  WrenchSource,
 } from '../types';
 
 /**
@@ -21,6 +22,7 @@ const SAFETY_STATES: SafetyState[] = [
   'protective_stop',
   'emergency_stop',
 ];
+const WRENCH_SOURCES: WrenchSource[] = ['px6d_serial', 'controller', 'simulation', 'none'];
 
 function numberArray(value: unknown, length?: number): number[] | undefined {
   if (!Array.isArray(value)) return undefined;
@@ -82,7 +84,17 @@ export function parseWrench(raw: unknown, receivedAt: number): WrenchSample | nu
   const torque = vec3(wrench.torque);
   if (!force || !torque) return null;
 
-  return { timestamp: receivedAt, force, torque };
+  const sample: WrenchSample = { timestamp: receivedAt, force, torque };
+
+  const source = oneOf(src.source, WRENCH_SOURCES);
+  if (source) sample.source = source;
+  if (typeof src.crcErrors === 'number' && Number.isFinite(src.crcErrors)) {
+    sample.crcErrors = src.crcErrors;
+  }
+  if (typeof src.sensorHz === 'number' && Number.isFinite(src.sensorHz)) {
+    sample.sensorHz = src.sensorHz;
+  }
+  return sample;
 }
 
 function vec3(value: unknown): [number, number, number] | undefined {

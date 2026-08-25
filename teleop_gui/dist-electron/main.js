@@ -1,37 +1,54 @@
-import { app as t, BrowserWindow as d, shell as w } from "electron";
-import { fileURLToPath as c } from "node:url";
-import i from "node:path";
-const r = i.dirname(c(import.meta.url)), o = process.env.VITE_DEV_SERVER_URL;
-function s() {
-  const e = new d({
+import { app, BrowserWindow, shell } from "electron";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+const __dirname$1 = path.dirname(fileURLToPath(import.meta.url));
+const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
+function createWindow() {
+  const window = new BrowserWindow({
     width: 1560,
     height: 960,
     minWidth: 1100,
     minHeight: 720,
-    backgroundColor: "#0a0d12",
+    // Opaque black, matching the console canvas. This is what the compositor
+    // paints before the first frame and behind anything the page leaves
+    // unpainted — a leftover non-black value here shows as a flash on open,
+    // and a translucent one lets the desktop through.
+    backgroundColor: "#000000",
     // Wait for the first paint so the operator never sees a white flash on a
     // dark panel in a darkened room.
-    show: !1,
-    autoHideMenuBar: !0,
+    show: false,
+    autoHideMenuBar: true,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     webPreferences: {
-      preload: i.join(r, "preload.mjs"),
-      contextIsolation: !0,
-      nodeIntegration: !1,
-      sandbox: !0,
-      webviewTag: !1
+      preload: path.join(__dirname$1, "preload.mjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webviewTag: false
     }
   });
-  e.once("ready-to-show", () => e.show()), e.webContents.setWindowOpenHandler(({ url: n }) => (w.openExternal(n), { action: "deny" })), e.webContents.on("will-navigate", (n, a) => {
-    const l = new URL(a);
-    !(o && a.startsWith(o)) && l.protocol !== "file:" && n.preventDefault();
-  }), o ? e.loadURL(o) : e.loadFile(i.join(r, "../dist/index.html"));
+  window.once("ready-to-show", () => window.show());
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    void shell.openExternal(url);
+    return { action: "deny" };
+  });
+  window.webContents.on("will-navigate", (event, url) => {
+    const target = new URL(url);
+    const isDev = DEV_SERVER_URL && url.startsWith(DEV_SERVER_URL);
+    if (!isDev && target.protocol !== "file:") event.preventDefault();
+  });
+  if (DEV_SERVER_URL) {
+    void window.loadURL(DEV_SERVER_URL);
+  } else {
+    void window.loadFile(path.join(__dirname$1, "../dist/index.html"));
+  }
 }
-t.whenReady().then(() => {
-  s(), t.on("activate", () => {
-    d.getAllWindows().length === 0 && s();
+app.whenReady().then(() => {
+  createWindow();
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
-t.on("window-all-closed", () => {
-  process.platform !== "darwin" && t.quit();
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") app.quit();
 });

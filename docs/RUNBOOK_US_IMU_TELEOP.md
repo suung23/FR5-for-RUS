@@ -174,6 +174,31 @@ ros2 launch fr5_launch us_phase0.launch.py backend:=fairino      # 실로봇 (19
 ```
 
 ### 6c. Touch(햅틱) 원격조작 함께 띄우기
+
+**항상 이 스크립트로 시작한다.** 기존 노드를 전부 정리하고 **종료를 확인한 뒤** 띄운다:
+
+```bash
+./scripts/start_teleop.sh                      # 실로봇 + teleop (기본)
+./scripts/start_teleop.sh backend:=mock        # mock
+./scripts/start_teleop.sh freespace:=false     # 접촉용 상한
+```
+
+인자는 그대로 `us_phase0.launch.py` 로 넘어간다. 정리만 하려면:
+
+```bash
+./scripts/stop_all.sh
+```
+
+> ⚠️ **왜 항상 정리하는가.** 남은 노드는 오작동하기 전까지 보이지 않는다.
+> 2026-08-25 에 `us_diff_ik` 두 개가 같은 `joint_velocity_cmds` 에 각각 100 Hz 로
+> 서로 다른 지령을 밀어 넣어 팔이 흔들렸는데, 조작석에서는 튜닝 문제와 구별되지
+> 않았고 로그에도 원인이 남지 않았다. 원인은 `pkill -f` 가 **자기 명령줄까지
+> 매칭해** 호출한 셸이 먼저 죽은 것과, 종료를 확인하지 않은 것이었다.
+> `scripts/fr5_nodes.sh` 는 `/proc` 를 직접 읽어 자기 자신을 제외하고, 프로세스가
+> 사라진 것을 확인할 때까지 기다린다.
+
+수동으로 띄울 수도 있으나 정리는 직접 해야 한다:
+
 ```bash
 ros2 launch fr5_launch us_phase0.launch.py backend:=fairino teleop:=true
 #   ↑ freespace 스케일이 **기본**이다 (2026-08-25~). 초기 자세 접근이 주 용도라서다.
@@ -205,6 +230,7 @@ ros2 run keyboard_teleop keyboard        # /fr5_right/desired_pose_wrt_rcm 발�
 
 ### 6e. 상태 확인
 ```bash
+./scripts/stop_all.sh          # 무엇이 떠 있는지 보기만 해도 된다 (없으면 그렇게 말한다)
 ros2 node list
 ros2 topic echo /fr5_right/desired_twist          # teleop 출력 확인
 ros2 param get /touch_teleop_node teleop.profile

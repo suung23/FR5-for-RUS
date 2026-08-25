@@ -43,6 +43,8 @@ export class SimulationTransport implements Transport {
   private joints = [...HOME];
   private velocities = new Array(6).fill(0);
   private contactForce = 0;
+  /** Latched safety level, so the state does not chatter at the threshold. */
+  private safety: SafetyState = 'normal';
 
   start(sink: TransportSink): void {
     this.t0 = Date.now();
@@ -101,9 +103,22 @@ export class SimulationTransport implements Transport {
     const gravityFz = -1.4 * Math.cos(this.joints[4] + 1.57) - 0.15;
 
     if (this.phase === 'contact') {
-      // Rise, then hold near 5.5 N with the wobble of a hand-held setpoint.
+      // Two episodes, because the display has to be seen doing all of its job.
+      //
+      //   0-9 s   light coupling. Total F_n lands near 5.5 N: the working band,
+      //           below the 6 N warning. This is where a session mostly lives.
+      //   9-14 s  a firmer press that crosses 7 N, so the contact stage, the
+      //           latch, the amber warning and the red limit are all exercised
+      //           rather than sitting unused behind a threshold nothing reaches.
+      //
+      // Living permanently in protective stop would be just as wrong — it
+      // teaches the operator to ignore the colour that matters most.
       const ramp = Math.min(1, held / 1.5);
-      this.contactForce = ramp * (5.5 + 0.55 * Math.sin(held * 1.9) + 0.2 * Math.sin(held * 5.3));
+      const firm = held > 9 ? Math.min(1, (held - 9) / 1.2) * 2.3 : 0;
+      // Light episode sits at F_n ~5.3 N with a narrow wobble so it stays
+      // clearly inside the working band; the firm episode is what crosses.
+      this.contactForce =
+        ramp * (3.75 + firm + 0.22 * Math.sin(held * 1.9) + 0.09 * Math.sin(held * 5.3));
     } else if (this.phase === 'retract') {
       this.contactForce = Math.max(0, this.contactForce - 0.35);
     } else {
@@ -116,6 +131,7 @@ export class SimulationTransport implements Transport {
 
     sink.onWrench({
       timestamp: now,
+      source: 'simulation',
       force: [
         Math.sin(t * 0.55) * lateral + noise(0.05),
         Math.cos(t * 0.43) * lateral + noise(0.05),
@@ -129,11 +145,21 @@ export class SimulationTransport implements Transport {
     });
 
     // --- state ------------------------------------------------------------
-    const robotState: RobotState =
-      this.phase === 'idle' ? 'idle' : this.phase === 'contact' ? 'contact' : 'teleop';
+    // The FR5 controller has no force sensor of its own — the PX6D is on USB —
+    // so it can only report that it is being teleoperated, never that it is in
+    // contact. Claiming otherwise here would fake an agreement the real system
+    // cannot produce.
+    const robotState: RobotState = this.phase === 'idle' ? 'idle' : 'teleop';
+    // Hysteresis on the declared safety level. A bare comparison flaps every
+    // few samples while the force oscillates around 6 N, and each flap would be
+    // a line in the event log — which is how a log stops being read.
     const fn = -fz;
-    const safetyState: SafetyState =
-      fn >= 7 ? 'protective_stop' : fn >= 6 ? 'warning' : 'normal';
+    if (fn >= 7.0) this.safety = 'protective_stop';
+    else if (fn >= 6.0) {
+      if (this.safety !== 'protective_stop') this.safety = 'warning';
+    } else if (fn < 5.0) this.safety = 'normal';
+    else if (fn < 6.6 && this.safety === 'protective_stop') this.safety = 'warning';
+    const safetyState: SafetyState = this.safety;
 
     sink.onTelemetry({
       timestamp: now,

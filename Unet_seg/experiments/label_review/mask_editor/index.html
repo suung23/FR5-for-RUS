@@ -1,0 +1,150 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GT 마스크 편집기</title><style>
+:root{--ink:#16211f;--mut:#697b78;--hair:#dbe4e1;--bg:#f6f8f7;--card:#fff;--acc:#0b7a67}
+@media(prefers-color-scheme:dark){:root{--ink:#e7eeec;--mut:#8a9c99;--hair:#26332f;--bg:#0f1514;--card:#171f1d;--acc:#4cd5b8}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 system-ui,"Noto Sans CJK KR",sans-serif;display:flex;height:100vh;overflow:hidden}
+aside{width:250px;flex:none;border-right:1px solid var(--hair);padding:14px;overflow:auto;background:var(--card)}
+main{flex:1;display:flex;flex-direction:column;min-width:0}
+#bar{padding:10px 14px;border-bottom:1px solid var(--hair);display:flex;gap:14px;align-items:center;flex-wrap:wrap;background:var(--card)}
+#wrap{flex:1;overflow:auto;display:grid;place-items:center;padding:14px}
+canvas{border:1px solid var(--hair);border-radius:4px;cursor:crosshair;touch-action:none;background:#000}
+h1{font-size:1rem;margin:0 0 12px}
+h2{font-size:.78rem;text-transform:uppercase;letter-spacing:.1em;color:var(--mut);margin:16px 0 6px;font-weight:500}
+button{font:inherit;padding:5px 11px;border:1px solid var(--hair);background:var(--card);color:var(--ink);border-radius:4px;cursor:pointer}
+button:hover{border-color:var(--acc)}
+button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.plist button{display:block;width:100%;text-align:left;margin:0 0 5px}
+kbd{font:inherit;font-family:ui-monospace,monospace;font-size:.82em;border:1px solid var(--hair);border-bottom-width:2px;border-radius:3px;padding:0 4px}
+.k{color:var(--mut);font-size:.82rem;line-height:1.9}
+#nav{font-family:ui-monospace,monospace}
+#prog{height:5px;background:var(--hair);border-radius:3px;overflow:hidden;margin-top:8px}
+#prog>div{height:100%;background:var(--acc);width:0}
+label{display:flex;gap:6px;align-items:center}
+input[type=range]{width:110px}
+.hint{color:var(--mut);font-size:.8rem}
+</style></head><body>
+<aside>
+  <h1>GT 마스크 편집기</h1>
+  <div class="hint">원본은 그대로 두고 <code>masks_edited/</code>에 씁니다.</div>
+  <h2>환자</h2><div class="plist" id="plist"></div>
+  <div id="prog"><div></div></div>
+  <div class="hint" id="pstat"></div>
+  <h2>단축키</h2>
+  <div class="k">
+    <kbd>←</kbd><kbd>→</kbd> 프레임 이동 (자동 저장)<br>
+    <kbd>E</kbd> 지우개 / <kbd>D</kbd> 그리기<br>
+    <kbd>[</kbd><kbd>]</kbd> 브러시 크기<br>
+    <kbd>C</kbd> 이전 프레임 복사<br>
+    <kbd>Z</kbd> 되돌리기<br>
+    <kbd>R</kbd> 원본 GT 로 복구<br>
+    <kbd>Space</kbd> 마스크 잠깐 숨기기<br><b>획을 놓을 때마다 저장</b>됩니다
+  </div>
+  <h2>작업 순서</h2>
+  <div class="k">기존 GT 가 이미 올라와 있습니다.<br>
+  <b>지우개로 방광이 아닌 부분을 덜어내는 것</b>이 주 작업입니다.<br>
+  다음 프레임은 <kbd>C</kbd> 로 복사한 뒤 손보면 빠릅니다.</div>
+</aside>
+<main>
+  <div id="bar">
+    <span id="nav">—</span>
+    <button id="bd">그리기</button><button id="be" class="on">지우개</button>
+    <label>크기 <input type="range" id="sz" min="3" max="90" value="26"><span id="szv">26</span></label>
+    <label>불투명 <input type="range" id="op" min="10" max="90" value="42"></label>
+    <button id="bc">이전 복사</button><button id="bz">되돌리기</button><button id="br">원본 복구</button>
+    <span class="hint" id="stat"></span>
+  </div>
+  <div id="wrap"><canvas id="cv"></canvas></div>
+</main>
+<script>
+const $=s=>document.querySelector(s);
+let P=null,N=0,i=0,img=new Image(),mask=null,mctx=null,undo=[],erase=true,size=26,down=false,hide=false,dirty=false,prevMask=null;
+const cv=$('#cv'),ctx=cv.getContext('2d');
+
+async function boot(){
+  const ps=await (await fetch('/api/patients')).json();
+  $('#plist').innerHTML=Object.entries(ps).map(([p,n])=>`<button data-p="${p}">${p} <span class="hint">${n}</span></button>`).join('');
+  $('#plist').onclick=e=>{const b=e.target.closest('button'); if(b) pick(b.dataset.p);};
+  pick(Object.keys(ps)[0]);
+}
+async function pick(p){
+  await flush(); P=p; i=0;
+  document.querySelectorAll('.plist button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));
+  const s=await (await fetch('/api/state/'+p)).json(); N=s.n; prevMask=null;
+  const r=await (await fetch('/api/resume/'+p)).json(); i=Math.min(r.index,N-1);   // 마지막 저장 지점부터
+  load();
+}
+async function refreshProg(){
+  const s=await (await fetch('/api/state/'+P)).json();
+  $('#prog>div').style.width=(100*s.edited/s.n)+'%';
+  $('#pstat').textContent=`${s.edited} / ${s.n} 편집됨`;
+}
+function load(){
+  img=new Image();
+  img.onload=()=>{
+    cv.width=img.width; cv.height=img.height;
+    const m=new Image();
+    m.onload=()=>{
+      mask=document.createElement('canvas'); mask.width=img.width; mask.height=img.height;
+      mctx=mask.getContext('2d',{willReadFrequently:true}); mctx.drawImage(m,0,0);
+      undo=[]; dirty=false; draw(); refreshProg();
+    };
+    m.src=`/api/mask/${P}/${i}?t=`+Date.now();
+  };
+  img.src=`/api/image/${P}/${i}`;
+  $('#nav').textContent=`${P}  ${i+1} / ${N}`;
+}
+function draw(){
+  ctx.clearRect(0,0,cv.width,cv.height); ctx.drawImage(img,0,0);
+  if(hide||!mask) return;
+  ctx.save(); ctx.globalAlpha=$('#op').value/100; ctx.globalCompositeOperation='lighter';
+  const t=document.createElement('canvas'); t.width=cv.width; t.height=cv.height;
+  const tc=t.getContext('2d'); tc.drawImage(mask,0,0);
+  const d=tc.getImageData(0,0,t.width,t.height);
+  for(let k=0;k<d.data.length;k+=4){const v=d.data[k]>127?1:0;
+    d.data[k]=0; d.data[k+1]=v?255:0; d.data[k+2]=v?90:0; d.data[k+3]=v?255:0;}
+  tc.putImageData(d,0,0); ctx.drawImage(t,0,0); ctx.restore();
+}
+function paint(e){
+  const r=cv.getBoundingClientRect(), x=(e.clientX-r.left)*cv.width/r.width, y=(e.clientY-r.top)*cv.height/r.height;
+  mctx.globalCompositeOperation='source-over';
+  mctx.fillStyle=erase?'#000':'#fff';
+  mctx.beginPath(); mctx.arc(x,y,size/2,0,7); mctx.fill();
+  dirty=true; draw();
+}
+async function flush(){
+  if(!dirty||!mask||P===null) return;
+  const blob=await new Promise(r=>mask.toBlob(r,'image/png'));
+  await fetch(`/api/save/${P}/${i}`,{method:'POST',body:blob});
+  dirty=false; $('#stat').textContent='저장됨'; setTimeout(()=>$('#stat').textContent='',900);
+}
+async function go(d){ prevMask=mask; await flush(); i=Math.max(0,Math.min(N-1,i+d)); load(); }
+
+cv.addEventListener('pointerdown',e=>{down=true; undo.push(mctx.getImageData(0,0,mask.width,mask.height)); if(undo.length>25)undo.shift(); paint(e); cv.setPointerCapture(e.pointerId);});
+cv.addEventListener('pointermove',e=>{ if(down) paint(e); });
+cv.addEventListener('pointerup',()=>{down=false; flush();});   // 획마다 저장 — Ctrl+C 로 잃지 않게
+$('#bd').onclick=()=>{erase=false;$('#bd').classList.add('on');$('#be').classList.remove('on');};
+$('#be').onclick=()=>{erase=true;$('#be').classList.add('on');$('#bd').classList.remove('on');};
+$('#sz').oninput=e=>{size=+e.target.value;$('#szv').textContent=size;};
+$('#op').oninput=draw;
+$('#bz').onclick=()=>{const u=undo.pop(); if(u){mctx.putImageData(u,0,0);dirty=true;draw();}};
+$('#br').onclick=async()=>{ dirty=false; const m=new Image();
+  m.onload=()=>{mctx.clearRect(0,0,mask.width,mask.height);mctx.drawImage(m,0,0);dirty=true;draw();};
+  m.src=`/api/mask/${P}/${i}?orig=1&t=`+Date.now(); };
+$('#bc').onclick=()=>{ if(prevMask){undo.push(mctx.getImageData(0,0,mask.width,mask.height));
+  mctx.clearRect(0,0,mask.width,mask.height); mctx.drawImage(prevMask,0,0); dirty=true; draw();} };
+addEventListener('keydown',e=>{
+  if(e.key==='ArrowRight')go(1); else if(e.key==='ArrowLeft')go(-1);
+  else if(e.key==='e'||e.key==='E')$('#be').click(); else if(e.key==='d'||e.key==='D')$('#bd').click();
+  else if(e.key==='[')$('#sz').value=size=Math.max(3,size-4),$('#szv').textContent=size;
+  else if(e.key===']')$('#sz').value=size=Math.min(90,size+4),$('#szv').textContent=size;
+  else if(e.key==='z'||e.key==='Z')$('#bz').click();
+  else if(e.key==='c'||e.key==='C')$('#bc').click();
+  else if(e.key==='r'||e.key==='R')$('#br').click();
+  else if(e.code==='Space'){hide=true;draw();e.preventDefault();}
+});
+addEventListener('keyup',e=>{ if(e.code==='Space'){hide=false;draw();} });
+addEventListener('beforeunload',flush);
+boot();
+</script></body></html>

@@ -1,0 +1,426 @@
+.column {
+  width: 316px;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--panel-gap);
+  min-height: 0;
+  overflow: hidden;
+  background: var(--black);
+  border-left: 1px solid var(--rule);
+}
+
+.pinned {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--panel-gap);
+}
+
+/* The middle band takes what is left and scrolls inside itself. */
+.scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: var(--panel-gap);
+}
+
+.scroll > * {
+  flex: 0 0 auto;
+}
+
+.note {
+  margin: 0;
+  padding: 5px var(--pad) 6px;
+  font-size: 9.5px;
+  line-height: 1.4;
+  color: var(--muted);
+  border-top: 1px solid var(--rule);
+}
+
+/* ---- force scale --------------------------------------------------------- */
+
+.forceBody {
+  padding: 8px var(--pad) 10px;
+  overflow: visible;
+}
+
+.forceRead {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 9px;
+}
+
+.forceValue {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: var(--black);
+}
+
+/* Over the limit the reading itself inverts. Size and inversion, not hue. */
+.forceValueAlarm {
+  background: var(--black);
+  color: var(--white);
+  padding: 0 5px;
+}
+
+.forceUnit {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.forcePeak {
+  margin-left: auto;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.peakLabel {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
+.forcePeak .num {
+  font-size: 12px;
+}
+
+.scale {
+  padding-bottom: 13px;
+}
+
+.track {
+  position: relative;
+  height: 13px;
+  border: 1px solid var(--black);
+  background: var(--white);
+}
+
+/* The measured value is the only navy element on the plate. */
+.bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  background: var(--navy);
+}
+
+.warnRule,
+.limitRule,
+.peakRule {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+}
+
+.warnRule {
+  width: 1px;
+  background: var(--muted);
+}
+
+.limitRule {
+  width: 2px;
+  margin-left: -1px;
+  background: var(--black);
+}
+
+/* Peak hold: an open tick that stays after the bar recedes. */
+.peakRule {
+  width: 1px;
+  background: var(--black);
+  top: -4px;
+  bottom: 50%;
+}
+
+.scaleTicks {
+  position: relative;
+  height: 11px;
+}
+
+.scaleTicks span {
+  position: absolute;
+  top: 3px;
+  font-family: var(--font-num);
+  font-size: 8.5px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+.scaleTicks span:first-child {
+  transform: none;
+}
+
+.scaleTicks span:last-child {
+  transform: translateX(-70%);
+  color: var(--black);
+}
+
+/* ---- tables -------------------------------------------------------------- */
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.table thead th {
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-align: right;
+  padding: 4px var(--pad) 3px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.table thead th:first-child {
+  text-align: left;
+}
+
+.table tbody tr {
+  border-bottom: 1px solid var(--rule);
+}
+
+.table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.table tbody th {
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  padding: 2px var(--pad);
+  width: 34px;
+}
+
+.table td {
+  text-align: right;
+  padding: 2px var(--pad);
+  color: var(--black);
+}
+
+.wide {
+  width: auto;
+}
+
+.unit {
+  width: 34px;
+  font-size: 8.5px;
+  color: var(--muted);
+  text-align: left !important;
+  padding-left: 4px !important;
+}
+
+/* A joint near its stop gets a heavier row rule and a printed tag. */
+.rowNear {
+  border-left: 2px solid var(--black);
+}
+
+.nearTag {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 0 3px;
+  font-family: var(--font-ui);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  border: 1px solid var(--black);
+}
+
+.tableNote {
+  margin: 0;
+  padding: 5px var(--pad) 6px;
+  font-size: 9px;
+  line-height: 1.4;
+  color: var(--muted);
+  border-top: 1px solid var(--rule);
+}
+
+.inlineTag,
+.inlineTagLight {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 4px;
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.inlineTag {
+  background: var(--white);
+  color: var(--black);
+}
+
+.inlineTagLight {
+  border: 1px solid var(--black);
+}
+
+/* ---- guidance ------------------------------------------------------------ */
+
+.guidance {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.guidance li {
+  display: flex;
+  gap: 7px;
+  padding: 5px var(--pad) 6px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.guidance li:last-child {
+  border-bottom: none;
+}
+
+.guidanceCritical {
+  background: var(--black);
+}
+
+.guidanceCritical .guidanceText,
+.guidanceCritical .guidanceTag {
+  color: var(--white);
+}
+
+.guidanceCritical .guidanceTag {
+  border-color: var(--white);
+}
+
+.guidanceCaution {
+  border-left: 2px solid var(--black);
+  padding-left: calc(var(--pad) - 2px);
+}
+
+.guidanceInfo {
+  border-left: 2px solid transparent;
+  padding-left: calc(var(--pad) - 2px);
+}
+
+.guidanceTag {
+  flex: 0 0 auto;
+  height: 13px;
+  padding: 0 4px;
+  border: 1px solid var(--black);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  line-height: 12px;
+  color: var(--black);
+}
+
+.guidanceInfo .guidanceTag {
+  border-color: var(--rule);
+  color: var(--muted);
+}
+
+.guidanceText {
+  font-size: 10px;
+  line-height: 1.38;
+  color: var(--black);
+}
+
+/* Legend for the force scale. The rules are barely a newton apart, so their
+   names live here rather than on the axis where they collided. */
+.scaleKey {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding-top: 7px;
+  border-top: 1px solid var(--rule);
+  margin-top: 3px;
+}
+
+.scaleKey span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.scaleKey i {
+  display: inline-block;
+  width: 10px;
+  height: 8px;
+  flex: 0 0 auto;
+}
+
+.keyWarn {
+  border-left: 1px solid var(--muted);
+  margin-left: 4px;
+}
+
+.keyLimit {
+  border-left: 2px solid var(--black);
+  margin-left: 4px;
+}
+
+.keyMeasured {
+  background: var(--navy);
+  height: 6px;
+}
+
+/* Sensor link quality. Only shown when the PX6D is read directly — the figures
+   have no meaning for a wrench arriving on the controller topic. */
+.sensorLink {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 4px var(--pad) 5px;
+  border-top: 1px solid var(--rule);
+}
+
+.sensorItem {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.sensorItem .num {
+  font-size: 11px;
+  color: var(--black);
+}
+
+.sensorLabel {
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
+/* A bad link inverts rather than colouring. */
+.sensorBad {
+  background: var(--black);
+  padding: 0 4px;
+}
+
+.sensorBad .sensorLabel,
+.sensorBad .num {
+  color: var(--white);
+}
+
+.sensorNote {
+  margin-left: auto;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  color: var(--muted);
+}

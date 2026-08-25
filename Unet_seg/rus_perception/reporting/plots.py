@@ -58,6 +58,7 @@ __all__ = [
     "apply_style",
     "plot_loss_decomposition",
     "plot_validation_curves",
+    "plot_run_comparison",
     "plot_temporal_diagnostics",
     "plot_optimization_health",
     "plot_quality_vs_accuracy",
@@ -313,6 +314,160 @@ def plot_validation_curves(history: Sequence[Mapping[str, Any]]) -> "Figure":
     ax.set_ylabel("score")
     ax.set_ylim(0, 1)
     ax.legend(loc="lower right")
+    return figure
+
+
+def _label_ends_decollided(
+    ax: "matplotlib.axes.Axes",
+    entries: Sequence[tuple[float, str, str]],
+    min_gap: float = 0.062,
+) -> None:
+    """Direct-label several lines at the right edge without letting labels overlap.
+
+    :func:`_label_line_end` anchors a label to its own last point, which is right
+    until two lines finish close together and the labels land on top of each
+    other. This variant places every label in the same pass: it converts the end
+    values to axes fractions, pushes any pair closer than ``min_gap`` apart, and
+    annotates at the adjusted heights. The label may then sit slightly off its
+    line, which is the cheaper error -- an unreadable label carries no identity
+    at all.
+
+    Args:
+        ax: Axes to annotate; its y-limits must already be final.
+        entries: ``(y_value, text, colour)`` per line, in any order.
+        min_gap: Minimum separation in axes fractions.
+    """
+    if not entries:
+        return
+    low, high = ax.get_ylim()
+    span = (high - low) or 1.0
+    placed = sorted(
+        ((float(y) - low) / span, text, color) for y, text, color in entries
+    )
+    for index in range(1, len(placed)):
+        previous, current = placed[index - 1][0], placed[index][0]
+        if current - previous < min_gap:
+            placed[index] = (previous + min_gap, placed[index][1], placed[index][2])
+    for fraction, text, color in placed:
+        ax.annotate(
+            text,
+            xy=(1.015, min(max(fraction, 0.0), 1.0)),
+            xycoords="axes fraction",
+            va="center",
+            fontsize=8,
+            color=color,
+            annotation_clip=False,
+        )
+
+
+def plot_run_comparison(
+    runs: Sequence[tuple[str, Sequence[Mapping[str, Any]]]],
+) -> "Figure":
+    """Compare several runs' histories: what generalised, and what was memorised.
+
+    Three stacked panels sharing the epoch axis. They are stacked rather than
+    overlaid because validation Dice, training loss and their gap have different
+    units and ranges; a second y-scale would make the comparison a matter of
+    where the axes happened to be pinned.
+
+    The panels answer three different questions:
+
+    ``val Dice``
+        What the run is actually worth. Read the *shape*, not only the peak: a
+        curve that is flat from the first epoch says the schedule is not what
+        limits the score.
+    ``train loss``
+        How completely the run fitted its own training set. On a log axis,
+        because it falls by more than an order of magnitude.
+    ``val loss - train loss``
+        The generalisation gap, which is the memorisation the top panel hides.
+        A run whose val Dice is flat while this climbs is not improving; it is
+        memorising.
+
+    Epochs are plotted 1-based. ``history.json`` stores a 0-based ``epoch``
+    field, and reporting "epoch 0" for the first epoch invites off-by-one
+    mistakes when these figures sit next to prose.
+
+    Args:
+        runs: ``(label, history)`` pairs. Colours are taken from
+            :data:`CATEGORICAL` by position, so a run keeps its colour when
+            another is added -- never cycled, never generated.
+
+    Returns:
+        The figure, for :func:`save`. Per-run summary statistics are deliberately
+        not drawn inside the panels; they belong in the caption or a table, where
+        they cannot collide with the curves.
+
+    Raises:
+        ValueError: If ``runs`` is empty or has more entries than
+            :data:`CATEGORICAL` has slots.
+    """
+    if not runs:
+        raise ValueError("plot_run_comparison needs at least one (label, history) pair.")
+    if len(runs) > len(CATEGORICAL):
+        raise ValueError(
+            f"{len(runs)} runs exceed the {len(CATEGORICAL)}-slot categorical ramp. "
+            "Facet into small multiples rather than generating a new hue."
+        )
+
+    apply_style()
+    figure, (top, mid, bottom) = plt.subplots(
+        3, 1, figsize=(8.4, 8.6), sharex=True,
+        gridspec_kw={"hspace": 0.30, "height_ratios": [1.25, 1, 1]},
+    )
+
+    ends: dict[Any, list[tuple[float, str, str]]] = {top: [], mid: [], bottom: []}
+    handles: list[Any] = []
+
+    for index, (label, history) in enumerate(runs):
+        color = CATEGORICAL[index]
+
+        epochs, dice = _series(history, "val/dice")
+        if epochs:
+            x = [e + 1 for e in epochs]
+            line, = top.plot(x, dice, "-", color=color, label=label)
+            handles.append(line)
+            best = int(np.argmax(dice))
+            top.plot([x[best]], [dice[best]], "o", color=color, zorder=5,
+                     markeredgecolor=PALETTE["surface"], markeredgewidth=1.5)
+            ends[top].append((dice[-1], label, color))
+
+        epochs_loss, train = _series(history, "loss/total")
+        if epochs_loss:
+            mid.plot([e + 1 for e in epochs_loss], train, "-", color=color)
+            ends[mid].append((train[-1], label, color))
+
+        epochs_val, val_loss = _series(history, "val/loss")
+        if epochs_loss and epochs_val:
+            span = min(len(train), len(val_loss))
+            gap = [val_loss[i] - train[i] for i in range(span)]
+            bottom.plot([e + 1 for e in epochs_val[:span]], gap, "-", color=color)
+            ends[bottom].append((gap[-1], label, color))
+
+    top.set_title("What generalised -- validation Dice   (o marks the selected epoch)")
+    top.set_ylabel("val Dice")
+
+    mid.set_title("What was memorised -- training loss")
+    mid.set_ylabel("train loss")
+    mid.set_yscale("log")
+
+    bottom.set_title("The gap -- val loss minus train loss")
+    bottom.set_ylabel("val - train loss")
+    bottom.set_xlabel("epoch")
+    bottom.axhline(0.0, color=PALETTE["rule"], linewidth=_THIN, linestyle=":")
+
+    for ax in (top, mid, bottom):
+        # Room at the right for the direct labels, which live outside the axes.
+        ax.set_xlim(left=0.5)
+    figure.subplots_adjust(right=0.74)
+    for ax, entries in ends.items():
+        _label_ends_decollided(ax, entries)
+
+    if len(handles) > 1:
+        figure.legend(
+            handles=handles, loc="lower center", ncols=min(len(handles), 3),
+            bbox_to_anchor=(0.42, -0.015), frameon=False,
+        )
     return figure
 
 

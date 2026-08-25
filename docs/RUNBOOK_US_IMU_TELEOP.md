@@ -175,20 +175,28 @@ ros2 launch fr5_launch us_phase0.launch.py backend:=fairino      # 실로봇 (19
 
 ### 6c. Touch(햅틱) 원격조작 함께 띄우기
 ```bash
-ros2 launch fr5_launch us_phase0.launch.py teleop:=true                       # 접촉용 상한
-ros2 launch fr5_launch us_phase0.launch.py teleop:=true freespace:=true       # 자유공간 검증(빠름)
+ros2 launch fr5_launch us_phase0.launch.py backend:=fairino teleop:=true
+#   ↑ freespace 스케일이 **기본**이다 (2026-08-25~). 초기 자세 접근이 주 용도라서다.
+ros2 launch fr5_launch us_phase0.launch.py backend:=fairino teleop:=true freespace:=false
+#   ↑ 접촉용 상한 (10 mm/s / 0.2 rad/s / 0.5 rad/s, teleop 프로파일 us_approach)
 ```
 - Touch 노드: `touch_teleop touch_twist`. **버튼 1(회색) = 데드맨** — 누르는 동안만 동작, 놓으면 정지.
 - 발행 토픽: `/fr5_right/desired_twist` (Twist), `/fr5_right/desired_gripper_pose`.
 - 프로파일을 조작 중에 바꾸기 (매 주기 반영):
   ```bash
-  ros2 param set /touch_teleop_node teleop.profile us_approach   # 정밀 접근
-  ros2 param set /touch_teleop_node teleop.profile freespace     # 자유공간(빠름)
-  ros2 param set /touch_teleop_node teleop.profile laparoscopic  # 기본
+  ros2 param set /touch_teleop_node teleop.profile us_approach   # 정밀 접근 (probe.yaml 기본값)
+  ros2 param set /touch_teleop_node teleop.profile freespace     # 빠름 (launch 기본값)
+  ros2 param set /touch_teleop_node teleop.profile laparoscopic  # 복강경 잔재
   ```
+  프로파일을 **내리는** 방향(freespace → us_approach)은 조작 중에도 바로 먹는다.
+  올리는 방향은 `freespace:=false` 로 띄운 경우 클램프(10 mm/s)에 걸려 체감이 안 바뀐다.
 
-> ⚠️ `freespace:=true` 는 `probe.yaml` 의 **접촉용 속도 상한을 덮어써 빠르게** 만든다.
-> **프로브가 조직/팬텀에 닿는 단계에선 절대 쓰지 말 것.**
+> ⚠️ 기본값이 `freespace:=true` 다 — `probe.yaml` 의 **접촉용 속도 상한을 덮어써
+> 15 배 빠르게** 돈다 (10 → 150 mm/s). **프로브가 조직/팬텀에 닿는 단계에서는
+> `freespace:=false` 를 명시할 것.** 잊으면 접촉용 한계가 걸리지 않는다.
+>
+> Phase 0 에는 힘 되먹임이 없다 (admittance·supervisor·힘 배리어 모두 미구현,
+> PX6D 도 이 launch 에 없다). 접촉 중 힘을 지키는 것은 조작자와 이 클램프뿐이다.
 
 ### 6d. 키보드 teleop (별도, 레거시 pose 경로)
 ```bash

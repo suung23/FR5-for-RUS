@@ -536,11 +536,11 @@
             <td>삭제</td>
           </tr>
           <tr>
-            <td>기하</td><td>로드 0.64 m, RCM 거리 0.19 m</td><td>프로브 마운트</td>
+            <td>기하</td><td>로드 0.64 m, 베이스 간격 0.61 m</td><td>프로브 마운트</td>
             <td>상수 교체 <span class="chip chip-meas">CAD 대기</span></td>
           </tr>
           <tr>
-            <td>구속</td><td>RCM — 트로카 고정점 통과</td><td>표면 접촉</td>
+            <td>구속</td><td>기구학적 고정점</td><td>표면 접촉</td>
             <td>구속 <b>삭제</b>, 대체물은 힘·모멘트</td>
           </tr>
           <tr>
@@ -588,8 +588,8 @@
     </p>
 
     <figure>
-      <svg viewBox="0 0 1020 836" role="img"
-           aria-label="US 프레임그래버에서 시작해 원시 품질과 세그멘테이션 두 경로로 갈라진 뒤, 힘 탐색과 영상 policy를 거쳐 admittance, DLS 역기구학, 125 Hz 서보로 내려가는 제어 아키텍처. 서보에서 wrench가 admittance로 되먹임된다.">
+      <svg viewBox="0 0 1320 836" role="img"
+           aria-label="US 프레임그래버에서 시작해 원시 품질과 세그멘테이션 두 경로로 갈라진 뒤, 힘 탐색과 영상 policy를 거쳐 QP arbiter와 125 Hz 서보로 내려가는 제어 아키텍처. 서보에서 wrench가 되먹임되고, 실현 twist가 오른쪽 레일로 policy와 오프셋 추정기로 되먹임된다.">
         <defs>
           <marker id="aA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
             <path d="M0,1 L9,5 L0,9 z" class="ah"/>
@@ -660,9 +660,10 @@
         <text class="lbl-f" x="335" y="481" text-anchor="middle">ry ←  M_y  →  0</text>
 
         <rect class="nd" x="560" y="418" width="268" height="82" rx="4"/>
-        <text class="lbl-s" x="694" y="447" text-anchor="middle">twist arbiter</text>
-        <text class="lbl-d" x="694" y="466" text-anchor="middle">힘축 3 + 영상축 3</text>
-        <text class="lbl-d" x="694" y="483" text-anchor="middle">QP 전환 지점</text>
+        <text class="lbl-s" x="694" y="443" text-anchor="middle">QP arbiter</text>
+        <text class="lbl-d" x="694" y="461" text-anchor="middle">축별 무차원화 · 힘축 우선 300:1</text>
+        <text class="lbl-d" x="694" y="477" text-anchor="middle">힘 배리어 · 비대칭 위험비용</text>
+        <text class="lbl-d" x="694" y="493" text-anchor="middle">→ q̇ 직접 산출 (IK 흡수)</text>
 
         <path class="ed" d="M478,459 L554,459" marker-end="url(#aA)"/>
 
@@ -672,7 +673,7 @@
 
         <rect class="nd" x="310" y="576" width="400" height="62" rx="5"/>
         <text class="lbl-s" x="510" y="600" text-anchor="middle">diff_ik_node</text>
-        <text class="lbl-d" x="510" y="618" text-anchor="middle">solve(V, q) → q̇  ·  DLS λ=0.02</text>
+        <text class="lbl-d" x="510" y="618" text-anchor="middle">solve(V, q) → q̇  ·  DLS λ=0.02  =  제약 없는 QP의 특수해</text>
 
         <path class="ed dash" d="M710,607 L796,607" marker-end="url(#aA)"/>
         <text class="lbl-d" x="802" y="604">추종오차 → supervisor</text>
@@ -695,6 +696,25 @@
         <path class="ed-f" d="M310,717 L110,717 L110,459 L186,459" marker-end="url(#aAf)"/>
         <text class="lbl-f" x="120" y="620">wrench</text>
         <text class="lbl-f" x="120" y="636">100 Hz</text>
+
+        <!-- 오프셋 추정기 (제안) -->
+        <rect class="nd-i" x="1060" y="232" width="190" height="112" rx="5" stroke-dasharray="6 4"/>
+        <text class="lbl-s" x="1155" y="256" text-anchor="middle">offset_filter</text>
+        <text class="lbl-d" x="1155" y="275" text-anchor="middle">제안 · 5 Hz</text>
+        <text class="lbl-d" x="1155" y="296" text-anchor="middle">믿음 p(d, φ) · 격자 필터</text>
+        <text class="lbl-d" x="1155" y="314" text-anchor="middle">학습 아님 — 추정</text>
+        <text class="lbl-d" x="1155" y="332" text-anchor="middle">±d 이봉을 명시적으로 유지</text>
+
+        <path class="ed-i" d="M870,160 L965,160 L965,188 L1155,188 L1155,228" marker-end="url(#aAi)"/>
+        <path class="ed-i" d="M1060,288 L998,288" marker-end="url(#aAi)"/>
+        <text class="lbl-i" x="1029" y="281" text-anchor="middle">belief</text>
+
+        <!-- 실현 twist 되먹임 -->
+        <path class="ed dash" d="M710,628 L1290,628 L1290,400 L1155,400 L1155,348" marker-end="url(#aA)"/>
+        <text class="lbl-d" x="1282" y="468" text-anchor="end">V_achieved = S·J q̇</text>
+        <text class="lbl-d" x="1282" y="484" text-anchor="end">지령 아니라 실현치</text>
+        <text class="lbl-d" x="1282" y="500" text-anchor="end">부호 모호성을 깨는</text>
+        <text class="lbl-d" x="1282" y="516" text-anchor="end">유일한 채널</text>
       </svg>
 
       <div class="figlegend">
@@ -706,9 +726,12 @@
 
       <figcaption>
         <b>공간 배치가 곧 축 분담이다.</b> 왼쪽 레일은 힘 도메인(<span class="m">quality_raw → force_search → wrench</span>),
-        오른쪽은 영상 도메인(<span class="m">perception → policy</span>). 둘은 admittance 안의 arbiter에서 처음 만난다.
-        <span class="m">wrench</span> 되먹임이 servo에서 admittance로 올라가는 것이 유일한 폐루프이며,
-        나머지는 전부 하향 흐름이다.
+        오른쪽은 영상 도메인(<span class="m">perception → policy</span>). 둘은 <span class="m">QP arbiter</span>에서 처음 만난다.
+        <b>2026-08-25 갱신 —</b> arbiter가 QP가 되면서 역기구학을 흡수한다(DLS는 제약 없는 특수해). 축 우선순위가
+        목적함수 가중으로, 힘 상한이 하드 제약으로 표현된다. 되먹임 고리가 둘로 늘었다: <span class="m">wrench</span>(힘)와
+        <span class="m">V_achieved = S·J q̇</span>(실현 twist). 후자가 elevational 부호 모호성을 깨는 유일한 채널이므로
+        <b>지령이 아니라 실현치</b>여야 한다. 점선 <span class="m">offset_filter</span>는 제안 단계로, ±d 이봉성을
+        신경망 안에 묻지 않고 믿음분포로 명시한다.
       </figcaption>
     </figure>
   </section>
@@ -1253,10 +1276,10 @@
   <!-- ============ 인벤토리 ============ -->
   <section id="migration">
     <p class="eyebrow">전환 인벤토리</p>
-    <h2>RCM은 개조가 아니라 삭제다</h2>
+    <h2>재사용할 것과 버릴 것</h2>
     <p class="lead">
-      RCM은 초음파에 대응물이 없다. 가상 구속이 필요하다면 그것은 표면 법선 정렬이고,
-      그건 Mx/My로 처리한다.
+      125 Hz 적분기와 워치독은 자산이라 그대로 간다. 복강경 구속 계열은 초음파에 대응물이
+      없어 통째로 빠진다 — 가상 구속이 필요하다면 그것은 표면 법선 정렬이고, Mx/My로 처리한다.
     </p>
 
     <div class="tw">
@@ -1268,7 +1291,6 @@
           <tr><td class="m">fairino/ SDK</td><td>유지</td><td>F/T API 전부 여기 — <span class="m">ft_sensor_data</span>는 RPC 없이 state pkg 직독</td></tr>
           <tr><td class="m">fr5_servo_joint_control_node</td><td><b>개조 (핵심 재사용)</b></td><td>125 Hz 적분기 + 워치독이 자산. 단일팔화 · 그리퍼 제거 · wrench 발행 추가</td></tr>
           <tr><td class="m">freespace_two_twist</td><td><b>개조 → diff_ik_node</b></td><td>단일팔 · 100 Hz 타이머 · <span class="m">solve()</span> 분리 · 추종 모니터</td></tr>
-          <tr><td class="m">rcm_* (6개)</td><td><b>폐기</b></td><td>RCM 구속 자체가 불필요</td></tr>
           <tr><td class="m">camera_node</td><td>개조 → <span class="m">us_frame_node</span></td><td>타이머 콜백 내 <span class="m">imshow</span> + <span class="m">waitKey</span> 반드시 제거 — 캡처 경로에 GUI 지연</td></tr>
           <tr><td>eye-to-hand 캘리브 일체</td><td><b>폐기</b></td><td>내시경용. US는 probe-to-image 캘리브로 절차 자체가 다름</td></tr>
           <tr><td class="m">fr5_inference (suturing ×5)</td><td>폐기</td><td>chunk delta 발행 구조만 policy 노드 템플릿으로 참조</td></tr>
@@ -1310,7 +1332,7 @@
         <span class="ph ph-done">0</span>
         <span class="phbody">
           <b>단일팔 골격</b>
-          <span>servo_node 개조(그리퍼 제거 · wrench 발행), 툴 변환 YAML, diff_ik 개조 + <span class="m">solve()</span> + 추종 모니터, RCM·듀얼암 정리</span><br>
+          <span>servo_node 개조(그리퍼 제거 · wrench 발행), 툴 변환 YAML, diff_ik 개조 + <span class="m">solve()</span> + 추종 모니터, 복강경 잔재 정리</span><br>
           <em>검증 — dummy 노드로 자유공간 twist 추종, 추종 오차 &lt; 임계</em>
         </span>
       </li>

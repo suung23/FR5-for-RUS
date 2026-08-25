@@ -1,0 +1,53 @@
+% 자동 생성: report/make_table_rotation.py — 손으로 고치지 말 것.
+% 필요 패키지: \usepackage{booktabs}, \usepackage{siunitx}
+\begin{table}[t]
+  \centering
+  \caption{Orientation tracking accuracy of the wrist-mounted IMU against robot
+  forward kinematics, recorded during teleoperated ultrasound probing
+  (\SI{84}{\second}, $n = 16757$ paired samples;
+  sensor \SI{253}{\hertz}, ground truth
+  \SI{144}{\hertz}). Sensor source:
+  6-axis (host fusion, no magnetometer). Hand--eye alignment residual
+  \SI{0.81}{\degree} RMS over $n = 7$ static
+  poses. Tilt $x$ and tilt $y$ are the two components of the probe axis
+  deviation from vertical; axial rotation is rotation about the probe axis.
+  A negative effective latency means the IMU \emph{leads} the robot state
+  stream. The quantity is the relative lag between the two streams, not the
+  absolute latency of either, because the robot's UDP status packets carry
+  their own transport delay.}
+  \label{tab:imu-rotation}
+  \begin{tabular}{l S[table-format=2.1] S[table-format=+2.1] S[table-format=1.4] S[table-format=2.2] S[table-format=2.2] S[table-format=2.2] S[table-format=+1.2]}
+    \toprule
+    Channel & {Ref.\ amplitude} & {Effective latency} & {$\rho$} & {RMS error} & {RMS (delay corr.)} & {95th pct.} & {Drift} \\
+     & {[\si{\degree}]} & {[\si{\milli\second}]} & {} & {[\si{\degree}]} & {[\si{\degree}]} & {[\si{\degree}]} & {[\si{\degree\per\minute}]} \\
+    \midrule
+    Tilt $x$ & 19.6 & -22.8 & 0.9974 & 1.17 & 1.14 & 2.36 & -0.83 \\
+    Tilt $y$ & 20.1 & -21.1 & 0.9991 & 0.80 & 0.73 & 1.52 & +0.38 \\
+    Axial rotation & 20.1 & -6.6 & 0.9997 & 1.95 & 1.95 & 2.58 & +0.23 \\
+    Combined tilt & 14.0 & -20.8 & 0.9992 & 0.50 & 0.42 & 0.88 & +0.37 \\
+    \midrule
+    3D geodesic & {--} & -20.9 & {--} & 2.52 & 2.50 & 3.61 & {--} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[t]
+  \centering
+  \caption{Effect of including the magnetometer, evaluated on the same
+  recording with the same hand--eye alignment. Omitting it improves every
+  channel. The gain is largest in axial rotation, the axis whose observability
+  depends on the magnetic reference: the ferromagnetic robot arm perturbs the
+  local field as the pose changes.}
+  \label{tab:imu-6ax-vs-9ax}
+  \begin{tabular}{l S[table-format=+2.2] S[table-format=+2.2] r}
+    \toprule
+    Metric & {6-axis} & {9-axis} & {Ratio} \\
+    \midrule
+    Geodesic RMS [\si{\degree}] & 2.52 & 12.55 & 5.0$\times$ \\
+    Geodesic 95th pct.\ [\si{\degree}] & 3.61 & 18.91 & 5.2$\times$ \\
+    Axial rotation RMS [\si{\degree}] & 1.95 & 11.26 & 5.8$\times$ \\
+    Combined tilt RMS [\si{\degree}] & 0.50 & 0.70 & 1.4$\times$ \\
+    Axial drift [\si{\degree\per\minute}] & +0.23 & -8.29 & 36.1$\times$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}

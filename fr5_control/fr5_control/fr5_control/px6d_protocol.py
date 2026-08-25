@@ -199,6 +199,14 @@ class FrameParser:
         self._max_buffer = max_buffer
         self.crc_errors = 0
 
+    def reset(self) -> None:
+        """누적 버퍼를 비운다. 포트 입력을 버린 직후 재동기하는 용도다.
+
+        ``crc_errors`` 는 그대로 둔다 — 지금까지의 회선 품질 기록이라 버퍼를
+        비웠다고 없던 일이 되지는 않는다.
+        """
+        self._buffer.clear()
+
     def feed(self, chunk: bytes) -> list[Frame]:
         """바이트를 넣고 완성된 프레임을 모두 돌려준다.
 

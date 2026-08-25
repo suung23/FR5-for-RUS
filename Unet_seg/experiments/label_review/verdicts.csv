@@ -1,0 +1,4 @@
+patient_id,n_frames,dice_mean,in_hydro,verdict,note
+P021,200,0.276,yes,label_wrong,라벨이 영상 구조를 따르지 않음. 사람 직접 검토 2026-08-25
+P043,100,0.461,no,label_wrong,아예 잘못됨. 방광 추정부와 비방광부가 한 라벨에 섞여 있어 Dice 자체가 무의미
+P000,147,0.628,no,unjudgeable,용적이 작아 사람도 정확히 판단 불가

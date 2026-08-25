@@ -35,6 +35,12 @@ setup(
             'us_servo = fr5_control.us_servo_node:main',
             # PX6D F/T 센서 시리얼 점검. 제어 경로가 아니라 배선·축 확인용이다.
             'px6d_probe = fr5_control.px6d_probe:main',
+            # 같은 시리얼 경로를 실시간 그래프로. 축 배정 실측에 쓴다.
+            'px6d_viz = fr5_control.px6d_viz:main',
+            # 같은 시리얼 경로를 터미널에서. 화면이 없는 콘솔·SSH 용이다.
+            'px6d_monitor = fr5_control.px6d_monitor:main',
+            # 축 배정·부호를 손으로 눌러 확정하는 절차. AXIS_ORDER 와 §4.4 검증용.
+            'px6d_axis_id = fr5_control.px6d_axis_id:main',
             # --- 복강경 시절부터 남은 것. Phase 0 검증 후 legacy 로 옮긴다 ---
             'fr5_status = fr5_control.fr5_status_node:main',
             'fr5_servo_joint_control = fr5_control.fr5_servo_joint_control_node:main',

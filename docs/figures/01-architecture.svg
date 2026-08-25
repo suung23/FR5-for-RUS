@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg viewBox="0 0 1020 836" role="img"
-           aria-label="US 프레임그래버에서 시작해 원시 품질과 세그멘테이션 두 경로로 갈라진 뒤, 힘 탐색과 영상 policy를 거쳐 admittance, DLS 역기구학, 125 Hz 서보로 내려가는 제어 아키텍처. 서보에서 wrench가 admittance로 되먹임된다." xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 1320 836" role="img"
+           aria-label="US 프레임그래버에서 시작해 원시 품질과 세그멘테이션 두 경로로 갈라진 뒤, 힘 탐색과 영상 policy를 거쳐 QP arbiter와 125 Hz 서보로 내려가는 제어 아키텍처. 서보에서 wrench가 되먹임되고, 실현 twist가 오른쪽 레일로 policy와 오프셋 추정기로 되먹임된다." xmlns="http://www.w3.org/2000/svg">
 <style>
   /* 팔레트는 학술 도판 관례를 따른다: 흰 바탕, 저채도, 색은 기능적으로만.
      힘/영상 두 도메인은 색상만이 아니라 **명도**로도 갈라 둔다 (L* 약 42 vs 27).
@@ -564,9 +564,10 @@
         <text class="lbl-f" x="335" y="481" text-anchor="middle">ry ←  M_y  →  0</text>
 
         <rect class="nd" x="560" y="418" width="268" height="82" rx="4"/>
-        <text class="lbl-s" x="694" y="447" text-anchor="middle">twist arbiter</text>
-        <text class="lbl-d" x="694" y="466" text-anchor="middle">힘축 3 + 영상축 3</text>
-        <text class="lbl-d" x="694" y="483" text-anchor="middle">QP 전환 지점</text>
+        <text class="lbl-s" x="694" y="443" text-anchor="middle">QP arbiter</text>
+        <text class="lbl-d" x="694" y="461" text-anchor="middle">축별 무차원화 · 힘축 우선 300:1</text>
+        <text class="lbl-d" x="694" y="477" text-anchor="middle">힘 배리어 · 비대칭 위험비용</text>
+        <text class="lbl-d" x="694" y="493" text-anchor="middle">→ q̇ 직접 산출 (IK 흡수)</text>
 
         <path class="ed" d="M478,459 L554,459" marker-end="url(#aA)"/>
 
@@ -576,7 +577,7 @@
 
         <rect class="nd" x="310" y="576" width="400" height="62" rx="5"/>
         <text class="lbl-s" x="510" y="600" text-anchor="middle">diff_ik_node</text>
-        <text class="lbl-d" x="510" y="618" text-anchor="middle">solve(V, q) → q̇  ·  DLS λ=0.02</text>
+        <text class="lbl-d" x="510" y="618" text-anchor="middle">solve(V, q) → q̇  ·  DLS λ=0.02  =  제약 없는 QP의 특수해</text>
 
         <path class="ed dash" d="M710,607 L796,607" marker-end="url(#aA)"/>
         <text class="lbl-d" x="802" y="604">추종오차 → supervisor</text>
@@ -599,4 +600,23 @@
         <path class="ed-f" d="M310,717 L110,717 L110,459 L186,459" marker-end="url(#aAf)"/>
         <text class="lbl-f" x="120" y="620">wrench</text>
         <text class="lbl-f" x="120" y="636">100 Hz</text>
+
+        <!-- 오프셋 추정기 (제안) -->
+        <rect class="nd-i" x="1060" y="232" width="190" height="112" rx="5" stroke-dasharray="6 4"/>
+        <text class="lbl-s" x="1155" y="256" text-anchor="middle">offset_filter</text>
+        <text class="lbl-d" x="1155" y="275" text-anchor="middle">제안 · 5 Hz</text>
+        <text class="lbl-d" x="1155" y="296" text-anchor="middle">믿음 p(d, φ) · 격자 필터</text>
+        <text class="lbl-d" x="1155" y="314" text-anchor="middle">학습 아님 — 추정</text>
+        <text class="lbl-d" x="1155" y="332" text-anchor="middle">±d 이봉을 명시적으로 유지</text>
+
+        <path class="ed-i" d="M870,160 L965,160 L965,188 L1155,188 L1155,228" marker-end="url(#aAi)"/>
+        <path class="ed-i" d="M1060,288 L998,288" marker-end="url(#aAi)"/>
+        <text class="lbl-i" x="1029" y="281" text-anchor="middle">belief</text>
+
+        <!-- 실현 twist 되먹임 -->
+        <path class="ed dash" d="M710,628 L1290,628 L1290,400 L1155,400 L1155,348" marker-end="url(#aA)"/>
+        <text class="lbl-d" x="1282" y="468" text-anchor="end">V_achieved = S·J q̇</text>
+        <text class="lbl-d" x="1282" y="484" text-anchor="end">지령 아니라 실현치</text>
+        <text class="lbl-d" x="1282" y="500" text-anchor="end">부호 모호성을 깨는</text>
+        <text class="lbl-d" x="1282" y="516" text-anchor="end">유일한 채널</text>
       </svg>

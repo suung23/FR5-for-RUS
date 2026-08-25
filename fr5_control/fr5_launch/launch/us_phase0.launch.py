@@ -2,7 +2,8 @@
 
     ros2 launch fr5_launch us_phase0.launch.py                       # mock, 하드웨어 불필요
     ros2 launch fr5_launch us_phase0.launch.py backend:=fairino      # 실로봇
-    ros2 launch fr5_launch us_phase0.launch.py teleop:=true freespace:=true
+    ros2 launch fr5_launch us_phase0.launch.py teleop:=true          # freespace 스케일 (기본)
+    ros2 launch fr5_launch us_phase0.launch.py teleop:=true freespace:=false   # 접촉용 상한
 
 세 노드 모두 fr5_control/config/probe.yaml 을 읽는다. 값은 거기서 고친다.
 명령줄 인자는 셋뿐이며, 모두 "실로봇과 mock 을 오가는" 류의 잦은 전환용이다.
@@ -17,12 +18,18 @@ from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
-# freespace:=true 일 때만 덮어쓰는 값.
+# freespace 스케일. 2026-08-25 부터 **기본값**이고, freespace:=false 로 끈다.
 #
-# probe.yaml 의 safety 값은 **접촉 중** 기준이다 (§12.3). 프로브도 조직도 없는
-# 자유공간 검증 단계에서 10 mm/s 상한을 쓰면 손을 크게 움직여도 로봇이 거의
-# 안 움직이는 것처럼 느껴진다. 그렇다고 probe.yaml 을 고치면 접촉 단계로 넘어갈 때
-# 되돌리는 것을 잊는다 — 그래서 launch 인자로만 존재한다.
+# probe.yaml 의 safety 값은 **접촉 중** 기준이다 (§12.3). teleop 으로 초기 자세에
+# 접근하는 동안에는 그 값이 지나치게 답답해서, 실제 운용은 거의 항상 이쪽을 켠 채
+# 이루어졌다. 기본값이 실사용과 어긋나 있으면 매번 인자를 붙여야 하고, 붙이는 것을
+# 잊은 run 이 "로봇이 안 움직인다" 로 오진된다 (2026-08-19 가 그 사례다).
+#
+# probe.yaml 을 직접 고치지 않는 이유는 그대로다 — 접촉용 값이 어딘가 한 곳에
+# 남아 있어야 되돌릴 수 있다. 여기는 그 값을 덮어쓰는 자리이지 값의 출처가 아니다.
+#
+# ⚠️ 대신 위험의 방향이 뒤집혔다. 프로브가 조직·팬텀에 닿는 단계에서는
+# **freespace:=false 를 명시**해야 한다. 잊으면 접촉용 상한이 아니라 150 mm/s 로 돈다.
 #
 # teleop 프로파일도 같이 바꾼다. 프로파일만 바꾸면 클램프에 걸려 체감이 안 변하고,
 # 클램프만 올리면 스케일이 낮아 여전히 느리다. 둘은 함께 움직여야 한다.
@@ -113,11 +120,11 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             "freespace",
-            default_value="false",
+            default_value="true",
             description=(
-                "자유공간 검증 모드. teleop 프로파일을 freespace 로 바꾸고 "
-                "속도 상한을 올린다. 프로브가 붙으면 절대 쓰지 말 것 — "
-                "probe.yaml 의 접촉용 한계(§12.3)를 덮어쓴다"
+                "freespace 스케일 (기본). teleop 프로파일을 freespace 로 두고 "
+                "속도 상한을 올린다. 프로브가 조직·팬텀에 닿는 단계에서는 "
+                "false 로 내려 probe.yaml 의 접촉용 한계(§12.3)를 쓸 것"
             ),
         ),
         OpaqueFunction(function=_launch_setup),

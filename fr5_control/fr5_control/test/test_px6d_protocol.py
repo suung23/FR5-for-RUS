@@ -189,3 +189,34 @@ def test_wrench_on_non_data_frame_raises():
     """ACK 프레임을 wrench 로 읽으려 하면 막는다."""
     with pytest.raises(ProtocolError):
         Frame(device_id=0x7F, cmd=CMD_TARE, payload=bytes(8)).wrench()
+
+
+def test_parser_reset_drops_partial_frame():
+    """포트 입력을 버린 뒤 파서에 남은 반쪽 프레임도 같이 버려야 한다.
+
+    안 버리면 다음에 읽은 프레임이 반쪽에 이어 붙어 CRC 불일치로 잡힌다 —
+    회선은 멀쩡한데 오류가 하나 찍힌다.
+    """
+    parser = FrameParser()
+    whole = _wrench_frame((1.0, 2.0, 3.0, 0.1, 0.2, 0.3))
+
+    assert parser.feed(whole[:10]) == []      # 프레임 한가운데서 끊긴다
+    parser.reset()
+
+    frames = parser.feed(whole)
+    assert len(frames) == 1
+    assert frames[0].wrench() == pytest.approx((1.0, 2.0, 3.0, 0.1, 0.2, 0.3))
+    assert parser.crc_errors == 0
+
+
+def test_parser_reset_keeps_error_history():
+    """버퍼를 비워도 지금까지의 CRC 집계는 남는다 — 회선 품질 기록이다."""
+    parser = FrameParser()
+    corrupt = bytearray(_wrench_frame((0.0,) * 6))
+    corrupt[-1] ^= 0xFF
+    parser.feed(bytes(corrupt))
+    before = parser.crc_errors
+    assert before > 0
+
+    parser.reset()
+    assert parser.crc_errors == before

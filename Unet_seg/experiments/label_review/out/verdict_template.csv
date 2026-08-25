@@ -1,0 +1,4 @@
+patient_id,n_frames,dice_mean,verdict,note
+P021,200,0.276,,
+P043,100,0.461,,
+P000,147,0.628,,

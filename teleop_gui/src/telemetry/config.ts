@@ -38,7 +38,12 @@ function str(key: string, fallback: string): string {
 }
 
 function num(key: string, fallback: number): number {
-  const parsed = Number(str(key, ''));
+  // `Number('')` is 0, not NaN, so an unset variable would otherwise resolve to
+  // zero rather than to the fallback — and a zero force threshold reads as a
+  // configured value rather than a missing one.
+  const raw = str(key, '');
+  if (raw.trim() === '') return fallback;
+  const parsed = Number(raw);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 

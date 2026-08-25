@@ -38,7 +38,7 @@ export class RobotTelemetryAdapter {
 
   constructor(
     private readonly listeners: AdapterListeners,
-    private readonly cfg: AppConfig = config,
+    cfg: AppConfig = config,
   ) {
     const transport = createTransport(cfg);
     this.transport = transport;

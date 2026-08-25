@@ -1,0 +1,28 @@
+patient_id,split,round,verdict,note
+P000,test,1,unjudgeable,용적이 작아 사람도 정확히 판단 불가
+P009,train,2,label_ok,
+P014,val,2,label_wrong,데이터 품질 및 라벨 불량 — 사람 검토 2026-08-25
+P020,test,2,label_wrong,데이터 품질 및 라벨 불량 — 사람 검토 2026-08-25
+P021,test,1,label_wrong,라벨이 영상 구조를 따르지 않음. 사람 직접 검토 2026-08-25
+P022,val,2,label_ok,
+P028,train,2,label_ok,
+P031,train,2,label_ok,
+P043,test,1,label_wrong,아예 잘못됨. 방광 추정부와 비방광부가 한 라벨에 섞여 있어 Dice 자체가 무의미
+P044,train,2,label_ok,
+P047,train,2,label_wrong,데이터 품질 및 라벨 불량 — 사람 검토 2026-08-25
+P049,train,2,label_ok,
+P051,train,2,label_ok,
+P058,train,2,label_ok,
+P059,train,2,label_ok,
+P060,train,2,label_ok,
+P061,train,2,label_ok,
+P062,train,2,label_wrong,데이터 품질 및 라벨 불량 — 사람 검토 2026-08-25
+P064,train,2,label_ok,
+P069,train,2,label_wrong,데이터 품질 및 라벨 불량 — 사람 검토 2026-08-25
+P070,train,2,label_ok,
+P082,train,2,label_ok,
+P089,test,2,label_ok,
+P090,val,2,label_ok,
+P092,train,2,label_ok,
+P103,train,2,label_ok,
+P108,test,2,label_ok,

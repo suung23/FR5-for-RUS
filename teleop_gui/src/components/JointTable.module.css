@@ -1,0 +1,113 @@
+.body {
+  overflow: auto;
+}
+
+.units {
+  font-size: 10px;
+  color: var(--ink-faint);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.table thead th {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  text-align: right;
+  padding: 7px 10px 6px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface-2);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.table thead th:first-child {
+  text-align: left;
+}
+
+.rangeHead {
+  width: 34%;
+}
+
+.table tbody tr {
+  border-bottom: 1px solid #1a212b;
+}
+
+.table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.warnRow {
+  background: rgba(224, 164, 74, 0.05);
+}
+
+.table td,
+.table tbody th {
+  padding: 6px 10px;
+  text-align: right;
+}
+
+.axis {
+  text-align: left !important;
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--ink-muted);
+  letter-spacing: 0.04em;
+}
+
+.value {
+  font-size: 12.5px;
+}
+
+.velocity,
+.margin {
+  color: var(--ink-muted);
+  font-size: 11.5px;
+}
+
+.marginWarn {
+  color: var(--caution);
+}
+
+.rangeCell {
+  padding-right: 12px !important;
+}
+
+/* Travel indicator: a hairline with a dot, no fill. A filled bar would read as
+   a magnitude, and position within a signed range is not a magnitude. */
+.range {
+  position: relative;
+  height: 12px;
+  display: flex;
+  align-items: center;
+}
+
+.rangeTrack {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--hairline-strong);
+}
+
+.rangeDot {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  margin-left: -3.5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--surface-1);
+  transition: left 90ms linear;
+}
+
+.rangeDotWarn {
+  background: var(--caution);
+}

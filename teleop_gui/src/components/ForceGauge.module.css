@@ -1,0 +1,145 @@
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.readout {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.value {
+  font-size: 40px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  transition: color 160ms ease;
+}
+
+.value--nominal { color: var(--ink); }
+.value--caution { color: var(--caution); }
+.value--critical { color: var(--critical); }
+.value--unknown { color: var(--ink-faint); }
+
+.unit {
+  font-size: 14px;
+  color: var(--ink-faint);
+}
+
+.peak {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+
+.peak .num {
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.scale {
+  padding-bottom: 20px;
+}
+
+.track {
+  position: relative;
+  height: 11px;
+  border-radius: 3px;
+  background: #0c1016;
+  border: 1px solid var(--hairline);
+  overflow: hidden;
+}
+
+.zoneWarn,
+.zoneLimit {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.zoneWarn {
+  background: rgba(224, 164, 74, 0.14);
+}
+
+.zoneLimit {
+  right: 0;
+  background: rgba(229, 97, 94, 0.18);
+}
+
+.fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 2px 0 0 2px;
+  transition: width 90ms linear, background 160ms ease;
+}
+
+.fill--nominal { background: linear-gradient(90deg, #2f7f6c, var(--nominal)); }
+.fill--caution { background: linear-gradient(90deg, #8a6428, var(--caution)); }
+.fill--critical { background: linear-gradient(90deg, #8f3a38, var(--critical)); }
+
+/* Peak hold: a thin bright rule that stays put after the fill recedes. */
+.peakMark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--ink);
+  opacity: 0.55;
+}
+
+.mark {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 1px;
+}
+
+.mark--contact { background: var(--accent); }
+.mark--warn { background: var(--caution); }
+.mark--limit { background: var(--critical); width: 2px; }
+
+.axis {
+  position: relative;
+  height: 0;
+}
+
+.axisLabel {
+  position: absolute;
+  top: 5px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  white-space: nowrap;
+}
+
+.axisValue {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  color: var(--ink-muted);
+}
+
+.axisName {
+  font-size: 8.5px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.note {
+  margin: 0;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--ink-faint);
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+}

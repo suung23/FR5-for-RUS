@@ -1,0 +1,92 @@
+.body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.chart {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 4px 4px 0;
+}
+
+.empty {
+  margin: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+
+.toggle {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.toggle button {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 2px 9px;
+  font-size: 10.5px;
+  color: var(--ink-muted);
+}
+
+.toggle button + button {
+  border-left: 1px solid var(--hairline-strong);
+}
+
+.toggle .active {
+  background: var(--surface-3);
+  color: var(--ink);
+}
+
+/* Six live channels in one strip. Fixed columns so digits do not reflow as
+   values cross zero. */
+.channels {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  border-top: 1px solid var(--hairline);
+  flex: 0 0 auto;
+}
+
+.channel {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 7px 10px;
+  min-width: 0;
+}
+
+.channel + .channel {
+  border-left: 1px solid var(--hairline);
+}
+
+.swatch {
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  flex: 0 0 auto;
+  align-self: center;
+}
+
+.channelLabel {
+  font-size: 10px;
+  color: var(--ink-faint);
+  letter-spacing: 0.04em;
+}
+
+.channelValue {
+  font-size: 12px;
+  margin-left: auto;
+}
+
+.channelUnit {
+  font-size: 9px;
+  color: var(--ink-faint);
+}

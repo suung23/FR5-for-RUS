@@ -1,0 +1,116 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>라벨 검토 배치 B — 24명</title><style>
+:root{--ink:#16211f;--mut:#697b78;--hair:#dbe4e1;--bg:#f6f8f7;--card:#fff}
+@media(prefers-color-scheme:dark){:root{--ink:#e7eeec;--mut:#8a9c99;--hair:#26332f;--bg:#0f1514;--card:#171f1d}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,"Noto Sans CJK KR",sans-serif}
+header{position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--hair);padding:14px 20px;z-index:9}
+h1{margin:0 0 6px;font-size:1.15rem}.lead{color:var(--mut);font-size:.88rem;margin:0 0 8px;max-width:72ch}
+nav{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:.78rem}nav a{color:var(--mut);text-decoration:none}nav a:hover{color:var(--ink)}
+main{max-width:1500px;margin:0 auto;padding:20px}
+section{background:var(--card);border:1px solid var(--hair);border-radius:6px;padding:18px;margin:0 0 28px}
+h2{margin:0 0 10px;font-size:1.05rem;display:flex;align-items:baseline;gap:10px}
+.n{font-family:ui-monospace,monospace;color:var(--mut)}.meta{font-weight:400;color:var(--mut);font-size:.82rem}
+.pick{display:flex;gap:18px;flex-wrap:wrap;padding:8px 0 14px;border-bottom:1px solid var(--hair);margin-bottom:14px;font-size:.9rem}
+figure{margin:0 0 16px}img{width:100%;height:auto;border:1px solid var(--hair);border-radius:4px}
+figcaption{color:var(--mut);font-size:.82rem;margin-top:6px}</style></head><body>
+<header><h1>GT 라벨 검토 — 배치 B · 24명</h1>
+<p class="lead">hydro 코호트 미검토 49명의 절반. 초록 = GT 윤곽, <b>모델 예측 없음</b>.
+자동 스크리닝은 판별력이 없어(AUC 0.45~0.49) 폐기했고, 이 배치는 <b>순서 무작위 전수</b>입니다.
+<b>라벨뿐 아니라 영상 품질</b>도 함께 보십시오. 기록은 <code>verdicts.csv</code>.</p><nav><a href="#P087">01 P087</a> <a href="#P106">02 P106</a> <a href="#P054">03 P054</a> <a href="#P046">04 P046</a> <a href="#P032">05 P032</a> <a href="#P093">06 P093</a> <a href="#P057">07 P057</a> <a href="#P005">08 P005</a> <a href="#P016">09 P016</a> <a href="#P025">10 P025</a> <a href="#P045">11 P045</a> <a href="#P102">12 P102</a> <a href="#P018">13 P018</a> <a href="#P095">14 P095</a> <a href="#P068">15 P068</a> <a href="#P100">16 P100</a> <a href="#P027">17 P027</a> <a href="#P029">18 P029</a> <a href="#P088">19 P088</a> <a href="#P074">20 P074</a> <a href="#P107">21 P107</a> <a href="#P067">22 P067</a> <a href="#P086">23 P086</a> <a href="#P066">24 P066</a></nav></header>
+<main>
+<section id="P087"><h2><span class="n">01</span> P087 <span class="meta">train · 125 프레임</span></h2>
+ <div class="pick"><label><input type="radio" name="vP087"> label_ok</label><label><input type="radio" name="vP087"> partial</label><label><input type="radio" name="vP087"> label_wrong</label><label><input type="radio" name="vP087"> unjudgeable</label></div>
+ <figure><img src="P087_zoom.png" loading="lazy"><figcaption>확대 — 경계가 영상 구조를 따르는가</figcaption></figure>
+ <figure><img src="P087_context.png" loading="lazy"><figcaption>전체 프레임 — 영상 품질, 라벨 안에 비내강이 섞였는가</figcaption></figure></section>
+<section id="P106"><h2><span class="n">02</span> P106 <span class="meta">val · 182 프레임</span></h2>
+ <div class="pick"><label><input type="radio" name="vP106"> label_ok</label><label><input type="radio" name="vP106"> partial</label><label><input type="radio" name="vP106"> label_wrong</label><label><input type="radio" name="vP106"> unjudgeable</label></div>
+ <figure><img src="P106_zoom.png" loading="lazy"><figcaption>확대 — 경계가 영상 구조를 따르는가</figcaption></figure>
+ <figure><img src="P106_context.png" loading="lazy"><figcaption>전체 프레임 — 영상 품질, 라벨 안에 비내강이 섞였는가</figcaption></figure></section>
+<section id="P054"><h2><span class="n">03</span> P054 <span class="meta">train · 171 프레임</span></h2>
+ <div class="pick"><label><input type="radio" name="vP054"> label_ok</label><label><input type="radio" name="vP054"> partial</label><label><input type="radio" name="vP054"> label_wrong</label><label><input type="radio" name="vP054"> unjudgeable</label></div>
+ <figure><img src="P054_zoom.png" loading="lazy"><figcaption>확대 — 경계가 영상 구조를 따르는가</figcaption></figure>
+ <figure><img src="P054_context.png" loading="lazy"><figcaption>전체 프레임 — 영상 품질, 라벨 안에 비내강이 섞였는가</figcaption></figure></section>
+<section id="P046"><h2><span class="n">04</span> P046 <span class="meta">train · 46 프레임</span></h2>
+ <div class="pick"><label><input type="radio" name="vP046"> label_ok</label><label><input type="radio" name="vP046"> partial</label><label><input type="radio" name="vP046"> label_wrong</label><label><input type="radio" name="vP046"> unjudgeable</label></div>
+ <figure><img src="P046_zoom.png" loading="lazy"><figcaption>확대 — 경계가 영상 구조를 따르는가</figcaption></figure>
+ <figure><img src="P046_context.png" loading="lazy"><figcaption>전체 프레임 — 영상 품질, 라벨 안에 비내강이 섞였는가</figcaption></figure></section>
+<section id="P032"><h2><span class="n">05</span> P032 <span class="meta">val · 228 프레임</span></h2>
+ <div class="pick"><label><input type="radio" name="vP032"> label_ok</label><label><input type="radio" name="vP032"> partial</label><label><input type="radio" name="vP032"> label_wrong</label><label><input type="radio" name="vP032"> unjudgeable</label></div>
+ <figure><img src="P032_zoom.png" loading="lazy"><figcaption>확대 — 경계가 영상 구조를 따르는가</figcaption></figure>
+ <figure><img src="P032_context.png" loading="lazy"><figcaption>전체 프레임 — 영상 품질, 라벨 안에 비내강이 섞였는가</figcaption></figure></section>
+<section id="P093"><h2><span class="n">06</span> P093 <span class="meta">train · 79 프레임</span></h2>
+ <div class="pick"><label><input type="radio" name="vP093"> label_ok</label><label><input type="radio" name="vP093"> partial</label><label><input type="radio" name="vP093"> label_wrong</label><label><input type="radio" name="vP093"> unjudgeable</label></div>
+ <figure><img src="P093_zoom.png" loading="lazy"><figcaption>확대 — 경계가 영상 구조를 따르는가</figcaption></figure>
+ <figure><img src="P093_context.png" loading="lazy"><figcaption>전체 프레임 — 영상 품질, 라벨 안에 비내강이 섞였는가</figcaption></figure></section>
+<section id="P057"><h2><span class="n">07</span> P057 <span class="meta">train · 98 프레임</span></h2>
+ <div class="pick"><label><input type="radio" name="vP057"> label_ok</label><label><input type="radio" name="vP057"> partial</label><label><input type="radio" name="vP057"> label_wrong</label><label><input type="radio" name="vP057"> unjudgeable</label></div>
+ <figure><img src="P057_zoom.png" loading="lazy"><figcaption>확대 — 경계가 영상 구조를 따르는가</figcaption></figure>
+ <figure><img src="P057_context.png" loading="lazy"><figcaption>전체 프레임 — 영상 품질, 라벨 안에 비내강이 섞였는가</figcaption></figure></section>
+<section id="P005"><h2><span class="n">08</span> P005 <span class="meta">train · 98 프레임</span></h2>
+ <div class="pick"><label><input type="radio" name="vP005"> label_ok</label><label><input type="radio" name="vP005"> partial</label><label><input type="radio" name="vP005"> label_wrong</label><label><input type="radio" name="vP005"> unjudgeable</label></div>
+ <figure><img src="P005_zoom.png" loading="lazy"><figcaption>확대 — 경계가 영상 구조를 따르는가</figcaption></figure>
+ <figure><img src="P005_context.png" loading="lazy"><figcaption>전체 프레임 — 영상 품질, 라벨 안에 비내강이 섞였는가</figcaption></figure></section>
+<section id="P016"><h2><span class="n">09</span> P016 <span class="meta">train · 139 프레임</span></h2>
+ <div class="pick"><label><input type="radio" name="vP016"> label_ok</label><label><input type="radio" name="vP016"> partial</label><label><input type="radio" name="vP016"> label_wrong</label><label><input type="radio" name="vP016"> unjudgeable</label></div>
+ <figure><img src="P016_zoom.png" loading="lazy"><figcaption>확대 — 경계가 영상 구조를 따르는가</figcaption></figure>
+ <figure><img src="P016_context.png" loading="lazy"><figcaption>전체 프레임 — 영상 품질, 라벨 안에 비내강이 섞였는가</figcaption></figure></section>
+<section id="P025"><h2><span class="n">10</span> P025 <span class="meta">val · 211 프레임</span></h2>
+ <div class="pick"><label><input type="radio" name="vP025"> label_ok</label><label><input type="radio" name="vP025"> partial</label><label><input type="radio" name="vP025"> label_wrong</label><label><input type="radio" name="vP025"> unjudgeable</label></div>
+ <figure><img src="P025_zoom.png" loading="lazy"><figcaption>확대 — 경계가 영상 구조를 따르는가</figcaption></figure>
+ <figure><img src="P025_context.png" loading="lazy"><figcaption>전체 프레임 — 영상 품질, 라벨 안에 비내강이 섞였는가</figcaption></figure></section>
+<section id="P045"><h2><span class="n">11</span> P045 <span class="meta">train · 80 프레임</span></h2>
+ <div class="pick"><label><input type="radio" name="vP045"> label_ok</label><label><input type="radio" name="vP045"> partial</label><label><input type="radio" name="vP045"> label_wrong</label><label><input type="radio" name="vP045"> unjudgeable</label></div>
+ <figure><img src="P045_zoom.png" loading="lazy"><figcaption>확대 — 경계가 영상 구조를 따르는가</figcaption></figure>
+ <figure><img src="P045_context.png" loading="lazy"><figcaption>전체 프레임 — 영상 품질, 라벨 안에 비내강이 섞였는가</figcaption></figure></section>
+<section id="P102"><h2><span class="n">12</span> P102 <span class="meta">train · 137 프레임</span></h2>
+ <div class="pick"><label><input type="radio" name="vP102"> label_ok</label><label><input type="radio" name="vP102"> partial</label><label><input type="radio" name="vP102"> label_wrong</label><label><input type="radio" name="vP102"> unjudgeable</label></div>
+ <figure><img src="P102_zoom.png" loading="lazy"><figcaption>확대 — 경계가 영상 구조를 따르는가</figcaption></figure>
+ <figure><img src="P102_context.png" loading="lazy"><figcaption>전체 프레임 — 영상 품질, 라벨 안에 비내강이 섞였는가</figcaption></figure></section>
+<section id="P018"><h2><span class="n">13</span> P018 <span class="meta">train · 90 프레임</span></h2>
+ <div class="pick"><label><input type="radio" name="vP018"> label_ok</label><label><input type="radio" name="vP018"> partial</label><label><input type="radio" name="vP018"> label_wrong</label><label><input type="radio" name="vP018"> unjudgeable</label></div>
+ <figure><img src="P018_zoom.png" loading="lazy"><figcaption>확대 — 경계가 영상 구조를 따르는가</figcaption></figure>
+ <figure><img src="P018_context.png" loading="lazy"><figcaption>전체 프레임 — 영상 품질, 라벨 안에 비내강이 섞였는가</figcaption></figure></section>
+<section id="P095"><h2><span class="n">14</span> P095 <span class="meta">test · 100 프레임</span></h2>
+ <div class="pick"><label><input type="radio" name="vP095"> label_ok</label><label><input type="radio" name="vP095"> partial</label><label><input type="radio" name="vP095"> label_wrong</label><label><input type="radio" name="vP095"> unjudgeable</label></div>
+ <figure><img src="P095_zoom.png" loading="lazy"><figcaption>확대 — 경계가 영상 구조를 따르는가</figcaption></figure>
+ <figure><img src="P095_context.png" loading="lazy"><figcaption>전체 프레임 — 영상 품질, 라벨 안에 비내강이 섞였는가</figcaption></figure></section>
+<section id="P068"><h2><span class="n">15</span> P068 <span class="meta">train · 160 프레임</span></h2>
+ <div class="pick"><label><input type="radio" name="vP068"> label_ok</label><label><input type="radio" name="vP068"> partial</label><label><input type="radio" name="vP068"> label_wrong</label><label><input type="radio" name="vP068"> unjudgeable</label></div>
+ <figure><img src="P068_zoom.png" loading="lazy"><figcaption>확대 — 경계가 영상 구조를 따르는가</figcaption></figure>
+ <figure><img src="P068_context.png" loading="lazy"><figcaption>전체 프레임 — 영상 품질, 라벨 안에 비내강이 섞였는가</figcaption></figure></section>
+<section id="P100"><h2><span class="n">16</span> P100 <span class="meta">train · 130 프레임</span></h2>
+ <div class="pick"><label><input type="radio" name="vP100"> label_ok</label><label><input type="radio" name="vP100"> partial</label><label><input type="radio" name="vP100"> label_wrong</label><label><input type="radio" name="vP100"> unjudgeable</label></div>
+ <figure><img src="P100_zoom.png" loading="lazy"><figcaption>확대 — 경계가 영상 구조를 따르는가</figcaption></figure>
+ <figure><img src="P100_context.png" loading="lazy"><figcaption>전체 프레임 — 영상 품질, 라벨 안에 비내강이 섞였는가</figcaption></figure></section>
+<section id="P027"><h2><span class="n">17</span> P027 <span class="meta">train · 123 프레임</span></h2>
+ <div class="pick"><label><input type="radio" name="vP027"> label_ok</label><label><input type="radio" name="vP027"> partial</label><label><input type="radio" name="vP027"> label_wrong</label><label><input type="radio" name="vP027"> unjudgeable</label></div>
+ <figure><img src="P027_zoom.png" loading="lazy"><figcaption>확대 — 경계가 영상 구조를 따르는가</figcaption></figure>
+ <figure><img src="P027_context.png" loading="lazy"><figcaption>전체 프레임 — 영상 품질, 라벨 안에 비내강이 섞였는가</figcaption></figure></section>
+<section id="P029"><h2><span class="n">18</span> P029 <span class="meta">val · 105 프레임</span></h2>
+ <div class="pick"><label><input type="radio" name="vP029"> label_ok</label><label><input type="radio" name="vP029"> partial</label><label><input type="radio" name="vP029"> label_wrong</label><label><input type="radio" name="vP029"> unjudgeable</label></div>
+ <figure><img src="P029_zoom.png" loading="lazy"><figcaption>확대 — 경계가 영상 구조를 따르는가</figcaption></figure>
+ <figure><img src="P029_context.png" loading="lazy"><figcaption>전체 프레임 — 영상 품질, 라벨 안에 비내강이 섞였는가</figcaption></figure></section>
+<section id="P088"><h2><span class="n">19</span> P088 <span class="meta">train · 79 프레임</span></h2>
+ <div class="pick"><label><input type="radio" name="vP088"> label_ok</label><label><input type="radio" name="vP088"> partial</label><label><input type="radio" name="vP088"> label_wrong</label><label><input type="radio" name="vP088"> unjudgeable</label></div>
+ <figure><img src="P088_zoom.png" loading="lazy"><figcaption>확대 — 경계가 영상 구조를 따르는가</figcaption></figure>
+ <figure><img src="P088_context.png" loading="lazy"><figcaption>전체 프레임 — 영상 품질, 라벨 안에 비내강이 섞였는가</figcaption></figure></section>
+<section id="P074"><h2><span class="n">20</span> P074 <span class="meta">train · 209 프레임</span></h2>
+ <div class="pick"><label><input type="radio" name="vP074"> label_ok</label><label><input type="radio" name="vP074"> partial</label><label><input type="radio" name="vP074"> label_wrong</label><label><input type="radio" name="vP074"> unjudgeable</label></div>
+ <figure><img src="P074_zoom.png" loading="lazy"><figcaption>확대 — 경계가 영상 구조를 따르는가</figcaption></figure>
+ <figure><img src="P074_context.png" loading="lazy"><figcaption>전체 프레임 — 영상 품질, 라벨 안에 비내강이 섞였는가</figcaption></figure></section>
+<section id="P107"><h2><span class="n">21</span> P107 <span class="meta">train · 153 프레임</span></h2>
+ <div class="pick"><label><input type="radio" name="vP107"> label_ok</label><label><input type="radio" name="vP107"> partial</label><label><input type="radio" name="vP107"> label_wrong</label><label><input type="radio" name="vP107"> unjudgeable</label></div>
+ <figure><img src="P107_zoom.png" loading="lazy"><figcaption>확대 — 경계가 영상 구조를 따르는가</figcaption></figure>
+ <figure><img src="P107_context.png" loading="lazy"><figcaption>전체 프레임 — 영상 품질, 라벨 안에 비내강이 섞였는가</figcaption></figure></section>
+<section id="P067"><h2><span class="n">22</span> P067 <span class="meta">train · 207 프레임</span></h2>
+ <div class="pick"><label><input type="radio" name="vP067"> label_ok</label><label><input type="radio" name="vP067"> partial</label><label><input type="radio" name="vP067"> label_wrong</label><label><input type="radio" name="vP067"> unjudgeable</label></div>
+ <figure><img src="P067_zoom.png" loading="lazy"><figcaption>확대 — 경계가 영상 구조를 따르는가</figcaption></figure>
+ <figure><img src="P067_context.png" loading="lazy"><figcaption>전체 프레임 — 영상 품질, 라벨 안에 비내강이 섞였는가</figcaption></figure></section>
+<section id="P086"><h2><span class="n">23</span> P086 <span class="meta">train · 61 프레임</span></h2>
+ <div class="pick"><label><input type="radio" name="vP086"> label_ok</label><label><input type="radio" name="vP086"> partial</label><label><input type="radio" name="vP086"> label_wrong</label><label><input type="radio" name="vP086"> unjudgeable</label></div>
+ <figure><img src="P086_zoom.png" loading="lazy"><figcaption>확대 — 경계가 영상 구조를 따르는가</figcaption></figure>
+ <figure><img src="P086_context.png" loading="lazy"><figcaption>전체 프레임 — 영상 품질, 라벨 안에 비내강이 섞였는가</figcaption></figure></section>
+<section id="P066"><h2><span class="n">24</span> P066 <span class="meta">train · 221 프레임</span></h2>
+ <div class="pick"><label><input type="radio" name="vP066"> label_ok</label><label><input type="radio" name="vP066"> partial</label><label><input type="radio" name="vP066"> label_wrong</label><label><input type="radio" name="vP066"> unjudgeable</label></div>
+ <figure><img src="P066_zoom.png" loading="lazy"><figcaption>확대 — 경계가 영상 구조를 따르는가</figcaption></figure>
+ <figure><img src="P066_context.png" loading="lazy"><figcaption>전체 프레임 — 영상 품질, 라벨 안에 비내강이 섞였는가</figcaption></figure></section></main></body></html>

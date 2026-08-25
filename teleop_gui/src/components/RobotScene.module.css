@@ -1,0 +1,66 @@
+.body {
+  position: relative;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.body canvas {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: block;
+}
+
+.hint {
+  font-size: 10px;
+  color: var(--ink-faint);
+}
+
+.veil {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 13, 18, 0.62);
+  backdrop-filter: blur(1.5px);
+  color: var(--ink-muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+
+.legend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 7px 12px;
+  border-top: 1px solid var(--hairline);
+  font-size: 10px;
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+}
+
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legend i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.swatchJoint { background: #7cc4e8; }
+.swatchLimit { background: #e0a44a; }
+.swatchFlange { background: #93a6bd; }
+
+.caveat {
+  margin-left: auto;
+  font-style: italic;
+}

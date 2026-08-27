@@ -1,32 +1,41 @@
 /*
- * Visual system: FAIRINO-style operational console.
+ * Visual system: clinical engineering console, white with a green structural
+ * accent.
  *
- * Three colours carry the entire interface — black, white, deep navy — with two
- * neutral greys for rules and de-emphasised text. Nothing is coloured for
- * decoration, and no state is signalled by colour alone.
+ * Surfaces are predominantly white. Green is structure and status — the active
+ * tab, the selected nav row, the measured force, the chart trace — never
+ * decoration and never a large field. Dark red appears as an outline on
+ * critical rows and nowhere else.
  *
- * Severity is expressed structurally instead:
+ * All text is #111111. Nothing is coloured to carry meaning, because colour
+ * alone is not allowed to carry it:
  *
- *   normal    plain row, hairline rule
+ *   normal    hairline separator
  *   warning   2px black left edge + a bordered WARN tag
- *   alarm     inverted block, white on black, + an ALARM tag
+ *   alarm     2px dark-red outline + a red-outlined ALARM tag
  *
- * That survives a monochrome pendant screen, a photocopy, and colour-blind
- * vision, which a red/amber/green scheme does not.
+ * That survives a monochrome print, a photocopy and colour-blind vision. The
+ * earlier scheme inverted rows to white-on-black for alarms; that is gone,
+ * because a black field is no longer part of this palette and inverted text
+ * would break the "text is always near-black" rule.
  *
- * Everything is square. Panels are white plates butted against a black canvas
- * and separated by 1px rules, so the console reads as one instrument rather
- * than a scatter of cards.
+ * Square corners throughout. No shadow, no gradient, no glow.
  */
 
 :root {
   color-scheme: light;
 
-  --black: #000000;
+  --ink: #111111;
   --white: #ffffff;
-  --navy: #10233f;
-  --rule: #d6d9de;
-  --muted: #6b7280;
+  --panel-pale: #eff7f1;
+  --nav-selected: #cfe5d4;
+  --green: #1e6b45;
+  --rule: #d5ded7;
+  --critical: #8b1e1e;
+
+  /* De-emphasised text. Near-black rather than a grey, so labels stay legible
+     on a pale green field and nothing reads as "coloured text". */
+  --ink-soft: #4a4a4a;
 
   /* Density. An operator glances at this while looking at the patient, so rows
      are tight and type is small but never below legibility. */
@@ -34,8 +43,11 @@
   --pad: 8px;
   --panel-gap: 1px;
 
-  --font-ui: 'Inter', 'Segoe UI', 'Helvetica Neue', system-ui, sans-serif;
-  --font-num: 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', ui-monospace, 'Courier New', monospace;
+  --font-ui: Arial, Helvetica, 'Noto Sans', sans-serif;
+  /* Raw values only — event log lines, joint angles, timestamps, packet rates.
+     Everything else is Arial; a monospaced face across the whole screen is what
+     made the previous console read as a terminal rather than an instrument. */
+  --font-mono: 'Roboto Mono', 'Consolas', monospace;
 }
 
 * {
@@ -45,18 +57,14 @@
 
 html,
 body,
-/* The root element paints opaque black in its own right. Relying on `body`
-   alone leaves a window whose background depends on the compositor's idea of
-   an unpainted surface, which on some setups is transparent. */
 #root {
   height: 100%;
   margin: 0;
-  background: var(--black);
 }
 
 body {
-  background: var(--black);
-  color: var(--black);
+  background: var(--white);
+  color: var(--ink);
   font-family: var(--font-ui);
   font-size: 12px;
   line-height: 1.35;
@@ -65,16 +73,25 @@ body {
   user-select: none;
 }
 
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--white);
+}
+
+/* Raw values. Monospaced so columns align and a changing digit does not shift
+   the reading — applied to readouts, not to labels or prose. */
 .num {
-  font-family: var(--font-num);
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-feature-settings: 'tnum' 1;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
 }
 
 /* ---- plate ---------------------------------------------------------------
-   A white information surface. Header is a thin navy-ruled bar; the body is
-   plain white. No shadow, no radius, no gradient. */
+   A white information surface with a pale green header band. The band is what
+   separates one plate from the next now that there is no dark canvas between
+   them. */
 
 .plate {
   background: var(--white);
@@ -92,24 +109,24 @@ body {
   gap: 8px;
   height: 24px;
   padding: 0 var(--pad);
-  border-bottom: 1px solid var(--navy);
-  flex: 0 0 auto;
   background: var(--white);
+  border-bottom: 1px solid var(--green);
+  flex: 0 0 auto;
 }
 
 .plate__title {
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--navy);
+  color: var(--ink);
   white-space: nowrap;
 }
 
 .plate__aside {
   font-size: 10px;
-  letter-spacing: 0.04em;
-  color: var(--muted);
+  letter-spacing: 0.02em;
+  color: var(--ink-soft);
   white-space: nowrap;
 }
 
@@ -117,6 +134,7 @@ body {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
+  background: var(--white);
 }
 
 /* ---- field rows ---------------------------------------------------------- */
@@ -137,16 +155,16 @@ body {
 
 .field__label {
   font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
+  font-weight: 700;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--muted);
+  color: var(--ink-soft);
   white-space: nowrap;
 }
 
 .field__value {
   font-size: 12px;
-  color: var(--black);
+  color: var(--ink);
   text-align: right;
   white-space: nowrap;
   overflow: hidden;
@@ -154,20 +172,17 @@ body {
 }
 
 .field--warn {
-  border-left: 2px solid var(--black);
+  border-left: 2px solid var(--ink);
   padding-left: calc(var(--pad) - 2px);
+  background: var(--panel-pale);
 }
 
+/* Critical is an outline, not a fill. The row keeps black text on white so it
+   stays readable and nothing depends on the colour being seen. */
 .field--alarm {
-  background: var(--black);
-}
-
-.field--alarm .field__label {
-  color: var(--white);
-}
-
-.field--alarm .field__value {
-  color: var(--white);
+  border: 2px solid var(--critical);
+  border-bottom: 2px solid var(--critical);
+  padding-left: calc(var(--pad) - 2px);
 }
 
 /* ---- status tag ----------------------------------------------------------
@@ -178,28 +193,33 @@ body {
   display: inline-block;
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   padding: 1px 5px;
-  border: 1px solid var(--black);
-  color: var(--black);
+  border: 1px solid var(--ink);
+  color: var(--ink);
   background: var(--white);
   white-space: nowrap;
 }
 
+/* Strong = heavier border and the pale field, not an inversion. */
 .tag--strong {
-  background: var(--black);
-  color: var(--white);
+  border-width: 2px;
+  background: var(--panel-pale);
 }
 
-.tag--navy {
-  border-color: var(--navy);
-  color: var(--navy);
+.tag--green {
+  border-color: var(--green);
+  background: var(--panel-pale);
+}
+
+.tag--critical {
+  border: 2px solid var(--critical);
 }
 
 .tag--off {
   border-color: var(--rule);
-  color: var(--muted);
+  color: var(--ink-soft);
 }
 
 /* ---- controls ------------------------------------------------------------ */
@@ -207,46 +227,42 @@ body {
 button {
   font: inherit;
   font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  font-weight: 700;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--black);
+  color: var(--ink);
   background: var(--white);
-  border: 1px solid var(--navy);
+  border: 1px solid var(--green);
   padding: 3px 10px;
   cursor: pointer;
 }
 
 button:hover {
-  background: var(--navy);
-  color: var(--white);
+  background: var(--panel-pale);
 }
 
 button:active {
-  background: var(--black);
-  border-color: var(--black);
-  color: var(--white);
+  background: var(--nav-selected);
 }
 
 button:focus-visible {
-  outline: 2px solid var(--black);
+  outline: 2px solid var(--green);
   outline-offset: 1px;
 }
 
 button[aria-pressed='true'] {
-  background: var(--navy);
-  color: var(--white);
+  background: var(--nav-selected);
+  border-color: var(--green);
 }
 
 button:disabled {
   border-color: var(--rule);
-  color: var(--muted);
+  color: var(--ink-soft);
   cursor: default;
 }
 
 button:disabled:hover {
   background: var(--white);
-  color: var(--muted);
 }
 
 /* ---- scrollbars ---------------------------------------------------------- */
@@ -267,11 +283,9 @@ button:disabled:hover {
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--muted);
+  background: var(--green);
 }
 
-/* Recharts leaves inline focus rings on the surface; suppress them so the
-   plate edge stays the only rule in view. */
 .recharts-wrapper:focus,
 .recharts-surface:focus {
   outline: none;

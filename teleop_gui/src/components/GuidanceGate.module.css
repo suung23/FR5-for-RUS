@@ -1,0 +1,123 @@
+/* A very light green tint, not an opaque sheet and not a dark backdrop. The
+   console has to stay visible behind the gate — the checklist is meant to be
+   read against the live state it refers to, and telemetry keeps updating while
+   it is open. No blur: the panel is separated by its border and by the tint,
+   which is enough at this contrast and keeps the readings behind it legible. */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(239, 247, 241, 0.92);
+}
+
+.panel {
+  width: 760px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  background: var(--white);
+  border: 1px solid var(--green);
+  padding: 26px 32px 28px;
+}
+
+.kicker {
+  margin: 0;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+/* Large but conventional. No display face, no wide tracking. */
+.title {
+  margin: 6px 0 0;
+  font-size: 27px;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--ink);
+}
+
+.rule {
+  height: 2px;
+  background: var(--green);
+  margin: 14px 0 18px;
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.list li {
+  display: flex;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.list li:last-child {
+  border-bottom: none;
+}
+
+.index {
+  flex: 0 0 auto;
+  width: 18px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.itemText {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.footer {
+  margin: 20px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--rule);
+  font-size: 13px;
+  color: var(--ink);
+}
+
+/* Outlined white button, deep-green border, black text. The keycap is drawn
+   rather than described so the hint reads as a key, not as prose. */
+.action {
+  margin-top: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px;
+  background: var(--white);
+  border: 2px solid var(--green);
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--ink);
+}
+
+.action:hover {
+  background: var(--panel-pale);
+}
+
+.action:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+
+.key {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.actionText {
+  color: var(--ink);
+}

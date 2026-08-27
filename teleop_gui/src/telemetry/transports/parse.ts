@@ -1,4 +1,5 @@
 import type {
+  ProbingMode,
   RobotState,
   RobotTelemetry,
   SafetyState,
@@ -22,6 +23,7 @@ const SAFETY_STATES: SafetyState[] = [
   'protective_stop',
   'emergency_stop',
 ];
+const PROBING_MODES: ProbingMode[] = ['approach', 'contact_probing'];
 const WRENCH_SOURCES: WrenchSource[] = ['px6d_serial', 'controller', 'simulation', 'none'];
 
 function numberArray(value: unknown, length?: number): number[] | undefined {
@@ -71,6 +73,7 @@ export function parseTelemetry(raw: unknown, receivedAt: number): RobotTelemetry
     tcpPose: tcpPose(src.tcpPose ?? src.tcp_pose),
     robotState: oneOf(src.robotState ?? src.robot_state, ROBOT_STATES),
     safetyState: oneOf(src.safetyState ?? src.safety_state, SAFETY_STATES),
+    probingMode: oneOf(src.probingMode ?? src.probing_mode, PROBING_MODES),
   };
 }
 

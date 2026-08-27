@@ -36,8 +36,8 @@
 .scaleItem {
   font-size: 9px;
   font-weight: 600;
-  letter-spacing: 0.07em;
-  color: var(--muted);
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
   white-space: nowrap;
 }
 
@@ -48,6 +48,6 @@
 .caveat {
   font-size: 9px;
   letter-spacing: 0.03em;
-  color: var(--muted);
+  color: var(--ink-soft);
   white-space: nowrap;
 }

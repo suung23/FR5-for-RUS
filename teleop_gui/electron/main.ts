@@ -22,11 +22,11 @@ function createWindow(): void {
     height: 960,
     minWidth: 1100,
     minHeight: 720,
-    // Opaque black, matching the console canvas. This is what the compositor
+    // Opaque white, matching the console canvas. This is what the compositor
     // paints before the first frame and behind anything the page leaves
-    // unpainted — a leftover non-black value here shows as a flash on open,
-    // and a translucent one lets the desktop through.
-    backgroundColor: '#000000',
+    // unpainted — a mismatched value here shows as a flash on open, and a
+    // translucent one lets the desktop through.
+    backgroundColor: '#ffffff',
     // Wait for the first paint so the operator never sees a white flash on a
     // dark panel in a darkened room.
     show: false,

@@ -9,11 +9,12 @@
 }
 
 .table thead th {
+  background: var(--panel-pale);
   font-size: 8.5px;
   font-weight: 700;
-  letter-spacing: 0.09em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--muted);
+  color: var(--ink-soft);
   text-align: right;
   padding: 5px var(--pad) 4px;
   border-bottom: 1px solid var(--rule);
@@ -48,7 +49,7 @@
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.05em;
-  color: var(--muted);
+  color: var(--ink-soft);
   padding: 5px var(--pad);
   width: 40px;
 }
@@ -56,11 +57,11 @@
 .table td {
   text-align: right;
   padding: 5px var(--pad);
-  color: var(--black);
+  color: var(--ink);
 }
 
 .near {
-  border-left: 2px solid var(--black);
+  border-left: 2px solid var(--ink);
 }
 
 .tag {
@@ -70,8 +71,8 @@
   font-family: var(--font-ui);
   font-size: 8px;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  border: 1px solid var(--black);
+  letter-spacing: 0.04em;
+  border: 1px solid var(--ink);
 }
 
 .range {
@@ -95,7 +96,7 @@
   position: absolute;
   width: 1px;
   height: 9px;
-  background: var(--muted);
+  background: var(--ink-soft);
 }
 
 .marker {
@@ -103,18 +104,18 @@
   width: 2px;
   height: 13px;
   margin-left: -1px;
-  background: var(--navy);
+  background: var(--green);
 }
 
 .markerNear {
-  background: var(--black);
+  background: var(--critical);
   width: 3px;
   margin-left: -1.5px;
 }
 
 .limits {
   font-size: 9.5px;
-  color: var(--muted);
+  color: var(--ink-soft);
   text-align: right;
   white-space: nowrap;
 }

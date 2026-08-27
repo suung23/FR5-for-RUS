@@ -15,8 +15,8 @@
 .trackLabel {
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.1em;
-  color: var(--muted);
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
   width: 42px;
   flex: 0 0 auto;
 }
@@ -25,7 +25,7 @@
   position: relative;
   flex: 1 1 auto;
   height: 26px;
-  border: 1px solid var(--black);
+  border: 1px solid var(--ink);
   background: var(--white);
   overflow: hidden;
 }
@@ -38,13 +38,13 @@
   justify-content: center;
   font-size: 9px;
   font-weight: 600;
-  letter-spacing: 0.12em;
-  color: var(--muted);
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
 }
 
-/* Approach is the open state; contact is filled. Hatching would be an option
-   but at this height it turns to moire, so a solid fill plus the printed word
-   carries it. */
+/* Approach is the open state; contact is the filled one. The fill is the pale
+   green field with a deep green edge — the printed word carries the meaning,
+   the field only makes the spans findable. */
 .bandApproach,
 .bandContact {
   position: absolute;
@@ -62,33 +62,34 @@
 }
 
 .bandContact {
-  background: var(--black);
-  border-left: 1px solid var(--black);
-  border-right: 1px solid var(--black);
+  background: var(--nav-selected);
+  border-left: 2px solid var(--green);
+  border-right: 2px solid var(--green);
 }
 
 .bandText {
   font-size: 8.5px;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.05em;
   white-space: nowrap;
 }
 
 .bandApproach .bandText {
-  color: var(--muted);
+  color: var(--ink-soft);
 }
 
 .bandContact .bandText {
-  color: var(--white);
+  color: var(--ink);
+  font-weight: 700;
 }
 
 .axis {
   display: flex;
   justify-content: space-between;
   padding: 3px var(--pad) 8px 58px;
-  font-family: var(--font-num);
+  font-family: var(--font-ui);
   font-size: 9px;
-  color: var(--muted);
+  color: var(--ink-soft);
   flex: 0 0 auto;
 }
 
@@ -117,20 +118,20 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  border-top: 1px solid var(--navy);
+  border-top: 1px solid var(--rule);
 }
 
 .bandsHead {
+  background: var(--panel-pale);
   display: flex;
   align-items: center;
   height: 20px;
   padding: 0 var(--pad);
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.11em;
-  color: var(--navy);
+  letter-spacing: 0.05em;
+  color: var(--ink);
   border-bottom: 1px solid var(--rule);
-  background: var(--white);
   position: sticky;
   top: 0;
 }
@@ -150,8 +151,8 @@
   padding: 4px var(--pad);
   font-size: 9.5px;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--muted);
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
   width: 96px;
 }
 
@@ -160,19 +161,15 @@
   padding: 4px var(--pad);
 }
 
-.bandContactRow th {
-  color: var(--white);
-}
-
 .bandContactRow {
-  background: var(--black);
-  color: var(--white);
+  background: var(--panel-pale);
+  border-left: 2px solid var(--green);
 }
 
 .bandEmpty {
   padding: 10px var(--pad);
   font-size: 9.5px;
   font-weight: 600;
-  letter-spacing: 0.1em;
-  color: var(--muted);
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
 }

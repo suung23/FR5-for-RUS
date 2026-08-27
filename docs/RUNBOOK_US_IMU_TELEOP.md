@@ -175,18 +175,37 @@ ros2 launch fr5_launch us_phase0.launch.py backend:=fairino      # 실로봇 (19
 
 ### 6c. Touch(햅틱) 원격조작 함께 띄우기
 
-**항상 이 스크립트로 시작한다.** 기존 노드를 전부 정리하고 **종료를 확인한 뒤** 띄운다:
+**항상 스크립트로 시작한다.** 기존 노드를 전부 정리하고 **종료를 확인한 뒤** 띄운다.
+
+세션 하나를 통째로 (정리 → 센서 송출 → GUI → teleop) — 평소 쓰는 것:
 
 ```bash
-./scripts/start_teleop.sh                      # 실로봇 + teleop (기본)
-./scripts/start_teleop.sh backend:=mock        # mock
-./scripts/start_teleop.sh freespace:=false     # 접촉용 상한
+./scripts/start_session.sh                       # freespace, 실로봇, PX6D, GUI 전부
+./scripts/start_session.sh backend:=mock         # mock
+./scripts/start_session.sh freespace:=false      # 접촉용 상한
+./scripts/start_session.sh --px6d /dev/ttyACM1   # 센서 포트 지정
+./scripts/start_session.sh --no-px6d             # 센서 없이
+./scripts/start_session.sh --no-gui              # GUI 없이
+./scripts/start_session.sh --dry-run             # 무엇을 할지만 출력
 ```
 
-인자는 그대로 `us_phase0.launch.py` 로 넘어간다. 정리만 하려면:
+GUI 창은 이 터미널이 아니라 **본체 화면(`:1`)** 에 뜬다 — SSH 로 붙어 있어도 된다.
+
+`--` 로 시작하지 않는 인자는 `us_phase0.launch.py` 로 넘어간다.
+**Ctrl-C 하나로 브리지와 GUI 까지 내려가고, 나가기 전에 남은 노드가 없는지 확인한다.**
+로그는 따로 쌓인다 (여러 로그가 한 콘솔에 섞이면 다 못 읽는다):
+`log/telemetry_bridge.log` · `log/teleop_gui.log`
+
+| 스크립트 | 범위 |
+|---|---|
+| `start_session.sh` | 정리 + 브리지 + GUI + teleop. 종료 시 자동 정리 |
+| `start_teleop.sh` | 정리 + teleop 만 (브리지 별도로 띄울 때) |
+| `stop_all.sh` | 정리만. 떠 있는 것 확인용으로도 쓴다 |
+
+GUI 만 따로 띄우려면 (`start_teleop.sh` 나 수동 기동과 함께 쓸 때):
 
 ```bash
-./scripts/stop_all.sh
+cd ~/FR5-for-RUS/teleop_gui && npm run console
 ```
 
 > ⚠️ **왜 항상 정리하는가.** 남은 노드는 오작동하기 전까지 보이지 않는다.
@@ -197,7 +216,9 @@ ros2 launch fr5_launch us_phase0.launch.py backend:=fairino      # 실로봇 (19
 > `scripts/fr5_nodes.sh` 는 `/proc` 를 직접 읽어 자기 자신을 제외하고, 프로세스가
 > 사라진 것을 확인할 때까지 기다린다.
 
-수동으로 띄울 수도 있으나 정리는 직접 해야 한다:
+⚠️ **아래 수동 방식은 정리를 건너뛴다.** 2026-08-25 에 실로봇에 제어 스택이 두 벌
+올라간 것이 이 경로였다 (`ros2 launch` 직접 실행). 스크립트를 쓸 수 없는 상황이 아니면
+쓰지 말 것. 쓴다면 먼저 `./scripts/stop_all.sh` 를 돌릴 것:
 
 ```bash
 ros2 launch fr5_launch us_phase0.launch.py backend:=fairino teleop:=true

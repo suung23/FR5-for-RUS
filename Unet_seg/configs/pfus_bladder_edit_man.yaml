@@ -1,0 +1,57 @@
+# Standard U-Net on PFUS1: hand-corrected labels + the human review's exclusions.
+#
+# configs/pfus_bladder_edit.yaml plus ONE change -- the five patients the
+# 2026-08-25 human review marked unusable are removed from TRAIN and VAL:
+#
+#   P047 P048 P062 P069   train   label_wrong
+#   P014                  val     label_wrong
+#
+# experiments/label_review/VERDICTS.csv flags nine patients, but four of them
+# (P000 P020 P021 P043) sit in test and are deliberately KEPT there --
+# see "test is protected" below. Built by:
+#
+#   python scripts/filter_manifest_by_area.py \
+#       --manifest ~/datasets/pfus/manifest_edited.csv \
+#       --output   ~/datasets/pfus/manifest_edit_man.csv \
+#       --exclude-patients P000,P014,P020,P021,P043,P047,P048,P062,P069 \
+#       --protect-splits test \
+#       --report   ~/datasets/pfus/manifest_edit_man_report.json
+#
+#   train  78 -> 74 patients, 10,315 -> 9,967 frames
+#   val    16 -> 15 patients,  2,476 -> 2,247 frames
+#   test   16 -> 16 patients,  2,017 -> 2,017 frames   (untouched)
+#
+# Test is protected, on purpose
+# -----------------------------
+# The four flagged test patients are also the four worst-scoring ones
+# (P021 0.28, P043 0.46, P000 0.63, P020 0.86). Dropping them would raise the
+# headline without a single prediction changing, and would make this run
+# incomparable with every earlier one. They stay in; the retained-cohort number
+# is reported separately from the same frame_metrics.csv, which gives both
+# figures without buying one of them with an unfalsifiable test set.
+#
+# CAVEATS
+# -------
+#   1. VERDICTS.csv covers 29 of 110 patients. batch_A/verdicts.csv and
+#      batch_B/verdicts.csv are still empty, so 49 patients have never been
+#      looked at. This is a PARTIAL review, and "not flagged" here means
+#      "not yet reviewed" at least as often as it means "checked and fine".
+#   2. Model selection runs against a 15-patient val split rather than 16, so
+#      best.pt is chosen on slightly different evidence than in pfus_bladder.
+#      The test set is identical, which is what the comparison rests on.
+#   3. The label correction it inherits still covers only 2 train patients
+#      (P033 P034) -- see configs/pfus_bladder_edit.yaml.
+
+defaults: pfus_bladder_edit.yaml
+
+experiment:
+  name: pfus_bladder_edit_man
+  output_dir: runs/pfus_bladder_edit_man
+  seed: 42
+
+data:
+  manifest: /home/rosotauser/datasets/pfus/manifest_edit_man.csv
+  root: /home/rosotauser/datasets/pfus
+
+train:
+  checkpoint_dir: checkpoints/pfus_bladder_edit_man

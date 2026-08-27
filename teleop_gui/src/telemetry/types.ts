@@ -10,6 +10,16 @@
 
 export type RobotState = 'idle' | 'teleop' | 'contact' | 'fault' | 'estop';
 
+/**
+ * Velocity-limit mode declared by the control stack.
+ *
+ * Distinct from the console's own contact classification: this is what the
+ * robot is *actually* clamping to, reported by `us_diff_ik_node`. The console
+ * must never infer it — if the display guessed and the robot disagreed, the
+ * operator would be reading a limit that is not in force.
+ */
+export type ProbingMode = 'approach' | 'contact_probing';
+
 export type SafetyState =
   | 'normal'
   | 'warning'
@@ -34,6 +44,8 @@ export interface RobotTelemetry {
   tcpPose?: TcpPose;
   robotState?: RobotState;
   safetyState?: SafetyState;
+  /** Velocity-limit mode the control stack has entered. */
+  probingMode?: ProbingMode;
 }
 
 /**

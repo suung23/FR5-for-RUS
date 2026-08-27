@@ -1,7 +1,7 @@
 import { config } from '../telemetry/config';
+import { GATE_CONTENT, type GateTopic } from '../telemetry/guidanceGate';
 import { JOINT_NAMES, marginToLimit } from '../telemetry/fr5Model';
 import type { ContactSnapshot } from '../telemetry/contactState';
-import type { GuidanceItem } from '../telemetry/guidance';
 import type { RobotTelemetry, WrenchSample, WrenchSource } from '../telemetry/types';
 import { SAFETY_STATE_LABEL } from '../store/selectors';
 import styles from './StatusColumn.module.css';
@@ -15,7 +15,8 @@ interface Props {
   contact: ContactSnapshot;
   peakN: number;
   available: boolean;
-  guidance: GuidanceItem[];
+  /** Last guidance the operator acknowledged, or null before the first. */
+  acknowledged: { topic: GateTopic; at: number } | null;
   frameCount: number;
 }
 
@@ -33,7 +34,7 @@ export function StatusColumn({
   contact,
   peakN,
   available,
-  guidance,
+  acknowledged,
   frameCount,
 }: Props) {
   return (
@@ -63,7 +64,7 @@ export function StatusColumn({
       </div>
 
       <div className={styles.pinned}>
-        <GuidancePlate items={guidance} />
+        <AcknowledgedLine acknowledged={acknowledged} />
       </div>
     </aside>
   );
@@ -86,6 +87,7 @@ function StagePlate({
   available: boolean;
 }) {
   const safety = telemetry.safetyState;
+  const probingMode = telemetry.probingMode;
   const alarm = safety === 'protective_stop' || safety === 'emergency_stop';
   const warn = safety === 'warning';
 
@@ -117,10 +119,17 @@ function StagePlate({
             {contact.hasContacted ? 'ENGAGED' : 'NOT ENGAGED'}
           </span>
         </div>
-        <div className="field">
-          <span className="field__label">Velocity scaling</span>
+        {/* What the robot is actually clamping to, as reported by the control
+            stack — not the console's own guess. When these two disagree the
+            operator needs to see it, so the declared mode is its own field. */}
+        <div className={`field ${probingMode === 'contact_probing' ? 'field--warn' : ''}`}>
+          <span className="field__label">Velocity limits</span>
           <span className="field__value num">
-            {contact.hasContacted ? 'CONTACT LIMITS' : 'FREESPACE'}
+            {!available || !probingMode
+              ? '—'
+              : probingMode === 'contact_probing'
+                ? 'CONTACT PROBING'
+                : 'APPROACH'}
           </span>
         </div>
         <p className={styles.note}>
@@ -170,6 +179,9 @@ function ForceScale({
           <span className={styles.forceUnit}>N</span>
           {overLimit ? <span className="tag tag--strong">OVER LIMIT</span> : null}
           {!overLimit && overWarn ? <span className="tag">WARN</span> : null}
+          {!overLimit && !overWarn && magnitude >= config.contactProbingN ? (
+            <span className="tag tag--navy">PROBING</span>
+          ) : null}
           <span className={styles.forcePeak}>
             <span className={styles.peakLabel}>PEAK</span>
             <span className="num">{available ? peakN.toFixed(2) : '—'}</span>
@@ -177,32 +189,56 @@ function ForceScale({
         </div>
 
         <div className={styles.scale}>
+          {/* White gauge, black scale. The reading is a deep-green marker, not a
+              filled bar — a filled bar reads as "how much of the budget is
+              used", and what the operator needs is where the value sits
+              relative to the target band and the limit. */}
           <div className={styles.track}>
-            {available ? (
-              <span className={styles.bar} style={{ width: pct(magnitude) }} />
-            ) : null}
-            <span className={styles.warnRule} style={{ left: pct(config.warnForceN) }} />
-            <span className={styles.limitRule} style={{ left: pct(config.maxForceN) }} />
+            <span
+              className={styles.safeBand}
+              style={{
+                left: pct(config.targetForceN - config.targetBandN),
+                width: pct(2 * config.targetBandN),
+              }}
+            />
+            <span className={styles.targetMark} style={{ left: pct(config.targetForceN) }} />
+            <span className={styles.probingMark} style={{ left: pct(config.contactProbingN) }} />
+            <span className={styles.warnMark} style={{ left: pct(config.warnForceN) }} />
+            <span className={styles.limitMark} style={{ left: pct(config.maxForceN) }} />
             {available && peakN > 0 ? (
-              <span className={styles.peakRule} style={{ left: pct(peakN) }} />
+              <span className={styles.peakMark} style={{ left: pct(peakN) }} />
+            ) : null}
+            {available ? (
+              <span className={styles.measuredMark} style={{ left: pct(magnitude) }} />
             ) : null}
           </div>
-          {/* Numbers only on the axis — the two rules are barely a newton apart
-              and their words collided. The legend below names them instead. */}
           <div className={styles.scaleTicks}>
             <span style={{ left: '0%' }}>0</span>
+            <span style={{ left: pct(config.targetForceN) }}>
+              {config.targetForceN.toFixed(0)}
+            </span>
+            <span style={{ left: pct(config.contactProbingN) }}>
+              {config.contactProbingN.toFixed(0)}
+            </span>
             <span style={{ left: pct(config.warnForceN) }}>{config.warnForceN.toFixed(0)}</span>
             <span style={{ left: pct(config.maxForceN) }}>{config.maxForceN.toFixed(0)}</span>
           </div>
           <div className={styles.scaleKey}>
             <span>
-              <i className={styles.keyWarn} /> WARN {config.warnForceN.toFixed(1)} N
+              <i className={styles.keyMeasured} /> Measured
             </span>
             <span>
-              <i className={styles.keyLimit} /> LIMIT {config.maxForceN.toFixed(1)} N
+              <i className={styles.keyTarget} /> Hold band {config.targetForceN.toFixed(1)} ±
+              {config.targetBandN.toFixed(1)} N
             </span>
             <span>
-              <i className={styles.keyMeasured} /> MEASURED
+              <i className={styles.keyProbing} /> Probing {config.contactProbingN.toFixed(1)} N
+            </span>
+            <span>
+              <i className={styles.keyWarn} /> Warn {config.warnForceN.toFixed(1)} N
+            </span>
+            <span>
+              <i className={styles.keyLimit} /> Limit {config.maxForceN.toFixed(1)} N
             </span>
           </div>
         </div>
@@ -382,33 +418,40 @@ function WrenchPlate({ wrench }: { wrench: WrenchSample | null }) {
   );
 }
 
-function GuidancePlate({ items }: { items: GuidanceItem[] }) {
+/**
+ * Acknowledgement receipt.
+ *
+ * Replaces the old standing guidance panel. Standing text in a corner is read
+ * once and then becomes furniture; the checklist now arrives as a gate the
+ * operator has to dismiss. What remains here is only the record that they did —
+ * which mode, and when.
+ *
+ * Deliberately not interactive: it is a receipt, not a way back into the text.
+ */
+function AcknowledgedLine({
+  acknowledged,
+}: {
+  acknowledged: { topic: GateTopic; at: number } | null;
+}) {
   return (
     <section className="plate">
       <div className="plate__head">
-        <span className="plate__title">Operator guidance</span>
+        <span className="plate__title">Guidance</span>
       </div>
       <div className="plate__body">
-        <ol className={styles.guidance}>
-          {items.slice(0, 3).map((item) => (
-            <li
-              key={item.id}
-              className={
-                item.tone === 'critical'
-                  ? styles.guidanceCritical
-                  : item.tone === 'caution'
-                    ? styles.guidanceCaution
-                    : styles.guidanceInfo
-              }
-            >
-              <span className={styles.guidanceTag}>
-                {item.tone === 'critical' ? 'ACT' : item.tone === 'caution' ? 'NOTE' : 'INFO'}
-              </span>
-              <span className={styles.guidanceText}>{item.text}</span>
-            </li>
-          ))}
-        </ol>
+        <div className="field">
+          <span className="field__label">Acknowledged</span>
+          <span className="field__value num">
+            {acknowledged
+              ? `${GATE_CONTENT[acknowledged.topic].title} · ${formatClock(acknowledged.at)}`
+              : '—'}
+          </span>
+        </div>
       </div>
     </section>
   );
+}
+
+function formatClock(at: number): string {
+  return new Date(at).toLocaleTimeString('en-GB', { hour12: false });
 }

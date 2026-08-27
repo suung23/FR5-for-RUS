@@ -1,9 +1,13 @@
+/* The strip is a pale green band, not a black bar. It still reads as "the
+   machine's own status" because it is the only pale field spanning the full
+   width, and it sits above every white plate. */
 .strip {
   display: flex;
   align-items: stretch;
   height: 30px;
-  background: var(--black);
-  color: var(--white);
+  background: var(--panel-pale);
+  color: var(--ink);
+  border-bottom: 1px solid var(--green);
   flex: 0 0 auto;
   -webkit-app-region: drag;
 }
@@ -18,8 +22,8 @@
   padding: 0 12px;
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.14em;
-  border-right: 1px solid var(--muted);
+  letter-spacing: 0.05em;
+  border-right: 1px solid var(--rule);
   white-space: nowrap;
 }
 
@@ -30,31 +34,31 @@
   align-items: center;
   gap: 7px;
   padding: 0 12px;
-  border-right: 1px solid var(--muted);
+  border-right: 1px solid var(--rule);
   white-space: nowrap;
 }
 
 .fieldLabel {
   font-size: 9px;
   font-weight: 600;
-  letter-spacing: 0.1em;
-  color: var(--rule);
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
 }
 
 .fieldValue {
-  font-family: var(--font-num);
+  font-family: var(--font-ui);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.02em;
-  color: var(--white);
+  color: var(--ink);
 }
 
-/* A bad value is boxed, not coloured — the strip is already black, so an
-   inverted plate is the strongest available emphasis. */
+/* A bad value is outlined, not coloured. The word still says what is wrong;
+   the box only makes it findable at a glance. */
 .fieldValueBad {
+  border: 1px solid var(--critical);
   background: var(--white);
-  color: var(--black);
-  padding: 1px 5px;
+  padding: 0 4px;
 }
 
 .spacer {
@@ -67,20 +71,20 @@
   align-items: center;
   padding: 0 12px;
   font-size: 10px;
-  color: var(--rule);
-  border-left: 1px solid var(--muted);
+  color: var(--ink-soft);
+  border-left: 1px solid var(--rule);
   white-space: nowrap;
 }
 
 .meta .num {
-  color: var(--white);
+  color: var(--ink);
   font-size: 11px;
   margin-right: 3px;
 }
 
 .clock {
   font-size: 11px;
-  color: var(--white);
+  color: var(--ink);
 }
 
 .actions {
@@ -88,21 +92,14 @@
   align-items: center;
   gap: 6px;
   padding: 0 10px;
-  border-left: 1px solid var(--muted);
+  border-left: 1px solid var(--rule);
 }
 
 .actions button {
-  background: var(--black);
-  color: var(--white);
-  border-color: var(--rule);
-}
-
-.actions button:hover {
   background: var(--white);
-  color: var(--black);
+  border-color: var(--green);
 }
 
 .actions button[aria-pressed='true'] {
-  background: var(--white);
-  color: var(--black);
+  background: var(--nav-selected);
 }

@@ -12,6 +12,9 @@ interface ImportMetaEnv {
   readonly VITE_CONTACT_RELEASE_N?: string;
   readonly VITE_WARN_FORCE_N?: string;
   readonly VITE_MAX_FORCE_N?: string;
+  readonly VITE_CONTACT_PROBING_N?: string;
+  readonly VITE_TARGET_FORCE_N?: string;
+  readonly VITE_TARGET_BAND_N?: string;
   readonly VITE_NORMAL_FORCE_SIGN?: string;
 }
 

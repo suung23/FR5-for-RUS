@@ -1,0 +1,46 @@
+# configs/pfus_bladder_edit_man.yaml plus the hydro-extension volume filter.
+#
+# Adds --min-patient-area-ratio 0.022888 (1,500 px at 256 x 256) to the same
+# build, again with test protected:
+#
+#   train  78 -> 50 patients, 10,315 -> 6,563 frames  (63.6% kept)
+#   val    16 ->  9 patients,  2,476 -> 1,424 frames  (57.5% kept)
+#   test   16 -> 16 patients,  2,017 -> 2,017 frames  (untouched)
+#
+#   python scripts/filter_manifest_by_area.py \
+#       --manifest ~/datasets/pfus/manifest_edited.csv \
+#       --output   ~/datasets/pfus/manifest_edit_man_hydro.csv \
+#       --exclude-patients P000,P014,P020,P021,P043,P047,P048,P062,P069 \
+#       --min-patient-area-ratio 0.022888 --protect-splits test \
+#       --report   ~/datasets/pfus/manifest_edit_man_hydro_report.json
+#
+# Why run it at all, given the filter was already measured and reverted
+# ---------------------------------------------------------------------
+# Isolated against the same test set, the volume filter was worth +0.003 Dice
+# for 34% of the frames (docs/filter_report_hydro.html), and configs/
+# pfus_bladder_qc.yaml records that verdict. This run does not relitigate that
+# number; it asks the one question the earlier measurement could not answer --
+# whether the filter behaves differently once the reviewed-bad patients are
+# already gone. Nine of the 24 train patients hydro drops are NOT in the review
+# list, so the two filters are not nested.
+#
+# Read it as an interaction check, not as a candidate recipe: 50 train patients
+# against 74 is a large capacity cut, and a loss here is the expected outcome.
+#
+# The val split falls to 9 patients, so its model-selection signal is noisier
+# than any other run in this comparison. Only the (fixed, 16-patient) test
+# numbers should be compared across runs.
+
+defaults: pfus_bladder_edit_man.yaml
+
+experiment:
+  name: pfus_bladder_edit_man_hydro
+  output_dir: runs/pfus_bladder_edit_man_hydro
+  seed: 42
+
+data:
+  manifest: /home/rosotauser/datasets/pfus/manifest_edit_man_hydro.csv
+  root: /home/rosotauser/datasets/pfus
+
+train:
+  checkpoint_dir: checkpoints/pfus_bladder_edit_man_hydro

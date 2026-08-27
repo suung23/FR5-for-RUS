@@ -31,9 +31,15 @@ interface Props {
  * console that shows a schematic invites the operator to read it as one.
  *
  * Rendered as a technical drawing rather than a product shot — light grey
- * surfaces with black sharp edges. That keeps the strict console palette,
+ * surfaces with near-black sharp edges. That keeps the console palette,
  * separates the arm from the white plate behind it, and makes the form legible
  * without relying on specular highlights the flat lighting does not provide.
+ *
+ * The arm itself stays neutral grey. Deep green appears only on the TCP frame,
+ * the flange path and the contact indication — the three things that are
+ * *state*, not structure. A joint inside ten degrees of its stop gets a heavier
+ * black edge rather than a colour, and the joint table reports the same fact as
+ * a number, so nothing depends on a colour being seen.
  */
 export function Fr5Model({ jointPositions, available, contact }: Props) {
   const poses = useMemo(() => solveChain(jointPositions), [jointPositions]);
@@ -85,7 +91,7 @@ function Part({
     <group position={position as [number, number, number]} quaternion={quaternion}>
       <mesh geometry={geometry} castShadow={false} receiveShadow={false}>
         <meshStandardMaterial
-          color={dimmed ? '#ffffff' : '#d6d9de'}
+          color={dimmed ? '#ffffff' : '#d5ded7'}
           roughness={0.85}
           metalness={0.05}
           // Polygon offset keeps the edge lines from z-fighting with the faces
@@ -97,9 +103,9 @@ function Part({
       </mesh>
       <lineSegments geometry={edges}>
         <lineBasicMaterial
-          color={nearLimit && !dimmed ? '#000000' : dimmed ? '#d6d9de' : '#6b7280'}
+          color={dimmed ? '#d5ded7' : nearLimit ? '#111111' : '#4a4a4a'}
           transparent
-          opacity={nearLimit && !dimmed ? 1 : 0.85}
+          opacity={nearLimit && !dimmed ? 1 : 0.8}
         />
       </lineSegments>
     </group>
@@ -110,9 +116,12 @@ function Part({
  * Tool flange marker.
  *
  * Not a mesh — the probe mount is not modelled and `tool.j6_to_probe` is still
- * unmeasured, so this marks the J6 mounting face and nothing beyond it. The
- * TCP frame is three black rules of different length, since the palette has no
- * room for the usual red/green/blue triad.
+ * unmeasured, so this marks the J6 mounting face and nothing beyond it.
+ *
+ * The TCP frame is drawn in deep green: it is the active tool frame, one of the
+ * three things this palette reserves green for. The three axes are told apart
+ * by length rather than by the usual red/green/blue triad, which the palette
+ * does not allow.
  */
 function Flange({
   pose,
@@ -129,35 +138,27 @@ function Flange({
       position={pose.position.toArray() as [number, number, number]}
       quaternion={pose.quaternion.toArray() as [number, number, number, number]}
     >
-      <TcpAxis to={[0.09, 0, 0]} width={1.6} />
-      <TcpAxis to={[0, 0.065, 0]} width={1.2} />
-      <TcpAxis to={[0, 0, 0.045]} width={1.2} navy />
+      <TcpAxis to={[0.09, 0, 0]} width={1.8} />
+      <TcpAxis to={[0, 0.065, 0]} width={1.3} />
+      <TcpAxis to={[0, 0, 0.045]} width={1.3} />
       {contact ? (
         <mesh rotation={[Math.PI / 2, 0, 0]}>
           <ringGeometry args={[0.046, 0.058, 28]} />
-          <meshBasicMaterial color="#000000" />
+          <meshBasicMaterial color="#1e6b45" />
         </mesh>
       ) : null}
     </group>
   );
 }
 
-function TcpAxis({
-  to,
-  width,
-  navy,
-}: {
-  to: [number, number, number];
-  width: number;
-  navy?: boolean;
-}) {
+function TcpAxis({ to, width }: { to: [number, number, number]; width: number }) {
   return (
     <Line
       points={[
         [0, 0, 0],
         to,
       ]}
-      color={navy ? '#10233f' : '#000000'}
+      color="#1e6b45"
       lineWidth={width}
     />
   );

@@ -15,9 +15,10 @@
   padding: 0 var(--pad);
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.1em;
-  color: var(--navy);
-  border-bottom: 1px solid var(--navy);
+  letter-spacing: 0.05em;
+  color: var(--ink);
+  background: var(--panel-pale);
+  border-bottom: 1px solid var(--green);
 }
 
 .list {
@@ -49,36 +50,33 @@
 }
 
 .item:hover {
-  background: var(--rule);
-  color: var(--black);
+  background: var(--panel-pale);
 }
 
+/* Selection is a muted green field with a deep green left edge. Text stays
+   near-black — the row is found by its field, not by reading a colour. */
 .itemActive,
 .itemActive:hover {
-  background: var(--navy);
-  border-left-color: var(--black);
+  background: var(--nav-selected);
+  border-left-color: var(--green);
 }
 
 .itemLabel {
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.01em;
-  color: var(--black);
+  color: var(--ink);
 }
 
 .itemNote {
   font-size: 9.5px;
   letter-spacing: 0.04em;
-  color: var(--muted);
+  color: var(--ink-soft);
   margin-top: 1px;
 }
 
 .itemActive .itemLabel {
-  color: var(--white);
-}
-
-.itemActive .itemNote {
-  color: var(--rule);
+  font-weight: 700;
 }
 
 /* Count of open warnings. A bordered square, not a pill. */
@@ -92,29 +90,23 @@
   align-items: center;
   justify-content: center;
   padding: 0 3px;
-  font-family: var(--font-num);
+  font-family: var(--font-ui);
   font-size: 10px;
   font-weight: 700;
-  background: var(--black);
-  color: var(--white);
-  border: 1px solid var(--black);
-}
-
-.itemActive .count {
   background: var(--white);
-  color: var(--navy);
-  border-color: var(--white);
+  color: var(--ink);
+  border: 2px solid var(--critical);
 }
 
 .foot {
   flex: 0 0 auto;
   padding: 7px 10px;
-  border-top: 1px solid var(--black);
+  border-top: 1px solid var(--ink);
 }
 
 .footLine {
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.14em;
-  color: var(--black);
+  letter-spacing: 0.05em;
+  color: var(--ink);
 }

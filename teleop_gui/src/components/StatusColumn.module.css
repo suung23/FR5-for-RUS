@@ -6,7 +6,7 @@
   gap: var(--panel-gap);
   min-height: 0;
   overflow: hidden;
-  background: var(--black);
+  background: var(--rule);
   border-left: 1px solid var(--rule);
 }
 
@@ -37,7 +37,7 @@
   padding: 5px var(--pad) 6px;
   font-size: 9.5px;
   line-height: 1.4;
-  color: var(--muted);
+  color: var(--ink-soft);
   border-top: 1px solid var(--rule);
 }
 
@@ -60,19 +60,19 @@
   font-weight: 600;
   line-height: 1;
   letter-spacing: -0.03em;
-  color: var(--black);
+  color: var(--ink);
 }
 
-/* Over the limit the reading itself inverts. Size and inversion, not hue. */
+/* Over the limit the reading is boxed in dark red. The digits stay near-black
+   so the number is readable even if the outline is not seen. */
 .forceValueAlarm {
-  background: var(--black);
-  color: var(--white);
+  border: 2px solid var(--critical);
   padding: 0 5px;
 }
 
 .forceUnit {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--ink-soft);
 }
 
 .forcePeak {
@@ -85,8 +85,8 @@
 .peakLabel {
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.1em;
-  color: var(--muted);
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
 }
 
 .forcePeak .num {
@@ -97,61 +97,16 @@
   padding-bottom: 13px;
 }
 
-.track {
-  position: relative;
-  height: 13px;
-  border: 1px solid var(--black);
-  background: var(--white);
-}
-
 /* The measured value is the only navy element on the plate. */
-.bar {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  background: var(--navy);
-}
-
 .warnRule,
 .limitRule,
-.peakRule {
-  position: absolute;
-  top: -2px;
-  bottom: -2px;
-}
-
-.warnRule {
-  width: 1px;
-  background: var(--muted);
-}
-
-.limitRule {
-  width: 2px;
-  margin-left: -1px;
-  background: var(--black);
-}
-
-/* Peak hold: an open tick that stays after the bar recedes. */
-.peakRule {
-  width: 1px;
-  background: var(--black);
-  top: -4px;
-  bottom: 50%;
-}
-
-.scaleTicks {
-  position: relative;
-  height: 11px;
-}
-
 .scaleTicks span {
   position: absolute;
   top: 3px;
-  font-family: var(--font-num);
+  font-family: var(--font-ui);
   font-size: 8.5px;
   letter-spacing: 0.04em;
-  color: var(--muted);
+  color: var(--ink-soft);
   white-space: nowrap;
   transform: translateX(-50%);
 }
@@ -162,7 +117,7 @@
 
 .scaleTicks span:last-child {
   transform: translateX(-70%);
-  color: var(--black);
+  color: var(--ink);
 }
 
 /* ---- tables -------------------------------------------------------------- */
@@ -174,11 +129,12 @@
 }
 
 .table thead th {
+  background: var(--panel-pale);
   font-size: 8.5px;
   font-weight: 700;
-  letter-spacing: 0.09em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--muted);
+  color: var(--ink-soft);
   text-align: right;
   padding: 4px var(--pad) 3px;
   border-bottom: 1px solid var(--rule);
@@ -201,7 +157,7 @@
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.05em;
-  color: var(--muted);
+  color: var(--ink-soft);
   padding: 2px var(--pad);
   width: 34px;
 }
@@ -209,7 +165,7 @@
 .table td {
   text-align: right;
   padding: 2px var(--pad);
-  color: var(--black);
+  color: var(--ink);
 }
 
 .wide {
@@ -219,14 +175,14 @@
 .unit {
   width: 34px;
   font-size: 8.5px;
-  color: var(--muted);
+  color: var(--ink-soft);
   text-align: left !important;
   padding-left: 4px !important;
 }
 
 /* A joint near its stop gets a heavier row rule and a printed tag. */
 .rowNear {
-  border-left: 2px solid var(--black);
+  border-left: 2px solid var(--ink);
 }
 
 .nearTag {
@@ -236,8 +192,8 @@
   font-family: var(--font-ui);
   font-size: 8px;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  border: 1px solid var(--black);
+  letter-spacing: 0.04em;
+  border: 1px solid var(--ink);
 }
 
 .tableNote {
@@ -245,7 +201,7 @@
   padding: 5px var(--pad) 6px;
   font-size: 9px;
   line-height: 1.4;
-  color: var(--muted);
+  color: var(--ink-soft);
   border-top: 1px solid var(--rule);
 }
 
@@ -257,16 +213,16 @@
   font-family: var(--font-ui);
   font-size: 8.5px;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.05em;
 }
 
 .inlineTag {
   background: var(--white);
-  color: var(--black);
+  color: var(--ink);
 }
 
 .inlineTagLight {
-  border: 1px solid var(--black);
+  border: 1px solid var(--ink);
 }
 
 /* ---- guidance ------------------------------------------------------------ */
@@ -288,21 +244,20 @@
   border-bottom: none;
 }
 
+/* Critical guidance is outlined in dark red; the sentence stays near-black so
+   it reads the same in a monochrome print. */
 .guidanceCritical {
-  background: var(--black);
-}
-
-.guidanceCritical .guidanceText,
-.guidanceCritical .guidanceTag {
-  color: var(--white);
+  border-left: 3px solid var(--critical);
+  padding-left: calc(var(--pad) - 3px);
+  background: var(--panel-pale);
 }
 
 .guidanceCritical .guidanceTag {
-  border-color: var(--white);
+  border: 2px solid var(--critical);
 }
 
 .guidanceCaution {
-  border-left: 2px solid var(--black);
+  border-left: 2px solid var(--ink);
   padding-left: calc(var(--pad) - 2px);
 }
 
@@ -315,34 +270,23 @@
   flex: 0 0 auto;
   height: 13px;
   padding: 0 4px;
-  border: 1px solid var(--black);
+  border: 1px solid var(--ink);
   font-size: 8px;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.05em;
   line-height: 12px;
-  color: var(--black);
+  color: var(--ink);
 }
 
 .guidanceInfo .guidanceTag {
   border-color: var(--rule);
-  color: var(--muted);
+  color: var(--ink-soft);
 }
 
 .guidanceText {
   font-size: 10px;
   line-height: 1.38;
-  color: var(--black);
-}
-
-/* Legend for the force scale. The rules are barely a newton apart, so their
-   names live here rather than on the axis where they collided. */
-.scaleKey {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  padding-top: 7px;
-  border-top: 1px solid var(--rule);
-  margin-top: 3px;
+  color: var(--ink);
 }
 
 .scaleKey span {
@@ -351,8 +295,8 @@
   gap: 5px;
   font-size: 8.5px;
   font-weight: 600;
-  letter-spacing: 0.07em;
-  color: var(--muted);
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
   white-space: nowrap;
 }
 
@@ -361,21 +305,6 @@
   width: 10px;
   height: 8px;
   flex: 0 0 auto;
-}
-
-.keyWarn {
-  border-left: 1px solid var(--muted);
-  margin-left: 4px;
-}
-
-.keyLimit {
-  border-left: 2px solid var(--black);
-  margin-left: 4px;
-}
-
-.keyMeasured {
-  background: var(--navy);
-  height: 6px;
 }
 
 /* Sensor link quality. Only shown when the PX6D is read directly — the figures
@@ -396,31 +325,159 @@
 
 .sensorItem .num {
   font-size: 11px;
-  color: var(--black);
+  color: var(--ink);
 }
 
 .sensorLabel {
   font-size: 8.5px;
   font-weight: 700;
-  letter-spacing: 0.1em;
-  color: var(--muted);
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
 }
 
-/* A bad link inverts rather than colouring. */
+/* A bad link is outlined rather than filled. */
 .sensorBad {
-  background: var(--black);
+  border: 1px solid var(--critical);
   padding: 0 4px;
-}
-
-.sensorBad .sensorLabel,
-.sensorBad .num {
-  color: var(--white);
 }
 
 .sensorNote {
   margin-left: auto;
   font-size: 8.5px;
   font-weight: 700;
-  letter-spacing: 0.09em;
-  color: var(--muted);
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
 }
+
+
+/* ---- force gauge ---------------------------------------------------------
+   A white scale with black rules. The measured value is a deep-green marker,
+   the target is a black marker inside a pale grey band. Nothing is filled with
+   green: green marks *where the value is*, not *how much of something* is
+   used. */
+
+.track {
+  position: relative;
+  height: 15px;
+  border: 1px solid var(--ink);
+  background: var(--white);
+}
+
+/* Safe operating band the regulator holds inside. */
+.safeBand {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--rule);
+}
+
+.targetMark,
+.probingMark,
+.warnMark,
+.limitMark,
+.peakMark,
+.measuredMark {
+  position: absolute;
+}
+
+/* Target: a black tick through the band. */
+.targetMark {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--ink);
+}
+
+/* Mode transition: a short black tick from the top edge. */
+.probingMark {
+  top: 0;
+  height: 5px;
+  width: 1px;
+  background: var(--ink);
+}
+
+/* Thresholds are dashed black, matching the trend chart's rules so the same
+   line means the same thing in both places. */
+.warnMark,
+.limitMark {
+  top: -1px;
+  bottom: -1px;
+  width: 0;
+  border-left: 1px dashed var(--ink);
+}
+
+.limitMark {
+  border-left-width: 2px;
+}
+
+/* Peak hold: an open tick below the scale that stays after the value falls. */
+.peakMark {
+  bottom: -4px;
+  height: 6px;
+  width: 1px;
+  background: var(--ink-soft);
+}
+
+/* The measurement. The one deep-green element on the plate. */
+.measuredMark {
+  top: -3px;
+  bottom: -3px;
+  width: 3px;
+  margin-left: -1.5px;
+  background: var(--green);
+}
+
+.scaleTicks {
+  position: relative;
+  height: 12px;
+}
+
+.scaleTicks span {
+  position: absolute;
+  top: 3px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+.scaleTicks span:first-child {
+  transform: none;
+}
+
+.scaleTicks span:last-child {
+  transform: translateX(-80%);
+  color: var(--ink);
+}
+
+.scaleKey {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 10px;
+  padding-top: 7px;
+  border-top: 1px solid var(--rule);
+  margin-top: 4px;
+}
+
+.scaleKey span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9.5px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.scaleKey i {
+  display: inline-block;
+  width: 12px;
+  height: 8px;
+  flex: 0 0 auto;
+}
+
+.keyMeasured { background: var(--green); width: 3px; }
+.keyTarget { background: var(--rule); border-left: 1px solid var(--ink); }
+.keyProbing { border-left: 1px solid var(--ink); margin-left: 5px; }
+.keyWarn { border-left: 1px dashed var(--ink); margin-left: 5px; }
+.keyLimit { border-left: 2px dashed var(--ink); margin-left: 4px; }

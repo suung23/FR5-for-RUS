@@ -19,7 +19,7 @@ interface Props {
 
 type Series = 'normal' | 'components';
 
-const AXIS_STYLE = { fontSize: 9.5, fill: '#6b7280', fontFamily: 'var(--font-num)' };
+const AXIS_STYLE = { fontSize: 9.5, fill: '#4a4a4a', fontFamily: 'Arial, Helvetica, sans-serif' };
 
 /**
  * Rolling force trend.
@@ -72,39 +72,39 @@ export function ForceTrend({ history }: Props) {
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={data} margin={{ top: 10, right: 42, bottom: 2, left: -8 }}>
-              <CartesianGrid stroke="#d6d9de" strokeDasharray="0" vertical={false} />
+              <CartesianGrid stroke="#d5ded7" strokeDasharray="0" vertical={false} />
               <XAxis
                 dataKey="age"
                 type="number"
                 domain={[-20, 0]}
                 ticks={[-20, -15, -10, -5, 0]}
-                tickFormatter={(v: number) => (v === 0 ? 'NOW' : `${-v}s`)}
-                stroke="#6b7280"
+                tickFormatter={(v: number) => (v === 0 ? 'now' : `${-v}s`)}
+                stroke="#4a4a4a"
                 tick={AXIS_STYLE}
                 tickLine={false}
-                axisLine={{ stroke: '#000000' }}
+                axisLine={{ stroke: '#111111' }}
               />
               <YAxis
                 domain={domain}
                 width={42}
-                stroke="#6b7280"
+                stroke="#4a4a4a"
                 tick={AXIS_STYLE}
                 tickLine={false}
                 axisLine={false}
                 tickFormatter={(v: number) => v.toFixed(0)}
-                label={{ value: 'N', position: 'insideTopLeft', offset: -2, fill: '#6b7280', fontSize: 9 }}
+                label={{ value: 'N', position: 'insideTopLeft', offset: -2, fill: '#4a4a4a', fontSize: 9 }}
               />
               <Tooltip
                 isAnimationActive={false}
-                cursor={{ stroke: '#000000', strokeWidth: 1 }}
+                cursor={{ stroke: '#111111', strokeWidth: 1 }}
                 contentStyle={{
                   background: '#ffffff',
-                  border: '1px solid #000000',
+                  border: '1px solid #1e6b45',
                   fontSize: 11,
-                  fontFamily: 'var(--font-num)',
+                  fontFamily: 'Arial, Helvetica, sans-serif',
                   padding: '4px 7px',
                 }}
-                labelStyle={{ color: '#000000' }}
+                labelStyle={{ color: '#111111' }}
                 labelFormatter={(v) => `${Math.abs(Number(v)).toFixed(1)} s ago`}
                 formatter={(value: number, name: string) => [`${value.toFixed(3)} N`, name]}
               />
@@ -113,22 +113,23 @@ export function ForceTrend({ history }: Props) {
                 <>
                   <ReferenceLine
                     y={config.warnForceN}
-                    stroke="#6b7280"
+                    stroke="#111111"
                     strokeDasharray="5 3"
                     strokeWidth={1}
-                    label={{ value: 'WARN', position: 'right', fill: '#6b7280', fontSize: 9 }}
+                    label={{ value: 'Warn', position: 'right', fill: '#111111', fontSize: 9 }}
                   />
                   <ReferenceLine
                     y={config.maxForceN}
-                    stroke="#000000"
-                    strokeWidth={1.4}
-                    label={{ value: 'LIMIT', position: 'right', fill: '#000000', fontSize: 9 }}
+                    stroke="#111111"
+                    strokeDasharray="2 2"
+                    strokeWidth={1.6}
+                    label={{ value: 'Limit', position: 'right', fill: '#111111', fontSize: 9 }}
                   />
                   <Line
                     type="linear"
                     dataKey="fn"
                     name="Fn"
-                    stroke="#10233f"
+                    stroke="#1e6b45"
                     strokeWidth={1.5}
                     dot={false}
                     isAnimationActive={false}
@@ -136,12 +137,12 @@ export function ForceTrend({ history }: Props) {
                 </>
               ) : (
                 <>
-                  <ReferenceLine y={0} stroke="#000000" strokeWidth={1} />
-                  <Line type="linear" dataKey="fx" name="Fx" stroke="#000000" strokeWidth={1.1}
+                  <ReferenceLine y={0} stroke="#111111" strokeWidth={1} />
+                  <Line type="linear" dataKey="fx" name="Fx" stroke="#111111" strokeWidth={1.1}
                         dot={false} isAnimationActive={false} />
-                  <Line type="linear" dataKey="fy" name="Fy" stroke="#6b7280" strokeWidth={1.1}
+                  <Line type="linear" dataKey="fy" name="Fy" stroke="#4a4a4a" strokeWidth={1.1}
                         dot={false} isAnimationActive={false} />
-                  <Line type="linear" dataKey="fz" name="Fz" stroke="#10233f" strokeWidth={1.5}
+                  <Line type="linear" dataKey="fz" name="Fz" stroke="#1e6b45" strokeWidth={1.5}
                         dot={false} isAnimationActive={false} />
                 </>
               )}

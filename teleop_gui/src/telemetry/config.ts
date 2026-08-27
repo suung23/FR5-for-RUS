@@ -34,6 +34,11 @@ export interface AppConfig {
   contactReleaseN: number;
   warnForceN: number;
   maxForceN: number;
+  /** Force at which the control stack drops to contact-probing limits. */
+  contactProbingN: number;
+  /** Force the robot holds once in contact probing, and the band around it. */
+  targetForceN: number;
+  targetBandN: number;
   normalForceSign: number;
 }
 
@@ -93,12 +98,16 @@ export function loadConfig(): AppConfig {
     rosJointTopic: str('VITE_ROS_JOINT_TOPIC', '/fr5_right/joint_states'),
     rosWrenchTopic: str('VITE_ROS_WRENCH_TOPIC', '/fr5_right/wrench'),
 
-    // probe.yaml: safety.max_normal_force_n = 7.0, warn_normal_force_n = 6.0,
-    // watchdog.retreat_until_force_n = 0.2, ft_sensor.normal_force_sign = -1.0.
+    // probe.yaml: safety.max_normal_force_n = 10.0, warn_normal_force_n = 9.0,
+    // teleop.contact_probing_force_n = 8.0, watchdog.retreat_until_force_n = 0.2,
+    // ft_sensor.normal_force_sign = -1.0.
     contactEnterN: num('VITE_CONTACT_ENTER_N', 7.0),
     contactReleaseN: num('VITE_CONTACT_RELEASE_N', 0.2),
-    warnForceN: num('VITE_WARN_FORCE_N', 6.0),
-    maxForceN: num('VITE_MAX_FORCE_N', 7.0),
+    warnForceN: num('VITE_WARN_FORCE_N', 9.0),
+    maxForceN: num('VITE_MAX_FORCE_N', 10.0),
+    contactProbingN: num('VITE_CONTACT_PROBING_N', 8.0),
+    targetForceN: num('VITE_TARGET_FORCE_N', 5.0),
+    targetBandN: num('VITE_TARGET_BAND_N', 0.5),
     normalForceSign: num('VITE_NORMAL_FORCE_SIGN', -1.0),
   };
 }

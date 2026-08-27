@@ -1,9 +1,13 @@
 /*
  * Console frame.
  *
- * Black canvas, white plates, 1px seams. The three columns are fixed-purpose:
- * navigation left, workspace centre, numbers right — so an operator's hand and
- * eye learn one place for each kind of question and never hunt.
+ * White throughout, with 1px rules where plates meet. The three columns are
+ * fixed-purpose: navigation left, workspace centre, numbers right — so an
+ * operator's hand and eye learn one place for each kind of question and never
+ * hunt.
+ *
+ * There is no dark canvas between plates any more, so separation comes from
+ * the rules and from each plate's pale green header band.
  */
 
 .console {
@@ -11,7 +15,7 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: var(--black);
+  background: var(--white);
 }
 
 .main {
@@ -19,7 +23,7 @@
   min-height: 0;
   display: flex;
   align-items: stretch;
-  background: var(--black);
+  background: var(--rule);
 }
 
 .workspace {
@@ -29,7 +33,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--panel-gap);
-  background: var(--black);
+  background: var(--white);
 }
 
 /* The lower panel sizes to its content and the workspace absorbs everything
@@ -73,13 +77,28 @@
   height: 24px;
   padding: 0 12px;
   background: var(--white);
-  border-bottom: 1px solid var(--black);
+  border-bottom: 1px solid var(--ink);
   font-size: 10.5px;
-  color: var(--black);
+  color: var(--ink);
 }
 
 @media (max-width: 1240px) {
   .main {
     overflow-x: auto;
   }
+}
+
+/* Everything the gate blocks. `inert` on this wrapper takes the whole console
+   out of the tab order and out of pointer events in one place, so no panel can
+   forget to opt in. Telemetry keeps flowing — only interaction stops. */
+.stack {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.stack[inert] {
+  pointer-events: none;
+  user-select: none;
 }

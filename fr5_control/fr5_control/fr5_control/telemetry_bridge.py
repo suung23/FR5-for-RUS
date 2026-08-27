@@ -33,8 +33,9 @@ import time
 
 import rclpy
 from geometry_msgs.msg import Pose, WrenchStamped
+from std_msgs.msg import String
 from rclpy.node import Node
-from rclpy.qos import QoSPresetProfiles
+from rclpy.qos import DurabilityPolicy, QoSPresetProfiles, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import JointState
 
 #: 관절이 이보다 느리면 정지로 본다 [rad/s]. 컨트롤러는 teleop 여부를 말해 주지
@@ -56,6 +57,13 @@ class TelemetryBridge(Node):
         self.declare_parameter("bridge.wrench_hz", 50.0)
         self.declare_parameter("bridge.px6d_port", "")
         self.declare_parameter("bridge.px6d_baud", 921600)
+        # PX6D 직결 값을 ROS 로도 낸다. 제어 스택이 실제 힘을 볼 수 있는 유일한 길이다.
+        #
+        # us_servo 가 이미 {ns}/wrench 를 내므로 **다른 토픽**을 쓴다. 같은 토픽에
+        # 발행자가 둘이면 구독자는 컨트롤러의 0 과 PX6D 값을 번갈아 받게 되고, 그
+        # 섞임은 로그에 드러나지 않는다.
+        self.declare_parameter("bridge.publish_wrench", True)
+        self.declare_parameter("bridge.wrench_topic", "wrench_px6d")
 
         self.robot_name = self.get_parameter("robot.name").value
         ns = f"/{self.robot_name}"
@@ -77,8 +85,29 @@ class TelemetryBridge(Node):
         self.create_subscription(Pose, f"{ns}/ee_wrt_base", self._on_pose, 10)
         self.create_subscription(WrenchStamped, f"{ns}/wrench", self._on_wrench, sensor_qos)
 
+        self._mode = None
+        # 발행자가 TRANSIENT_LOCAL 이므로 구독도 맞춘다. 안 맞추면 QoS 불일치로
+        # 아예 연결되지 않는다 — 조용히, 오류 없이.
+        self.create_subscription(
+            String,
+            f"{ns}/probing_mode",
+            self._on_mode,
+            QoSProfile(
+                depth=1,
+                reliability=ReliabilityPolicy.RELIABLE,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            ),
+        )
+
+        self.wrench_pub = None
+        if bool(self.get_parameter("bridge.publish_wrench").value):
+            topic = f"{ns}/{self.get_parameter('bridge.wrench_topic').value}"
+            self.wrench_pub = self.create_publisher(WrenchStamped, topic, 10)
+            self._wrench_frame = f"{self.robot_name}_ft_sensor"
+            self.get_logger().info(f"PX6D wrench 발행: {topic}")
+
         self.get_logger().info(
-            f"구독: {ns}/joint_states · {ns}/ee_wrt_base · {ns}/wrench"
+            f"구독: {ns}/joint_states · {ns}/ee_wrt_base · {ns}/wrench · {ns}/probing_mode"
         )
 
         px6d_port = str(self.get_parameter("bridge.px6d_port").value)
@@ -97,6 +126,12 @@ class TelemetryBridge(Node):
     def _on_pose(self, msg: Pose) -> None:
         with self._lock:
             self._pose = msg
+
+    def _on_mode(self, msg: String) -> None:
+        """로봇이 선언한 프로빙 모드. 콘솔이 추측하지 않게 그대로 전달한다."""
+        if msg.data != self._mode:
+            self.get_logger().info(f"프로빙 모드: {msg.data}")
+        self._mode = msg.data
 
     def _on_wrench(self, msg: WrenchStamped) -> None:
         # 컨트롤러 경유 값은 PX6D 직결이 없을 때만 쓴다. 둘 다 있으면 직결이 이긴다 —
@@ -172,11 +207,13 @@ class TelemetryBridge(Node):
                             stamps.append(now)
                             while stamps and now - stamps[0] > 1.0:
                                 stamps.pop(0)
+                            values = frame.wrench()
                             with self._lock:
-                                self._wrench = frame.wrench()
+                                self._wrench = values
                                 self._wrench_at = now
                                 self._px6d_crc = parser.crc_errors - crc_base
                                 self._px6d_hz = float(len(stamps))
+                            self._publish_wrench(values)
             except Exception as exc:  # 케이블이 빠져도 노드는 살아 있어야 한다
                 self.get_logger().warn(
                     f"PX6D 읽기 실패 ({exc}) — 2 초 뒤 재시도", throttle_duration_sec=5.0
@@ -184,6 +221,17 @@ class TelemetryBridge(Node):
                 with self._lock:
                     self._wrench_source = "none"
                 time.sleep(2.0)
+
+    def _publish_wrench(self, values) -> None:
+        """PX6D 값을 ROS 토픽으로. 제어 스택이 이것을 보고 모드를 바꾼다."""
+        if self.wrench_pub is None:
+            return
+        msg = WrenchStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = self._wrench_frame
+        msg.wrench.force.x, msg.wrench.force.y, msg.wrench.force.z = values[0:3]
+        msg.wrench.torque.x, msg.wrench.torque.y, msg.wrench.torque.z = values[3:6]
+        self.wrench_pub.publish(msg)
 
     # -- 프레임 조립 -------------------------------------------------------
 
@@ -217,6 +265,9 @@ class TelemetryBridge(Node):
             # 컨트롤러는 teleop 여부를 말해 주지 않는다. 움직임에서 추론한 값이며
             # safetyState 는 추론하지 않는다 — 안전 상태를 지어내면 안 된다.
             frame["robotState"] = "teleop" if moving else "idle"
+
+        if self._mode:
+            frame["probingMode"] = self._mode
 
         if pose is not None:
             frame["tcpPose"] = {

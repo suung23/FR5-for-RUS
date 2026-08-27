@@ -4,12 +4,13 @@
   align-items: stretch;
   height: 92px;
   background: var(--white);
-  border-top: 1px solid var(--rule);
+  border-top: 1px solid var(--green);
 }
 
 .logHead {
   flex: 0 0 auto;
   width: 148px;
+  background: var(--panel-pale);
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -21,14 +22,14 @@
 .logTitle {
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.11em;
-  color: var(--navy);
+  letter-spacing: 0.04em;
+  color: var(--ink);
 }
 
 .logCount {
-  font-family: var(--font-num);
+  font-family: var(--font-ui);
   font-size: 10px;
-  color: var(--muted);
+  color: var(--ink-soft);
 }
 
 .list {
@@ -56,44 +57,40 @@
   border-bottom: none;
 }
 
+/* Alarm rows are outlined, not filled. The text stays near-black so the line
+   reads identically in a monochrome print. */
 .alarm {
-  background: var(--black);
-}
-
-.alarm .time,
-.alarm .source,
-.alarm .text {
-  color: var(--white);
+  border-left: 3px solid var(--critical);
+  padding-left: calc(var(--pad) - 3px);
+  background: var(--panel-pale);
 }
 
 .alarm .severity {
-  background: var(--white);
-  color: var(--black);
-  border-color: var(--white);
+  border: 2px solid var(--critical);
 }
 
 .empty {
   font-size: 9.5px;
   font-weight: 600;
-  letter-spacing: 0.12em;
-  color: var(--muted);
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
   align-items: center !important;
 }
 
 .time {
   flex: 0 0 auto;
   font-size: 10px;
-  color: var(--muted);
+  color: var(--ink-soft);
 }
 
 .severity {
   flex: 0 0 auto;
   padding: 0 4px;
-  border: 1px solid var(--black);
+  border: 1px solid var(--ink);
   font-size: 8px;
   font-weight: 700;
-  letter-spacing: 0.09em;
-  color: var(--black);
+  letter-spacing: 0.04em;
+  color: var(--ink);
 }
 
 .source {
@@ -101,15 +98,15 @@
   width: 54px;
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--muted);
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
 }
 
 .text {
   flex: 1 1 auto;
   min-width: 0;
   font-size: 10.5px;
-  color: var(--black);
+  color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -133,19 +130,18 @@
 .metaLabel {
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.1em;
-  color: var(--muted);
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
 }
 
 .metaValue {
   font-size: 13px;
   font-weight: 600;
-  color: var(--black);
+  color: var(--ink);
 }
 
 .metaStale {
-  background: var(--black);
-  color: var(--white);
+  border: 1px solid var(--critical);
   padding: 0 4px;
 }
 
@@ -154,7 +150,7 @@
   line-height: 1.4;
   font-weight: 600;
   letter-spacing: 0.05em;
-  color: var(--black);
-  border-top: 1px solid var(--black);
+  color: var(--ink);
+  border-top: 1px solid var(--ink);
   padding-top: 4px;
 }

@@ -1,0 +1,71 @@
+# ABLATION: configs/pfus_bladder_edit.yaml with P033's manual edit REVERTED.
+#
+# Reason, measured not assumed: on the model-blind appearance audit
+# (experiments/label_review/verify_edited_appearance.py, the same frame_stats
+# the exclusion rule uses) P034 and P097 improve after the manual pass
+# (label-interior-vs-ring contrast +8.1 and +9.5) while P033 gets WORSE (-4.9),
+# and the loss is concentrated in a contiguous run around frames 73-108 where
+# the hand contour is drawn outside the anechoic core rather than inside the
+# over-inclusive original. 76 of P033's 145 edited frames lose contrast.
+#
+# This run keeps P033 entirely at its ORIGINAL label (all 188 frames), so the
+# difference against pfus_bladder_edit isolates that one patient's edit.
+#
+# Original header follows.
+# ---------------------------------------------------------------------------
+# Standard U-Net on PFUS1 with the hand-corrected bladder labels.
+#
+# configs/pfus_bladder.yaml with ONE change -- the manifest. Model, splits,
+# augmentation, loss, optimizer, schedule and seed are byte-identical, so the
+# difference against checkpoints/pfus_bladder/best.pt is the label correction
+# and nothing else.
+#
+# What the corrected manifest contains
+# ------------------------------------
+# Three patients were re-labelled by hand in experiments/label_review/mask_editor
+# (2026-08-25/26), after the 2026-08-25 review found their GT swallowing bright
+# tissue outside the anechoic lumen:
+#
+#   P033  train  145/188 frames edited   mean IoU(orig, edit) 0.728   area x1.010
+#   P034  train  157/158 frames edited   mean IoU(orig, edit) 0.851   area x0.934
+#   P097  test    73/ 73 frames edited   mean IoU(orig, edit) 0.648   area x0.654
+#
+# The editor writes only frames a human touched, so the 44 untouched frames of
+# P033 and P034 are DROPPED rather than kept at their original label: keeping
+# them would teach two different lumen boundaries for the same anatomy in the
+# same patient. 14,852 -> 14,808 rows. Built by:
+#
+#   python3 experiments/label_review/build_edited_manifest.py
+#
+# THREE CAVEATS that must travel with any number from this config
+# ---------------------------------------------------------------
+#   1. Only 2 of 78 train patients are corrected (302 of 10,359 train frames,
+#      2.9%). The training signal is still overwhelmingly the original
+#      over-inclusive convention; do not read a small Dice move as evidence that
+#      the label definition has been fixed.
+#   2. The test GT changed for P097, so the headline is NOT comparable with
+#      docs/eval_report_pfus_bladder.html or FINAL_PERFORMANCE.md. Compare only
+#      against a baseline scored on THIS manifest
+#      (runs/labeledit/eval_base_editGT).
+#   3. Nine edited frames carry 1-15 px brush specks beside the main mask. At
+#      the 256 x 256 working resolution these are sub-pixel; they are recorded
+#      in manifest_edited_report.json and deliberately not cleaned, because
+#      silently editing a human's annotation is worse than a sub-pixel speck.
+
+defaults: pfus_bladder.yaml
+
+experiment:
+  name: pfus_bladder_edit_noP033
+  output_dir: runs/pfus_bladder_edit_noP033
+  seed: 42
+
+data:
+  manifest: /home/rosotauser/datasets/pfus/manifest_edited_noP033.csv
+  root: /home/rosotauser/datasets/pfus   # the edited manifest mixes masks/ and
+                                         # masks_edited/ relative paths
+
+split:
+  strategy: manifest             # the rebuild preserves the split column verbatim
+
+train:
+  checkpoint_dir: checkpoints/pfus_bladder_edit_noP033

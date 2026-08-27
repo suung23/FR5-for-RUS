@@ -105,7 +105,7 @@ function GroundPlan() {
         <Line
           key={i}
           points={points}
-          color="#d6d9de"
+          color="#d5ded7"
           lineWidth={i % 2 === 0 ? 1 : 0.6}
         />
       ))}
@@ -113,22 +113,22 @@ function GroundPlan() {
   );
 }
 
-/** Flange path over the recent past, drawn as a thin navy polyline. */
+/** Flange path over the recent past — deep green, one of the three state axes. */
 function Trajectory({ points }: { points: [number, number, number][] }) {
   if (points.length < 2) return null;
-  return <Line points={points} color="#10233f" lineWidth={1.2} dashed={false} />;
+  return <Line points={points} color="#1e6b45" lineWidth={1.2} dashed={false} />;
 }
 
 function ScaleBar({ contact, available }: { contact: boolean; available: boolean }) {
   return (
     <div className={styles.scaleBar}>
-      <span className={styles.scaleItem}>GRID 100 mm</span>
-      <span className={styles.scaleItem}>TCP FRAME: LONG=X · MID=Y · NAVY=Z</span>
-      <span className={styles.scaleItem}>PATH 10 s</span>
+      <span className={styles.scaleItem}>Grid 100 mm</span>
+      <span className={styles.scaleItem}>TCP frame: long = X · mid = Y · short = Z</span>
+      <span className={styles.scaleItem}>Path 10 s</span>
       <span className={styles.scaleSpacer} />
       {available ? (
         <span className={contact ? 'tag tag--strong' : 'tag tag--off'}>
-          {contact ? 'CONTACT RING SHOWN' : 'NO CONTACT'}
+          {contact ? 'Contact indicated' : 'No contact'}
         </span>
       ) : null}
       <span className={styles.caveat}>Flange shown — tool transform unmeasured</span>

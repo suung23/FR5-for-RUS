@@ -22,9 +22,12 @@ from geometry_msgs.msg import PoseStamped, Twist, WrenchStamped
 from rclpy.node import Node
 from scipy.spatial.transform import Rotation
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Bool, Float32MultiArray
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from std_msgs.msg import Bool, Float32MultiArray, String
 
 from fr5_ik.dls_solver import DlsSolver
+from fr5_ik.force_regulator import ForceRegulator
+from fr5_ik.probing_mode import ProbingModeSwitch
 from fr5_ik.teleop_frame import TeleopFrameMapper
 
 JOINT_NAMES = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
@@ -87,8 +90,39 @@ class UsDiffIkNode(Node):
         self.retreat_force = float(self.get_parameter("watchdog.retreat_until_force_n").value)
         self.max_retreat = float(self.get_parameter("watchdog.max_retreat_s").value)
 
-        self.max_linear = float(self.get_parameter("safety.max_linear_vel_m_s").value)
-        self.max_angular = float(self.get_parameter("safety.max_angular_vel_rad_s").value)
+        # 접근 상한. freespace:=true 면 launch 가 덮어쓴 값이 여기로 들어온다.
+        self.approach_linear = float(self.get_parameter("safety.max_linear_vel_m_s").value)
+        self.approach_angular = float(self.get_parameter("safety.max_angular_vel_rad_s").value)
+        self.contact_linear = float(
+            self.get_parameter("safety.contact.max_linear_vel_m_s").value
+        )
+        self.contact_angular = float(
+            self.get_parameter("safety.contact.max_angular_vel_rad_s").value
+        )
+        # 지금 쓰는 상한. 모드가 바뀌면 이 둘만 갈아 끼운다.
+        self.max_linear = self.approach_linear
+        self.max_angular = self.approach_angular
+
+        self.allow_teleop_lateral = bool(
+            self.get_parameter("contact_control.allow_teleop_lateral").value
+        )
+        self.regulator = ForceRegulator(
+            target_force_n=float(self.get_parameter("contact_control.target_force_n").value),
+            deadband_n=float(self.get_parameter("contact_control.deadband_n").value),
+            admittance_b_z=float(self.get_parameter("contact_control.admittance_b_z").value),
+            max_speed_m_s=self.contact_linear,
+            warn_force_n=float(self.get_parameter("safety.warn_normal_force_n").value),
+            max_force_n=float(self.get_parameter("safety.max_normal_force_n").value),
+            retreat_speed_m_s=float(
+                self.get_parameter("contact_control.retreat_speed_m_s").value
+            ),
+        )
+        self.regulator_reason = ""
+
+        self.mode_switch = ProbingModeSwitch(
+            enter_force_n=float(self.get_parameter("teleop.contact_probing_force_n").value),
+            confirm_s=float(self.get_parameter("teleop.contact_probing_confirm_s").value),
+        )
         self.normal_sign = float(self.get_parameter("ft_sensor.normal_force_sign").value)
 
         # 병진 기준 프레임. "latched" 가 표류를 없애는 쪽, "probe" 가 예전 거동이다.
@@ -124,7 +158,8 @@ class UsDiffIkNode(Node):
         ns = f"/{self.robot_name}"
         self.create_subscription(JointState, f"{ns}/joint_states", self._on_joints, 10)
         self.create_subscription(Twist, f"{ns}/desired_twist", self._on_twist, 10)
-        self.create_subscription(WrenchStamped, f"{ns}/wrench", self._on_wrench, 10)
+        wrench_topic = f"{ns}/{self.get_parameter('ft_sensor.wrench_topic').value}"
+        self.create_subscription(WrenchStamped, wrench_topic, self._on_wrench, 10)
         # 스타일러스 자세. teleop 이 데드맨을 잡고 있는 동안에만 발행하므로,
         # **발행이 끊겼다 다시 오는 것 자체가 재파지 신호**다 (별도 토픽이 필요 없다).
         side = str(self.robot_name).rsplit("_", 1)[-1]
@@ -134,6 +169,22 @@ class UsDiffIkNode(Node):
 
         self.velocity_pub = self.create_publisher(JointState, f"{ns}/joint_velocity_cmds", 10)
         self.error_pub = self.create_publisher(Float32MultiArray, "/diag/twist_tracking_error", 10)
+        # 콘솔이 로봇의 **선언된** 모드를 볼 수 있어야 한다. GUI 가 자기 판정으로
+        # 추측하면 로봇이 실제로 쓰는 상한과 어긋날 수 있다. latched 로 내보내
+        # 늦게 붙은 구독자도 현재 모드를 즉시 받는다.
+        # TRANSIENT_LOCAL. 모드는 전환할 때만 발행하므로, 늦게 붙는 구독자가
+        # volatile 이면 다음 전환까지 아무것도 못 받는다 — 단방향 전환이라 그
+        # "다음" 이 영영 안 올 수도 있다. 콘솔 브리지를 재시작하면 로봇이 이미 접촉
+        # 프로빙인데 화면은 접근으로 보이게 된다.
+        self.mode_pub = self.create_publisher(
+            String,
+            f"{ns}/probing_mode",
+            QoSProfile(
+                depth=1,
+                reliability=ReliabilityPolicy.RELIABLE,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            ),
+        )
         self.retreat_pub = self.create_publisher(Bool, "/diag/retreating", 10)
 
         self.create_timer(1.0 / self.rate_hz, self._control_loop)
@@ -142,15 +193,20 @@ class UsDiffIkNode(Node):
             f"twist ZOH 유지 {self.twist_hold * 1000:.0f} ms → 감쇠 → "
             f"워치독 {self.twist_timeout * 1000:.0f} ms → 프로브 −z 후퇴"
         )
+        self.get_logger().info(f"wrench 구독: {wrench_topic}")
         # 클램프를 기동 로그에 찍는다. 이 값이 안 보이면 freespace 인자를 빠뜨렸는지
         # 조작감만으로는 구분할 수 없다 — teleop 스케일을 아무리 올려도 여기서 잘리므로
         # "스케일이 안 먹는다" 로만 나타난다. 실제로 그 혼동이 있었다 (2026-08-19).
         self.get_logger().info(
-            f"속도 클램프: 병진 {self.max_linear * 1000:.0f} mm/s · "
-            f"회전 {self.max_angular:.2f} rad/s"
-            + ("   ← 접촉용 한계다. 자유공간이면 freespace:=true 를 빠뜨린 것이다"
-               if self.max_linear <= 0.02 else "")
+            f"속도 클램프: 접근 {self.approach_linear * 1000:.0f} mm/s · "
+            f"{self.approach_angular:.2f} rad/s  →  접촉 "
+            f"{self.contact_linear * 1000:.0f} mm/s · {self.contact_angular:.2f} rad/s "
+            f"(F_n {self.mode_switch.enter_force_n:.1f} N 에서 전환, 단방향)"
+            + ("   ← 접근 상한이 이미 접촉용이다. freespace:=true 를 빠뜨린 것이다"
+               if self.approach_linear <= 0.02 else "")
         )
+        # 늦게 붙는 구독자(콘솔 브리지)가 현재 모드를 즉시 받도록 한 번 낸다.
+        self._publish_mode()
         # 병진 기준이 무엇인지 안 찍으면, 축이 어긋났을 때 원인을 조작감으로만
         # 판단하게 된다 — 2026-08-21 에 실제로 그렇게 시간을 썼다.
         self.get_logger().info(
@@ -174,8 +230,29 @@ class UsDiffIkNode(Node):
         self.declare_parameter("ik.tracking_error_linear_m_s", 0.002)
         self.declare_parameter("ik.tracking_error_angular_rad_s", 0.05)
 
+        self.declare_parameter("safety.warn_normal_force_n", 9.0)
+        self.declare_parameter("safety.max_normal_force_n", 10.0)
         self.declare_parameter("safety.max_linear_vel_m_s", 0.010)
         self.declare_parameter("safety.max_angular_vel_rad_s", 0.2)
+
+        # 접촉 프로빙 상한. launch 의 freespace 오버라이드가 safety.max_* 를 덮어써도
+        # 이쪽은 건드리지 않는다 — 두 벌이 동시에 있어야 런타임에 전환할 수 있다.
+        self.declare_parameter("safety.contact.max_linear_vel_m_s", 0.010)
+        self.declare_parameter("safety.contact.max_angular_vel_rad_s", 0.2)
+
+        # 이 힘을 넘으면 접촉 프로빙으로 넘어간다. 단방향이다.
+        self.declare_parameter("teleop.contact_probing_force_n", 8.0)
+        self.declare_parameter("teleop.contact_probing_confirm_s", 0.02)
+
+        # 접촉 프로빙에서 로봇이 스스로 잡는 힘. §7 admittance 의 첫 구현이다.
+        self.declare_parameter("contact_control.target_force_n", 5.0)
+        self.declare_parameter("contact_control.deadband_n", 0.5)
+        self.declare_parameter("contact_control.admittance_b_z", 1000.0)
+        self.declare_parameter("contact_control.retreat_speed_m_s", 0.005)
+        # 접촉 프로빙에서 조작자의 병진·회전을 그대로 통과시킬지. 기본은 거짓 —
+        # 로봇이 힘만 잡고 나머지는 정지한다. policy 가 영상축을 맡기 전까지
+        # 조작자가 미끄러뜨리며 쓰고 싶으면 켠다.
+        self.declare_parameter("contact_control.allow_teleop_lateral", False)
 
         self.declare_parameter("watchdog.twist_timeout_s", 0.1)
         self.declare_parameter("watchdog.twist_hold_s", 0.04)
@@ -185,6 +262,9 @@ class UsDiffIkNode(Node):
         self.declare_parameter("watchdog.max_retreat_s", 3.0)
 
         self.declare_parameter("ft_sensor.normal_force_sign", -1.0)
+        # 어느 wrench 를 볼 것인가. 우리 PX6D 는 컨트롤러에 안 물리므로 기본
+        # `wrench`(us_servo 발행)는 0 이다. probe.yaml 이 `wrench_px6d` 를 준다.
+        self.declare_parameter("ft_sensor.wrench_topic", "wrench")
 
         # teleop 노드와 **같은** probe.yaml 항목을 읽는다. 값이 갈라지면 병진이
         # 조용히 90° 틀어지므로, 여기서 따로 기본값을 만들지 않는다.
@@ -290,8 +370,42 @@ class UsDiffIkNode(Node):
             )
 
     def _on_wrench(self, msg: WrenchStamped) -> None:
+        now = self.get_clock().now()
+        previous = self.wrench_stamp
         self.normal_force = self.normal_sign * msg.wrench.force.z
-        self.wrench_stamp = self.get_clock().now()
+        self.wrench_stamp = now
+
+        # 모드 판정은 힘이 들어오는 순간에 한다. 제어 루프(100 Hz)에 맡기면 센서가
+        # 그보다 빨리 올 때 문턱을 넘는 순간을 지나칠 수 있다.
+        dt = 0.0 if previous is None else (now - previous).nanoseconds / 1e9
+        was_contact = self.mode_switch.in_contact_probing
+        self.mode_switch.update(self.normal_force, dt)
+        if self.mode_switch.in_contact_probing and not was_contact:
+            self._enter_contact_probing()
+
+    def _enter_contact_probing(self) -> None:
+        """접촉 프로빙으로 넘어간다. 상한을 갈아 끼우고 알린다.
+
+        단방향이다 — 힘이 다시 떨어져도 접근 상한으로 돌아가지 않는다. 프로브를 살짝
+        떼는 것은 접촉 작업의 일부이지 작업의 끝이 아니고, 그때마다 상한이 15 배로
+        뛰면 같은 손동작에 로봇 반응이 달라진다.
+        """
+        self.max_linear = self.contact_linear
+        self.max_angular = self.contact_angular
+        self.get_logger().warn(
+            f"접촉 프로빙 전환 — F_n {self.normal_force:.2f} N "
+            f"(문턱 {self.mode_switch.enter_force_n:.1f} N). "
+            f"속도 상한 {self.approach_linear * 1000:.0f} → "
+            f"{self.contact_linear * 1000:.0f} mm/s · "
+            f"{self.approach_angular:.2f} → {self.contact_angular:.2f} rad/s. "
+            f"되돌아가지 않는다 — 접근 속도가 다시 필요하면 세션을 새로 시작하라."
+        )
+        self._publish_mode()
+
+    def _publish_mode(self) -> None:
+        msg = String()
+        msg.data = self.mode_switch.mode
+        self.mode_pub.publish(msg)
 
     # -- 제어 ------------------------------------------------------------
 
@@ -359,6 +473,48 @@ class UsDiffIkNode(Node):
             self._retreat_announced = True
         return np.array([0.0, 0.0, -self.retreat_speed, 0.0, 0.0, 0.0])
 
+    def _apply_force_regulation(self, twist: np.ndarray) -> np.ndarray:
+        """접촉 프로빙에서 침투축을 로봇이 잡는다.
+
+        접근 모드에서는 아무것도 하지 않는다 — 그때 z 는 조작자의 것이다.
+
+        접촉 프로빙에서는 **z 를 조절기가 덮어쓴다.** 조작자가 누르는 깊이를 맞추는
+        것이 아니라, 목표 힘 구간에 들어오도록 로봇이 스스로 움직인다. 나머지 다섯
+        축은 기본적으로 0 이다 (``contact_control.allow_teleop_lateral`` 로 켤 수 있다)
+        — policy 가 영상축을 맡기 전까지는 미끄러뜨릴 주체가 없고, 힘을 잡는 동안
+        옆으로 흐르면 그 힘이 무엇에 대한 힘인지 알 수 없게 된다.
+
+        **데드맨은 그대로 살아 있다.** 이 함수는 twist 가 신선할 때만 불린다. 조작자가
+        손을 놓으면 상위 워치독이 후퇴를 맡고 여기는 아예 안 온다 — 자율 모드라고
+        해서 조작자가 멈출 수단을 잃지는 않는다.
+
+        wrench 가 오래되면 조절하지 않는다. 힘을 모르는 채로 힘을 잡을 수는 없다.
+        """
+        if not self.mode_switch.in_contact_probing:
+            return twist
+
+        now = self.get_clock().now()
+        wrench_fresh = (
+            self.wrench_stamp is not None
+            and (now - self.wrench_stamp).nanoseconds / 1e9 < 0.5
+        )
+        if not wrench_fresh:
+            self.regulator_reason = "wrench 두절 — 힘 조절 중단, 정지"
+            self.get_logger().error(
+                "접촉 프로빙 중 wrench 두절 — 힘 축을 놓는다", throttle_duration_sec=1.0
+            )
+            return np.zeros(6)
+
+        out = self.regulator.update(self.normal_force)
+        self.regulator_reason = out.reason
+
+        regulated = np.zeros(6)
+        if self.allow_teleop_lateral:
+            regulated = np.array(twist, dtype=float)
+            regulated[2] = 0.0
+        regulated[2] = out.v_z
+        return regulated
+
     def _remap_twist(self, twist: np.ndarray) -> np.ndarray:
         """지령을 표류하지 않는 고정 프레임으로 옮긴다 (fr5_ik.teleop_frame 참조).
 
@@ -420,6 +576,7 @@ class UsDiffIkNode(Node):
             self.retreat_started = None
             twist = self._clamp(self.twist_cmd) * self._hold_fade(now)
             twist = self._remap_twist(twist)
+            twist = self._apply_force_regulation(twist)
             self.retreat_pub.publish(Bool(data=False))
 
         try:

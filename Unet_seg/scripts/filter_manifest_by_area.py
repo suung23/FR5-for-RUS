@@ -162,6 +162,16 @@ def get_args() -> argparse.Namespace:
              "justified independently of the model's own score is circular.",
     )
     parser.add_argument(
+        "--protect-splits",
+        default=None,
+        help="Comma-separated splits that NO filter may touch, e.g. 'test'. Every "
+             "patient in a protected split is kept whatever its volume or its name. "
+             "Use it when the point of the run is to change training data while the "
+             "evaluation set stays byte-identical to previous runs -- a filter that "
+             "also removes the hardest test patients raises the headline without "
+             "improving anything.",
+    )
+    parser.add_argument(
         "--report",
         default=None,
         help="Optional JSON file recording every kept/dropped patient and its median area",
@@ -203,11 +213,14 @@ def main() -> int:
             f"{sorted(unknown)}. Check for a typo rather than silently dropping nothing."
         )
 
+    protected_splits = {s.strip() for s in (args.protect_splits or "").split(",") if s.strip()}
+    protected = {r.patient_id for r in manifest if (r.split or "unassigned") in protected_splits}
+
     _, patient_medians = compute_patient_areas(manifest, args.workers)
     threshold = float(args.min_patient_area_ratio)
     keep = {
         p for p, median in patient_medians.items()
-        if median >= threshold and p not in excluded
+        if (median >= threshold and p not in excluded) or p in protected
     }
     dropped = sorted(set(manifest.patients) - keep)
 
@@ -219,6 +232,14 @@ def main() -> int:
         logger.info("Volume filter disabled (--min-patient-area-ratio 0)")
     if excluded:
         logger.info("Excluded by name: %s", sorted(excluded))
+    if protected_splits:
+        spared = sorted((excluded | {p for p, m in patient_medians.items() if m < threshold})
+                        & protected)
+        logger.info(
+            "Protected split(s) %s: %d patients kept, of which %d would otherwise "
+            "have been dropped: %s",
+            sorted(protected_splits), len(protected), len(spared), spared,
+        )
     logger.info(
         "Keeping %d/%d patients, dropping %d",
         len(keep), len(manifest.patients), len(dropped),
@@ -249,6 +270,11 @@ def main() -> int:
             "min_patient_area_ratio": threshold,
             "min_patient_area_px_at_256": threshold * PX_AT_256,
             "excluded_patients": sorted(excluded),
+            "protected_splits": sorted(protected_splits),
+            "protected_patients_spared": sorted(
+                (excluded | {p for p, m in patient_medians.items() if m < threshold})
+                & protected
+            ),
             "splits": stats,
             "kept_patients": {
                 p: {"median_area_ratio": patient_medians[p],

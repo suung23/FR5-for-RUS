@@ -1,4 +1,6 @@
+import { config } from '../config';
 import type {
+  ProbingMode,
   RobotState,
   SafetyState,
   Transport,
@@ -45,6 +47,8 @@ export class SimulationTransport implements Transport {
   private contactForce = 0;
   /** Latched safety level, so the state does not chatter at the threshold. */
   private safety: SafetyState = 'normal';
+  /** Velocity-limit mode. One-way, mirroring the control stack. */
+  private probing: ProbingMode = 'approach';
 
   start(sink: TransportSink): void {
     this.t0 = Date.now();
@@ -114,7 +118,11 @@ export class SimulationTransport implements Transport {
       // Living permanently in protective stop would be just as wrong — it
       // teaches the operator to ignore the colour that matters most.
       const ramp = Math.min(1, held / 1.5);
-      const firm = held > 9 ? Math.min(1, (held - 9) / 1.2) * 2.3 : 0;
+      // The firm episode has to clear the contact-probing threshold, so it is
+      // sized from the configured value rather than a constant that would
+      // silently stop exercising the transition when the threshold moves.
+      const firmPeak = config.contactProbingN - 3.9 - 1.55 + 1.2;
+      const firm = held > 9 ? Math.min(1, (held - 9) / 1.2) * Math.max(0, firmPeak) : 0;
       // Light episode sits at F_n ~5.3 N with a narrow wobble so it stays
       // clearly inside the working band; the firm episode is what crosses.
       this.contactForce =
@@ -151,15 +159,23 @@ export class SimulationTransport implements Transport {
     // cannot produce.
     const robotState: RobotState = this.phase === 'idle' ? 'idle' : 'teleop';
     // Hysteresis on the declared safety level. A bare comparison flaps every
-    // few samples while the force oscillates around 6 N, and each flap would be
-    // a line in the event log — which is how a log stops being read.
+    // few samples while the force oscillates near a threshold, and each flap
+    // would be a line in the event log — which is how a log stops being read.
+    //
+    // Thresholds come from the configuration, not from constants: a simulator
+    // that keeps announcing a protective stop at a limit the console no longer
+    // uses teaches the operator to distrust both.
     const fn = -fz;
-    if (fn >= 7.0) this.safety = 'protective_stop';
-    else if (fn >= 6.0) {
+    const { warnForceN, maxForceN, contactProbingN } = config;
+    if (fn >= maxForceN) this.safety = 'protective_stop';
+    else if (fn >= warnForceN) {
       if (this.safety !== 'protective_stop') this.safety = 'warning';
-    } else if (fn < 5.0) this.safety = 'normal';
-    else if (fn < 6.6 && this.safety === 'protective_stop') this.safety = 'warning';
+    } else if (fn < warnForceN - 1.0) this.safety = 'normal';
     const safetyState: SafetyState = this.safety;
+
+    // The control stack's mode switch is one-way; mirror that here so the
+    // console's gate and its VELOCITY LIMITS field are exercised.
+    if (fn >= contactProbingN) this.probing = 'contact_probing';
 
     sink.onTelemetry({
       timestamp: now,
@@ -168,6 +184,7 @@ export class SimulationTransport implements Transport {
       jointVelocities: this.velocities,
       robotState,
       safetyState,
+      probingMode: this.probing,
     });
     sink.onStatus({ lastFrameAt: now });
   }

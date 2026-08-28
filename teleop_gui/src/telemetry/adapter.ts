@@ -25,11 +25,18 @@ export interface AdapterListeners {
  * point: swapping the simulator for a live rosbridge must change where the
  * numbers come from and nothing about what they mean.
  *
- * The adapter is **receive-only by construction**. There is no `send`, and no
- * transport implements one. Commanding the arm belongs to the ROS 2 stack that
- * owns the velocity clamps and the watchdogs; a monitoring window that could
- * also drive the robot would put a second, unguarded path to the hardware on
- * the same screen as the readouts meant to make it safe.
+ * The adapter **never commands robot motion**. Two things it can send, neither
+ * of which moves anything: a calibration command — capture at the pose the
+ * operator has already moved to, fit, save — and the operator's station, which
+ * only says which way to read a hand motion the operator is already making.
+ * Commanding the arm belongs to the ROS 2 stack that owns the velocity clamps
+ * and the watchdogs; a monitoring window that could also drive the robot would
+ * put a second, unguarded path to the hardware on the same screen as the
+ * readouts meant to make it safe.
+ *
+ * The channel exists because the procedure has to say "capture now" from
+ * somewhere, and the operator is at this screen. Its boundary is enforced by
+ * what the bridge accepts, not only by what this sends.
  */
 export class RobotTelemetryAdapter {
   private transport: Transport | null = null;
@@ -74,6 +81,17 @@ export class RobotTelemetryAdapter {
         this.listeners.onTelemetry({ timestamp: Date.now(), connected: false });
       }
     }, 500);
+  }
+
+  /**
+   * Send a console command. Never a motion command.
+   *
+   * Returns false when the transport has no back channel — the simulator and
+   * the polling transports do not, and the UI has to say so rather than
+   * pretending a capture started.
+   */
+  sendCommand(command: Record<string, unknown>): boolean {
+    return this.transport?.sendCommand?.(command) ?? false;
   }
 
   stop(): void {

@@ -301,3 +301,87 @@ def test_rotation_falls_back_to_passthrough_before_first_engage():
     mapper = TeleopFrameMapper(TIP_ROLL)
     cmd = np.array([0.1, -0.2, 0.3])
     assert mapper.to_probe(cmd, np.eye(3), np.eye(3)) == pytest.approx(cmd)
+
+
+# ---- 조작자 위치 (미러) 2026-08-27 -----------------------------------------
+#
+# 마주보고 서면 조작자의 앞은 로봇의 뒤이고 조작자의 오른쪽은 로봇의 왼쪽이다.
+# 고치는 것은 base 수직축 둘레 180° 회전 하나이며, **반사가 아니다** — 반사는
+# 좌우만 뒤집고 앞뒤는 두는데, 반대편으로 걸어가면 둘 다 뒤집힌다.
+
+
+def test_facing_flips_both_horizontal_axes_and_keeps_penetration():
+    """마주보기는 앞뒤·좌우를 함께 뒤집고 침투축은 건드리지 않는다."""
+    beside = TeleopFrameMapper(TIP_ROLL)
+    facing = TeleopFrameMapper(TIP_ROLL, operator_yaw_deg=180.0)
+    rot_base_probe = rot_x(math.pi)          # 프로브가 아래를 본다 (실제 자세)
+    stylus = rot_z(0.3)
+    for mapper in (beside, facing):
+        mapper.engage(rot_base_probe, stylus)
+
+    cmd = np.array([0.02, 0.01, 0.005])       # 임의의 손 지령
+    v_beside = beside.to_base(cmd, stylus)
+    v_facing = facing.to_base(cmd, stylus)
+
+    assert v_facing[0] == pytest.approx(-v_beside[0], abs=1e-12)   # base x 뒤집힘
+    assert v_facing[1] == pytest.approx(-v_beside[1], abs=1e-12)   # base y 뒤집힘
+    assert v_facing[2] == pytest.approx(v_beside[2], abs=1e-12)    # 높이는 그대로
+
+
+def test_operator_rotation_is_a_rotation_not_a_reflection():
+    """det = +1 이어야 한다. 반사면 각속도가 거울상으로 망가진다."""
+    for yaw in (0.0, 90.0, 180.0, -37.0):
+        mapper = TeleopFrameMapper(TIP_ROLL, operator_yaw_deg=yaw)
+        mapper.engage(rot_x(math.pi), np.eye(3))
+        assert np.linalg.det(mapper.latched) == pytest.approx(1.0)
+
+
+def test_change_waits_for_the_next_grip():
+    """조작 중에는 안 바뀐다 — 같은 손동작에 로봇이 반대로 가면 안 된다."""
+    mapper = TeleopFrameMapper(TIP_ROLL)
+    stylus = rot_z(0.2)
+    mapper.engage(rot_x(math.pi), stylus)
+    before = mapper.to_base(np.array([1.0, 0.0, 0.0]), stylus)
+
+    assert mapper.request_operator_yaw(180.0) is True
+    assert mapper.pending_yaw_deg == 180.0
+    # 파지가 이어지는 동안은 예약만 되어 있고 지령은 그대로다.
+    assert mapper.to_base(np.array([1.0, 0.0, 0.0]), stylus) == pytest.approx(before)
+
+    mapper.engage(rot_x(math.pi), stylus)     # 놓았다 다시 잡았다
+    assert mapper.pending_yaw_deg is None
+    assert mapper.operator_yaw_deg == 180.0
+    assert mapper.to_base(np.array([1.0, 0.0, 0.0]), stylus) == pytest.approx(-before)
+
+
+def test_changing_the_station_does_not_relatch_the_session_axis():
+    """조작자 각도만 갈아 끼운다. 요청하지 않은 축 이동이 함께 일어나면 안 된다."""
+    mapper = TeleopFrameMapper(TIP_ROLL)
+    stylus = rot_z(0.2)
+    mapper.engage(rot_x(math.pi), stylus)
+    latched_before = mapper.latched.copy()
+
+    mapper.request_operator_yaw(90.0)
+    mapper.engage(rot_z(1.1) @ rot_x(math.pi), rot_z(0.9))   # 자세가 달라진 채로 재파지
+
+    expected = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]) @ latched_before
+    assert mapper.latched == pytest.approx(expected, abs=1e-12)
+
+
+def test_body_axes_get_the_same_station_rotation():
+    """기준을 고정하지 않는 축도 같이 뒤집힌다. 병진만 뒤집히면 축이 갈라진다."""
+    mapper = TeleopFrameMapper(TIP_ROLL, operator_yaw_deg=180.0)
+    rot_base_probe = rot_x(math.pi)
+    cmd = np.array([0.3, -0.2, 0.1])
+    out = mapper.to_probe_body(cmd, rot_base_probe)
+    # base 수직축 둘레 180° 를 프로브 축에서 본 것. 프로브가 뒤집혀 있으므로
+    # 프로브 z 는 그대로이고 x·y 가 뒤집힌다.
+    assert out == pytest.approx([-0.3, 0.2, 0.1], abs=1e-12)
+
+
+def test_zero_station_is_bit_for_bit_the_old_behaviour():
+    """0° 는 지금까지의 거동이어야 한다 — 곱셈 한 번도 끼어들지 않는다."""
+    mapper = TeleopFrameMapper(TIP_ROLL)
+    cmd = np.array([0.11, -0.22, 0.33])
+    assert mapper.to_probe_body(cmd, rot_z(0.7)) is not None
+    assert mapper.to_probe_body(cmd, rot_z(0.7)) == pytest.approx(cmd, abs=0.0)

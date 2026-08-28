@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { JOINT_LIMITS_DEG, JOINT_NAMES, jointTravelFraction, marginToLimit } from '../telemetry/fr5Model';
+import { fixed, signed } from '../lib/format';
 import type { RobotTelemetry } from '../telemetry/types';
 import styles from './JointRates.module.css';
 
@@ -67,14 +68,13 @@ export function JointRates({ telemetry, available }: Props) {
               return (
                 <tr key={row.name} className={near ? styles.near : undefined}>
                   <th scope="row">{row.name}</th>
+                  {/* Position and rate both cross zero, so both carry a sign
+                      at all times — see lib/format. Margin cannot go negative
+                      and keeps its width without one. */}
+                  <td className="num">{signed(row.positionDeg, 2)}</td>
+                  <td className="num">{signed(row.rateDeg, 1)}</td>
                   <td className="num">
-                    {row.positionDeg === undefined ? '—' : row.positionDeg.toFixed(2)}
-                  </td>
-                  <td className="num">
-                    {row.rateDeg === undefined ? '—' : row.rateDeg.toFixed(1)}
-                  </td>
-                  <td className="num">
-                    {row.marginDeg === undefined ? '—' : row.marginDeg.toFixed(1)}
+                    {fixed(row.marginDeg, 1)}
                     {near ? <span className={styles.tag}>LIM</span> : null}
                   </td>
                   <td>

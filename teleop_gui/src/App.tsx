@@ -1,15 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { EventLog } from './components/EventLog';
 import { GuidanceGate } from './components/GuidanceGate';
 import { ForceTrend } from './components/ForceTrend';
 import { JointRates } from './components/JointRates';
 import { ModeTimeline } from './components/ModeTimeline';
 import { NavRail, viewFromHash, type ConsoleView } from './components/NavRail';
+import { OperatorFrame } from './components/OperatorFrame';
 import { SafetyPanel } from './components/SafetyPanel';
+import { SensorCalibration } from './components/SensorCalibration';
 import { StatusColumn } from './components/StatusColumn';
 import { StatusStrip } from './components/StatusStrip';
 import { Workspace } from './components/Workspace';
-import { GateTrigger, type GateTopic } from './telemetry/guidanceGate';
 import { isStale } from './store/selectors';
 import { logEvent } from './store/events';
 import { subscribeEvents } from './store/events';
@@ -22,42 +23,35 @@ export function App() {
   const contact = useTelemetryStore((s) => s.contact);
   const link = useTelemetryStore((s) => s.link);
   const history = useTelemetryStore((s) => s.history);
+  const waveformHz = useTelemetryStore((s) => s.waveformHz);
   const trajectory = useTelemetryStore((s) => s.trajectory);
   const peak = useTelemetryStore((s) => s.peakNormalForceN);
   const frameRateHz = useTelemetryStore((s) => s.frameRateHz);
   const paused = useTelemetryStore((s) => s.paused);
   const setPaused = useTelemetryStore((s) => s.setPaused);
   const resetSession = useTelemetryStore((s) => s.resetSession);
+  const sendCommand = useTelemetryStore((s) => s.sendCommand);
+  const forceZero = useTelemetryStore((s) => s.forceZero);
+  const zeroForce = useTelemetryStore((s) => s.zeroForce);
+  const clearForceZero = useTelemetryStore((s) => s.clearForceZero);
 
   // The selected view lives in the URL hash. A reload — or a crash and restart
   // mid-procedure — returns to the panel the operator was on rather than to a
   // default they then have to re-select.
-  // Guidance gate. One is owed at startup and on each transition that changes
-  // what the operator must watch; the console stays inert until acknowledged.
-  const triggerRef = useRef(new GateTrigger());
-  const [gate, setGate] = useState<GateTopic | null>(() =>
-    triggerRef.current.initialTopic(),
-  );
-  const [acknowledged, setAcknowledged] = useState<{ topic: GateTopic; at: number } | null>(
-    null,
-  );
-
-  useEffect(() => {
-    const owed = triggerRef.current.observe({
-      robotState: telemetry.robotState,
-      safetyState: telemetry.safetyState,
-      probingMode: telemetry.probingMode,
-    });
-    if (owed) setGate(owed);
-  }, [telemetry.robotState, telemetry.safetyState, telemetry.probingMode]);
+  // Operator briefing. Shown once at startup and never again — the console
+  // stays inert until it is acknowledged. It does not re-arm on mode changes:
+  // an overlay that reappears mid-procedure covers the live state at the moment
+  // the operator is reacting to it, and gets dismissed unread.
+  const [gate, setGate] = useState(true);
+  const [acknowledged, setAcknowledged] = useState<{ at: number } | null>(null);
 
   const acknowledge = useCallback(() => {
-    setGate((current) => {
-      if (current) {
-        setAcknowledged({ topic: current, at: Date.now() });
-        logEvent('GUIDANCE', `acknowledged — ${current.replace(/_/g, ' ')}`);
+    setGate((open) => {
+      if (open) {
+        setAcknowledged({ at: Date.now() });
+        logEvent('GUIDANCE', 'operator briefing acknowledged');
       }
-      return null;
+      return false;
     });
   }, []);
 
@@ -87,7 +81,7 @@ export function App() {
   // ticks is briefly "in the future". Clamp rather than show a negative age.
   const ageMs = telemetry.timestamp === 0 ? null : Math.max(0, now - telemetry.timestamp);
 
-  const blocked = gate !== null;
+  const blocked = gate;
 
   return (
     <div className={styles.console}>
@@ -128,17 +122,40 @@ export function App() {
                 available={available}
                 contactPhase={contact.phase}
                 trajectory={trajectory}
+                // Frames belong to the views that are about frames. On the
+                // monitoring view they would sit on top of the force reading
+                // the operator is there to watch.
+                showFrames={view === 'calibration' || view === 'contact'}
               />
             </div>
             <div
-              className={`${styles.lower} ${view === 'monitoring' ? styles.lowerChart : ''}`}
+              className={`${styles.lower} ${
+              view === 'monitoring' ? styles.lowerChart : ''
+            } ${view === 'calibration' || view === 'safety' ? styles.lowerTall : ''}`}
             >
-              {view === 'monitoring' ? <ForceTrend history={history} /> : null}
+              {view === 'monitoring' ? (
+                <ForceTrend history={history} waveformHz={waveformHz} />
+              ) : null}
               {view === 'teleoperation' ? (
-                <JointRates telemetry={telemetry} available={available} />
+                <>
+                  <OperatorFrame
+                    telemetry={telemetry}
+                    available={available}
+                    onCommand={sendCommand}
+                  />
+                  <JointRates telemetry={telemetry} available={available} />
+                </>
               ) : null}
               {view === 'contact' ? <ModeTimeline history={history} contact={contact} /> : null}
-              {view === 'safety' ? (
+              {view === 'calibration' ? (
+              <SensorCalibration
+                telemetry={telemetry}
+                wrench={wrench}
+                available={available}
+                onCommand={sendCommand}
+              />
+            ) : null}
+            {view === 'safety' ? (
                 <SafetyPanel telemetry={telemetry} contact={contact} available={available} />
               ) : null}
             </div>
@@ -152,13 +169,16 @@ export function App() {
             available={available}
             acknowledged={acknowledged}
             frameCount={history.length}
+            forceZero={forceZero}
+            onZeroForce={zeroForce}
+            onClearForceZero={clearForceZero}
           />
         </div>
 
           <EventLog ageMs={ageMs} stale={stale} />
       </div>
 
-      {gate ? <GuidanceGate topic={gate} onAcknowledge={acknowledge} /> : null}
+      {gate ? <GuidanceGate onAcknowledge={acknowledge} /> : null}
     </div>
   );
 }

@@ -47,6 +47,21 @@
   margin: 14px 0 18px;
 }
 
+/* Three checklists in one briefing, so the sections need to separate without
+   adding a second kind of rule — the section heading carries the break. */
+.section + .section {
+  margin-top: 20px;
+}
+
+.sectionTitle {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
 .list {
   margin: 0;
   padding: 0;
@@ -112,7 +127,7 @@
 }
 
 .key {
-  font-family: var(--font-mono);
+  font-family: var(--font-num);
   font-size: 12.5px;
   font-weight: 700;
   color: var(--ink);

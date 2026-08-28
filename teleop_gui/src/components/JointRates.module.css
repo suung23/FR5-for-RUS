@@ -14,7 +14,7 @@
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--ink-soft);
+  color: var(--ink);
   text-align: right;
   padding: 5px var(--pad) 4px;
   border-bottom: 1px solid var(--rule);
@@ -49,7 +49,7 @@
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.05em;
-  color: var(--ink-soft);
+  color: var(--ink);
   padding: 5px var(--pad);
   width: 40px;
 }
@@ -115,7 +115,7 @@
 
 .limits {
   font-size: 9.5px;
-  color: var(--ink-soft);
+  color: var(--ink);
   text-align: right;
   white-space: nowrap;
 }

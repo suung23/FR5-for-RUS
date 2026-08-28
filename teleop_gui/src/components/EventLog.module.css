@@ -29,7 +29,7 @@
 .logCount {
   font-family: var(--font-ui);
   font-size: 10px;
-  color: var(--ink-soft);
+  color: var(--ink);
 }
 
 .list {
@@ -73,14 +73,14 @@
   font-size: 9.5px;
   font-weight: 600;
   letter-spacing: 0.05em;
-  color: var(--ink-soft);
+  color: var(--ink);
   align-items: center !important;
 }
 
 .time {
   flex: 0 0 auto;
   font-size: 10px;
-  color: var(--ink-soft);
+  color: var(--ink);
 }
 
 .severity {
@@ -99,7 +99,7 @@
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.04em;
-  color: var(--ink-soft);
+  color: var(--ink);
 }
 
 .text {
@@ -131,7 +131,7 @@
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.05em;
-  color: var(--ink-soft);
+  color: var(--ink);
 }
 
 .metaValue {

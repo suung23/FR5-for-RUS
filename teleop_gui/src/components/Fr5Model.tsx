@@ -1,7 +1,7 @@
 import { Line } from '@react-three/drei';
 import { useLoader } from '@react-three/fiber';
 import { Suspense, useMemo } from 'react';
-import { BufferGeometry, EdgesGeometry } from 'three';
+import { BufferGeometry } from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import {
   BASE_MESH,
@@ -10,57 +10,72 @@ import {
   solveChain,
   type LinkPose,
 } from '../telemetry/fr5Model';
+import { ProbeAssembly, STACK } from './ProbeAssembly';
 
 const MESH_URL = (name: string) => `./models/fr5/${name}.stl`;
 
-/** Sharp-edge threshold. Below this the STL's tessellation shows as noise. */
-const EDGE_ANGLE_DEG = 32;
+/** Painted link housings. */
+const SHELL = '#f4f5f2';
+/** Joint collars and interface hardware. */
+const ORANGE = '#e86f24';
+/** Recessed detail and mechanical edges. */
+const GRAPHITE = '#4a4a46';
+/** Deep green — reserved for state, never for structure. */
+const ACTIVE = '#17683a';
 
 interface Props {
   jointPositions?: number[];
   available: boolean;
   contact: boolean;
+  /** Draw the probe and sensor coordinate frames. Off outside the views that
+   *  are about frames, because three triads at the tool crowd the viewport. */
+  showFrames?: boolean;
 }
 
 /**
- * The real FR5, drawn from Fairino's own `fairino_description` meshes.
+ * The FR5, drawn from Fairino's own `fairino_description` meshes.
  *
  * Seven STL parts placed on the URDF chain: the arm on screen is the arm in
- * the cell, at the joint angles the bridge reported. The earlier capsule
- * stand-in was honest about the joint angles but not about the machine, and a
- * console that shows a schematic invites the operator to read it as one.
+ * the cell, at the joint angles the bridge reported.
  *
- * Rendered as a technical drawing rather than a product shot — light grey
- * surfaces with near-black sharp edges. That keeps the console palette,
- * separates the arm from the white plate behind it, and makes the form legible
- * without relying on specular highlights the flat lighting does not provide.
+ * Shaded as the machine rather than as a drawing. The earlier version traced
+ * every sharp edge in near-black over flat grey faces, which read as a pencil
+ * sketch — legible as a diagram, but it invited the operator to take the
+ * viewport as a schematic. Painted housings, orange joint collars and lighting
+ * with real falloff give each link volume, and volume is what tells you which
+ * way the wrist is turned.
  *
- * The arm itself stays neutral grey. Deep green appears only on the TCP frame,
- * the flange path and the contact indication — the three things that are
- * *state*, not structure. A joint inside ten degrees of its stop gets a heavier
- * black edge rather than a colour, and the joint table reports the same fact as
- * a number, so nothing depends on a colour being seen.
+ * Colour still means only one thing. The arm is the machine's own livery;
+ * deep green appears on the tool frame, the flange path and contact, which are
+ * *state*. A joint inside ten degrees of its stop darkens its collar, and the
+ * joint table reports the same fact as a number, so nothing depends on a
+ * colour being seen.
  */
-export function Fr5Model({ jointPositions, available, contact }: Props) {
+export function Fr5Model({ jointPositions, available, contact, showFrames }: Props) {
   const poses = useMemo(() => solveChain(jointPositions), [jointPositions]);
+  const flange = poses[poses.length - 1];
 
   return (
     <Suspense fallback={null}>
       <Part url={MESH_URL(BASE_MESH)} dimmed={!available} />
       {FR5_CHAIN.map((joint, i) => {
         const margin = jointPositions ? marginToLimit(i, jointPositions[i]) : Infinity;
+        const nearLimit = margin < (10 * Math.PI) / 180;
         return (
           <group key={joint.name}>
-            <Part
-              url={MESH_URL(joint.mesh)}
-              pose={poses[i]}
-              dimmed={!available}
-              nearLimit={margin < (10 * Math.PI) / 180}
-            />
+            <Part url={MESH_URL(joint.mesh)} pose={poses[i]} dimmed={!available} />
+            <JointCollar pose={poses[i]} dimmed={!available} nearLimit={nearLimit} />
           </group>
         );
       })}
-      <Flange pose={poses[poses.length - 1]} contact={contact} dimmed={!available} />
+      <group
+        position={flange.position.toArray() as [number, number, number]}
+        quaternion={flange.quaternion.toArray() as [number, number, number, number]}
+      >
+        <ProbeAssembly dimmed={!available} contact={contact} showFrames={showFrames} />
+        {showFrames && available ? <ToolFrame /> : null}
+        {contact && available ? <ContactMark /> : null}
+      </group>
     </Suspense>
   );
 }
@@ -69,18 +84,12 @@ function Part({
   url,
   pose,
   dimmed,
-  nearLimit,
 }: {
   url: string;
   pose?: LinkPose;
   dimmed: boolean;
-  nearLimit?: boolean;
 }) {
   const geometry = useLoader(STLLoader, url) as BufferGeometry;
-  const edges = useMemo(
-    () => new EdgesGeometry(geometry, EDGE_ANGLE_DEG),
-    [geometry],
-  );
 
   const position = pose ? pose.position.toArray() : [0, 0, 0];
   const quaternion = pose
@@ -88,77 +97,114 @@ function Part({
     : ([0, 0, 0, 1] as [number, number, number, number]);
 
   return (
-    <group position={position as [number, number, number]} quaternion={quaternion}>
-      <mesh geometry={geometry} castShadow={false} receiveShadow={false}>
-        <meshStandardMaterial
-          color={dimmed ? '#ffffff' : '#d5ded7'}
-          roughness={0.85}
-          metalness={0.05}
-          // Polygon offset keeps the edge lines from z-fighting with the faces
-          // they trace, which at this line width reads as a dashed outline.
-          polygonOffset
-          polygonOffsetFactor={1}
-          polygonOffsetUnits={1}
-        />
-      </mesh>
-      <lineSegments geometry={edges}>
-        <lineBasicMaterial
-          color={dimmed ? '#d5ded7' : nearLimit ? '#111111' : '#4a4a4a'}
-          transparent
-          opacity={nearLimit && !dimmed ? 1 : 0.8}
-        />
-      </lineSegments>
-    </group>
+    <mesh
+      geometry={geometry}
+      position={position as [number, number, number]}
+      quaternion={quaternion}
+      castShadow
+      receiveShadow
+    >
+      {/* Painted metal: matte, barely metallic. A glossier surface would throw
+          highlights that move with the camera and read as parts of the shape. */}
+      <meshStandardMaterial
+        color={dimmed ? '#fbfbfa' : SHELL}
+        roughness={0.62}
+        metalness={0.06}
+      />
+    </mesh>
   );
 }
 
 /**
- * Tool flange marker.
+ * The orange band at a joint.
  *
- * Not a mesh — the probe mount is not modelled and `tool.j6_to_probe` is still
- * unmeasured, so this marks the J6 mounting face and nothing beyond it.
- *
- * The TCP frame is drawn in deep green: it is the active tool frame, one of the
- * three things this palette reserves green for. The three axes are told apart
- * by length rather than by the usual red/green/blue triad, which the palette
- * does not allow.
+ * The supplied meshes are one solid per link, so a joint cover cannot be given
+ * its own material by splitting the geometry. A collar drawn on the joint axis
+ * puts the colour where the machine wears it and, more usefully, marks the
+ * axis itself — the thing an operator is actually looking for when reading a
+ * pose off the screen.
  */
-function Flange({
+function JointCollar({
   pose,
-  contact,
   dimmed,
+  nearLimit,
 }: {
   pose: LinkPose;
-  contact: boolean;
   dimmed: boolean;
+  nearLimit: boolean;
 }) {
-  if (dimmed) return null;
   return (
     <group
       position={pose.position.toArray() as [number, number, number]}
       quaternion={pose.quaternion.toArray() as [number, number, number, number]}
     >
-      <TcpAxis to={[0.09, 0, 0]} width={1.8} />
-      <TcpAxis to={[0, 0.065, 0]} width={1.3} />
-      <TcpAxis to={[0, 0, 0.045]} width={1.3} />
-      {contact ? (
-        <mesh rotation={[Math.PI / 2, 0, 0]}>
-          <ringGeometry args={[0.046, 0.058, 28]} />
-          <meshBasicMaterial color="#1e6b45" />
+      {/* Cylinders are +Y in three.js; the joint axis is local +Z. */}
+      <mesh rotation={[Math.PI / 2, 0, 0]} castShadow receiveShadow>
+        <cylinderGeometry args={[0.0455, 0.0455, 0.026, 40]} />
+        <meshStandardMaterial
+          color={dimmed ? '#e8e8e6' : nearLimit ? GRAPHITE : ORANGE}
+          roughness={0.55}
+          metalness={0.08}
+        />
+      </mesh>
+      {/* A seam either side, so the collar reads as a fitted cover rather than
+          a painted stripe. */}
+      {[0.0145, -0.0145].map((y) => (
+        <mesh key={y} position={[0, 0, y]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.0462, 0.0462, 0.0022, 40]} />
+          <meshStandardMaterial color={GRAPHITE} roughness={0.7} metalness={0.1} />
         </mesh>
-      ) : null}
+      ))}
     </group>
   );
 }
 
-function TcpAxis({ to, width }: { to: [number, number, number]; width: number }) {
+/**
+ * Probe control frame at the acoustic reference point.
+ *
+ * Axes are told apart by length rather than the usual red/green/blue triad,
+ * which this palette does not allow: long is +x (lateral, in the image plane),
+ * middle is +y (elevational), short is +z (axial — the direction the probe
+ * presses).
+ */
+function ToolFrame() {
+  return (
+    <group position={[0, 0, STACK.total]}>
+      <Axis to={[0.075, 0, 0]} width={2.0} />
+      <Axis to={[0, 0.055, 0]} width={1.5} />
+      <Axis to={[0, 0, 0.038]} width={1.5} />
+    </group>
+  );
+}
+
+function ContactMark() {
+  return (
+    <group position={[0, 0, STACK.total]}>
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.03, 0.038, 32]} />
+        <meshBasicMaterial color={ACTIVE} />
+      </mesh>
+      {/* Normal-force arrow, along the axis the controller regulates. */}
+      <Line
+        points={[
+          [0, 0, 0],
+          [0, 0, 0.052],
+        ]}
+        color={ACTIVE}
+        lineWidth={2.4}
+      />
+    </group>
+  );
+}
+
+function Axis({ to, width }: { to: [number, number, number]; width: number }) {
   return (
     <Line
       points={[
         [0, 0, 0],
         to,
       ]}
-      color="#1e6b45"
+      color={ACTIVE}
       lineWidth={width}
     />
   );

@@ -58,7 +58,7 @@
   grid-area: note;
   font-family: var(--font-ui);
   font-size: 9px;
-  color: var(--ink-soft);
+  color: var(--ink);
   margin-top: 1px;
 }
 
@@ -76,7 +76,7 @@
   text-align: left;
   font-size: 10px;
   font-weight: 700;
-  color: var(--ink-soft);
+  color: var(--ink);
   padding: 3px var(--pad);
   width: 40px;
 }
@@ -90,7 +90,7 @@
 .dots {
   width: 22px !important;
   text-align: center !important;
-  color: var(--ink-soft);
+  color: var(--ink);
 }
 
 .jointTable td:last-child {
@@ -121,5 +121,5 @@
 .caveatText {
   font-size: 10px;
   line-height: 1.42;
-  color: var(--ink-soft);
+  color: var(--ink);
 }

@@ -46,7 +46,19 @@ FREESPACE_OVERRIDES = {
     # 다시 잘린다. 특이점 근처에서 DLS 가 큰 관절속도를 내므로 이 값이 곧
     # 최악의 경우 속도이며, 그래서 필요 이상으로 올려두지 않는다.
     "safety.max_linear_vel_m_s": 0.15,      # 10 → 150 mm/s
-    "safety.max_angular_vel_rad_s": 1.5,    # 0.2 → 1.5 rad/s
+    # 2026-08-27: 1.5 → 0.9 로 내렸다. 툴 변환(당시 243 mm)이 들어오면서 회전이
+    # 프로브 끝을 중심으로 돌게 됐고, 같은 각속도에 필요한 관절속도가 늘었다.
+    # 뻗은 자세에서 1.2 rad/s 지령이 관절 2.04 rad/s 를 요구해 아래
+    # max_joint_vel(1.5)를 넘겼다 — 넘으면 서보가 그 관절만 잘라내고, 잘린
+    # 관절 하나가 **전체 운동 방향을 튼다.** 조작자에게는 "회전이 말을 안 듣고
+    # 자세마다 다르다" 로 느껴진다.
+    #
+    # 0.9 는 최악 자세에서도 관절 요구를 1.5 아래로 두는 값이다. 회전이 느려지는
+    # 대신 **지령한 방향으로 간다.** 병진은 그대로다 (툴 길이와 무관하다).
+    #
+    # 같은 날 늦게 툴이 234 mm 로 줄었다 (마운트를 CAD 로 대체). 필요한 관절속도가
+    # 4 % 줄었을 뿐이라 이 값은 그대로 두고, 보수적인 쪽으로 남긴다.
+    "safety.max_angular_vel_rad_s": 0.9,    # 0.2 → 0.9 rad/s
     "safety.max_joint_vel_rad_s": 1.5,      # 0.5 → 1.5 rad/s
 }
 
@@ -56,6 +68,9 @@ def _launch_setup(context, *args, **kwargs):
         get_package_share_directory("fr5_control"), "config", "probe.yaml"
     )
     backend = LaunchConfiguration("backend").perform(context)
+    staging = LaunchConfiguration("contact_probing").perform(context).lower() not in (
+        "false", "0", "no"
+    )
     freespace = LaunchConfiguration("freespace").perform(context).lower() in ("true", "1")
 
     # 노드마다 **사본**을 넘긴다. 같은 dict 객체를 세 노드에 공유하면 launch_ros 가
@@ -70,7 +85,7 @@ def _launch_setup(context, *args, **kwargs):
         return out
 
     servo_params = _params({"robot.backend": backend})
-    ik_params = _params()
+    ik_params = _params(None if staging else {"teleop.contact_probing_enabled": False})
     teleop_params = _params()
 
     return [
@@ -108,6 +123,17 @@ def _launch_setup(context, *args, **kwargs):
 
 def generate_launch_description():
     return LaunchDescription([
+        DeclareLaunchArgument(
+            "contact_probing",
+            default_value="true",
+            description=(
+                "F_n 문턱에서 접촉 프로빙으로 전환할지. false 면 힘이 얼마가 되든 "
+                "접근 상한을 유지한다 — 전자저울 검증처럼 의도적으로 문턱을 넘겨 "
+                "누르면서 teleop 을 계속해야 하는 절차 전용이다. 전환은 단방향이라 "
+                "한 번 걸리면 그 세션에서 다시 못 나온다. ⚠️ 안전 거동을 끄는 것이며, "
+                "남는 층은 힘 한계뿐이다"
+            ),
+        ),
         DeclareLaunchArgument(
             "backend",
             default_value="mock",

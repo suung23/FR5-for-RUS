@@ -14,16 +14,18 @@
 """
 from __future__ import annotations
 
+import json
 import math
 
 import numpy as np
 import rclpy
 from geometry_msgs.msg import PoseStamped, Twist, WrenchStamped
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from scipy.spatial.transform import Rotation
 from sensor_msgs.msg import JointState
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-from std_msgs.msg import Bool, Float32MultiArray, String
+from std_msgs.msg import Bool, Float32MultiArray, Float64, String
 
 from fr5_ik.dls_solver import DlsSolver
 from fr5_ik.force_regulator import ForceRegulator
@@ -118,7 +120,19 @@ class UsDiffIkNode(Node):
             ),
         )
         self.regulator_reason = ""
+        self.require_calibration = bool(
+            self.get_parameter("contact_control.require_valid_calibration").value
+        )
+        #: 브리지가 알려 주는 교정 유효성. None 이면 아직 못 들었다는 뜻이고,
+        #: 그것은 "유효하다" 와 다르다 — 모르는 것을 통과시키지 않는다.
+        self.calibration_valid = None
+        # 접촉 판정 보류를 한 번만 알리기 위한 표시. 렌치는 50 Hz 로 들어온다.
+        self._mode_gate_warned = False
+        self._calibration_blocked_announced = False
 
+        self.contact_probing_enabled = bool(
+            self.get_parameter("teleop.contact_probing_enabled").value
+        )
         self.mode_switch = ProbingModeSwitch(
             enter_force_n=float(self.get_parameter("teleop.contact_probing_force_n").value),
             confirm_s=float(self.get_parameter("teleop.contact_probing_confirm_s").value),
@@ -132,6 +146,7 @@ class UsDiffIkNode(Node):
         self.mapper = TeleopFrameMapper(
             tip_roll_deg=float(self.get_parameter("teleop.tip_roll_deg").value),
             relatch_on_engage=bool(self.get_parameter("teleop.relatch_on_engage").value),
+            operator_yaw_deg=float(self.get_parameter("teleop.operator_yaw_deg").value),
         )
 
         self.solver = DlsSolver(
@@ -160,6 +175,9 @@ class UsDiffIkNode(Node):
         self.create_subscription(Twist, f"{ns}/desired_twist", self._on_twist, 10)
         wrench_topic = f"{ns}/{self.get_parameter('ft_sensor.wrench_topic').value}"
         self.create_subscription(WrenchStamped, wrench_topic, self._on_wrench, 10)
+        self.create_subscription(
+            Bool, f"{ns}/calibration_valid", self._on_calibration, 10
+        )
         # 스타일러스 자세. teleop 이 데드맨을 잡고 있는 동안에만 발행하므로,
         # **발행이 끊겼다 다시 오는 것 자체가 재파지 신호**다 (별도 토픽이 필요 없다).
         side = str(self.robot_name).rsplit("_", 1)[-1]
@@ -187,6 +205,25 @@ class UsDiffIkNode(Node):
         )
         self.retreat_pub = self.create_publisher(Bool, "/diag/retreating", 10)
 
+        # 조작자 위치(미러) 상태와 요청. 모드와 같은 이유로 latched 다 — 콘솔이
+        # 늦게 붙어도 지금 어느 매핑으로 도는지 즉시 알아야 한다. 화면이 축을
+        # 추측하면 "밀면 반대로 온다" 를 조작자가 혼자 판단하게 된다.
+        latched_qos = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self.teleop_frame_pub = self.create_publisher(
+            String, f"{ns}/teleop_frame", latched_qos
+        )
+        # 콘솔에서 바꾸는 길. **파라미터가 진실이고 이 토픽은 그 파라미터를 쓰는
+        # 창구다** — 요청이 오면 자기 파라미터를 갱신하므로 `ros2 param get` 과
+        # 화면이 갈라지지 않는다.
+        self.create_subscription(
+            Float64, f"{ns}/teleop_frame_request", self._on_frame_request, latched_qos
+        )
+        self._publish_teleop_frame()
+
         self.create_timer(1.0 / self.rate_hz, self._control_loop)
         self.get_logger().info(
             f"미분 IK {self.rate_hz:.0f} Hz · DLS λ={self.solver.damping} · "
@@ -201,10 +238,21 @@ class UsDiffIkNode(Node):
             f"속도 클램프: 접근 {self.approach_linear * 1000:.0f} mm/s · "
             f"{self.approach_angular:.2f} rad/s  →  접촉 "
             f"{self.contact_linear * 1000:.0f} mm/s · {self.contact_angular:.2f} rad/s "
-            f"(F_n {self.mode_switch.enter_force_n:.1f} N 에서 전환, 단방향)"
+            + (f"(F_n {self.mode_switch.enter_force_n:.1f} N 에서 전환, 단방향)"
+               if self.contact_probing_enabled else "(전환 꺼짐)")
             + ("   ← 접근 상한이 이미 접촉용이다. freespace:=true 를 빠뜨린 것이다"
                if self.approach_linear <= 0.02 else "")
         )
+        if not self.contact_probing_enabled:
+            self.get_logger().warn(
+                "⚠️ 접촉 프로빙 전환이 꺼져 있다 (teleop.contact_probing_enabled=false). "
+                "힘이 얼마가 되든 접근 상한 "
+                f"{self.approach_linear * 1000:.0f} mm/s 를 유지한다 — 접촉해도 속도가 "
+                "줄지 않는다. 남는 안전층은 힘 한계 "
+                f"{float(self.get_parameter('safety.max_normal_force_n').value):.1f} N 뿐이다. "
+                "검증 절차 전용이며, "
+                "팬텀 작업에는 켜고 써라."
+            )
         # 늦게 붙는 구독자(콘솔 브리지)가 현재 모드를 즉시 받도록 한 번 낸다.
         self._publish_mode()
         # 병진 기준이 무엇인지 안 찍으면, 축이 어긋났을 때 원인을 조작감으로만
@@ -241,8 +289,20 @@ class UsDiffIkNode(Node):
         self.declare_parameter("safety.contact.max_angular_vel_rad_s", 0.2)
 
         # 이 힘을 넘으면 접촉 프로빙으로 넘어간다. 단방향이다.
+        # 접촉 프로빙 전환을 켤지.
+        #
+        # 끄면 힘이 얼마가 되든 접근 상한을 유지한다. 전자저울 검증처럼 **의도적으로
+        # 문턱을 넘겨 누르면서 teleop 을 계속해야 하는** 절차를 위한 것이다 — 전환은
+        # 단방향이라 한 번 걸리면 그 세션에서 다시 못 나온다.
+        #
+        # ⚠️ 이것은 안전 거동을 끄는 스위치다. 접촉 시 속도를 15 배 줄이는 층이
+        # 사라지고, 남는 것은 힘 한계(safety.max_normal_force_n)뿐이다. 그래서
+        # 기본값은 켜짐이고, 끄면 기동 로그에 경고가 찍힌다.
+        self.declare_parameter("teleop.contact_probing_enabled", True)
         self.declare_parameter("teleop.contact_probing_force_n", 8.0)
         self.declare_parameter("teleop.contact_probing_confirm_s", 0.02)
+        # 교정이 유효할 때만 힘 기반 동작을 연다 (사양 §6·§7).
+        self.declare_parameter("contact_control.require_valid_calibration", True)
 
         # 접촉 프로빙에서 로봇이 스스로 잡는 힘. §7 admittance 의 첫 구현이다.
         self.declare_parameter("contact_control.target_force_n", 5.0)
@@ -278,6 +338,9 @@ class UsDiffIkNode(Node):
         self.declare_parameter("teleop.angular_frame", "body")
         self.declare_parameter("teleop.relatch_on_engage", False)
         self.declare_parameter("teleop.engage_gap_s", 0.3)
+        # 조작자가 로봇의 어느 쪽에 서 있는가 [도]. base 수직축 둘레 회전이며,
+        # 180 이 "마주보기"(흔히 말하는 미러 모드)다. teleop_frame 모듈 문서 참조.
+        self.declare_parameter("teleop.operator_yaw_deg", 0.0)
 
     def _resolve_tool(self):
         """프로브 변환을 읽는다. 미측정이면 기동을 거부한다.
@@ -362,18 +425,98 @@ class UsDiffIkNode(Node):
                 f"회전 기준 프레임 변경: {previous_angular} → {self.angular_frame}"
             )
 
-        if self.mapper.engage(self.solver.rotation_base_probe(self.q), self.rot_stylus):
+        # 조작자 위치도 파지 경계에서만 바뀐다. 조작 중에 뒤집히면 같은 손동작에
+        # 로봇이 반대로 가고, 그 순간의 반사적인 교정은 상황을 악화시킨다.
+        requested = float(self.get_parameter("teleop.operator_yaw_deg").value)
+        self.mapper.request_operator_yaw(requested)
+        pending = self.mapper.pending_yaw_deg
+
+        latched = self.mapper.engage(self.solver.rotation_base_probe(self.q), self.rot_stylus)
+
+        if pending is not None:
+            self.get_logger().warn(
+                f"조작자 위치 {self.mapper.operator_yaw_deg:+.0f}° 적용 — "
+                + ("**마주보기(미러)**: 앞뒤와 좌우가 뒤집힌다. "
+                   if self.mapper.mirrored else "나란히: 지금까지의 축이다. ")
+                + "침투축(프로브 z)은 바뀌지 않는다."
+            )
+            self._publish_teleop_frame()
+        if latched:
             self.get_logger().info(
                 f"기준 프레임 고정 (파지 {self.mapper.engage_count}회차). "
                 f"이 순간의 축이 세션 내내 유지된다 — "
                 f"손 자세가 돌아도 '오른쪽'은 계속 같은 방향이다."
             )
 
+    def _on_frame_request(self, msg: Float64) -> None:
+        """콘솔이 조작자 위치를 바꿔 달라고 한다.
+
+        **즉시 바뀌지 않는다.** 자기 파라미터에 적어 두면 다음 파지 경계에서
+        ``_on_stylus`` 가 그것을 읽어 적용한다. 파라미터를 진실로 두는 덕에
+        ``ros2 param get`` 과 화면이 갈라지지 않는다.
+        """
+        wanted = float(msg.data)
+        if not math.isfinite(wanted):
+            self.get_logger().error(f"조작자 위치 요청이 숫자가 아니다: {msg.data}")
+            return
+        self.set_parameters([Parameter("teleop.operator_yaw_deg", value=wanted)])
+        self.mapper.request_operator_yaw(wanted)
+        if self.mapper.pending_yaw_deg is None:
+            self.get_logger().info(f"조작자 위치 {wanted:+.0f}° — 이미 그 값이다")
+        else:
+            self.get_logger().info(
+                f"조작자 위치 {wanted:+.0f}° 예약 — **다음 파지부터** 적용된다. "
+                "손을 놓았다 다시 잡아라."
+            )
+        self._publish_teleop_frame()
+
+    def _publish_teleop_frame(self) -> None:
+        """지금 어느 매핑으로 도는지 한 장으로 알린다 (콘솔용)."""
+        msg = String()
+        msg.data = json.dumps({
+            "operatorYawDeg": self.mapper.operator_yaw_deg,
+            "pendingYawDeg": self.mapper.pending_yaw_deg,
+            "mirrored": self.mapper.mirrored,
+            "linearFrame": self.linear_frame,
+            "angularFrame": self.angular_frame,
+            "tipRollDeg": float(self.get_parameter("teleop.tip_roll_deg").value),
+            "engageCount": self.mapper.engage_count,
+        })
+        self.teleop_frame_pub.publish(msg)
+
+    def _on_calibration(self, msg: Bool) -> None:
+        """브리지가 알려 주는 교정 유효성."""
+        if self.calibration_valid is not msg.data:
+            self.get_logger().info(f"교정 유효성: {msg.data}")
+        self.calibration_valid = bool(msg.data)
+
     def _on_wrench(self, msg: WrenchStamped) -> None:
         now = self.get_clock().now()
         previous = self.wrench_stamp
         self.normal_force = self.normal_sign * msg.wrench.force.z
         self.wrench_stamp = now
+
+        # 교정이 유효하지 않으면 **모드 판정 자체를 하지 않는다.**
+        #
+        # 보상 전 렌치에는 마운트·프로브 자중이 그대로 실려 있다 (실측 약 10 N).
+        # 그 값은 자세에 따라 부호가 바뀌므로, 프로브가 위를 향하는 것만으로도
+        # 8 N 문턱을 넘는다. 전환은 **단방향** 이라 한 번 걸리면 접근 속도가
+        # 세션 내내 15 배로 묶인다 — 아무것도 닿지 않았는데.
+        #
+        # 힘 축을 여는 것은 이미 교정으로 막혀 있었지만(_apply_force_regulation),
+        # 속도 상한을 갈아 끼우는 것은 막혀 있지 않았다. 접촉 판정이 못 믿을
+        # 값에서 나온다면 그 판정으로 무엇도 바꾸면 안 된다.
+        if not self.contact_probing_enabled:
+            return
+
+        if self.require_calibration and self.calibration_valid is not True:
+            if not self._mode_gate_warned:
+                self._mode_gate_warned = True
+                self.get_logger().warn(
+                    "교정이 유효하지 않아 접촉 판정을 보류한다 — 보상 전 렌치에는 "
+                    "자중이 실려 있어 접촉과 구분되지 않는다. 접근 상한을 유지한다."
+                )
+            return
 
         # 모드 판정은 힘이 들어오는 순간에 한다. 제어 루프(100 Hz)에 맡기면 센서가
         # 그보다 빨리 올 때 문턱을 넘는 순간을 지나칠 수 있다.
@@ -493,6 +636,22 @@ class UsDiffIkNode(Node):
         if not self.mode_switch.in_contact_probing:
             return twist
 
+        # 교정이 유효하지 않으면 힘 기반 동작을 열지 않는다. 보정되지 않은 값으로
+        # 힘을 잡으면 자세가 바뀔 때마다 목표가 수 N 씩 어긋난 채로 조직을 민다.
+        if not self.contact_probing_enabled:
+            return
+
+        if self.require_calibration and self.calibration_valid is not True:
+            if not self._calibration_blocked_announced:
+                self.get_logger().error(
+                    "접촉 프로빙인데 교정이 유효하지 않다 — 힘 축을 놓는다. "
+                    "콘솔의 Sensor calibration 에서 교정을 마쳐라."
+                )
+                self._calibration_blocked_announced = True
+            self.regulator_reason = "교정 무효 — 힘 제어 차단"
+            return np.zeros(6)
+        self._calibration_blocked_announced = False
+
         now = self.get_clock().now()
         wrench_fresh = (
             self.wrench_stamp is not None
@@ -527,10 +686,11 @@ class UsDiffIkNode(Node):
         """
         want_linear = self.linear_frame == "latched"
         want_angular = self.angular_frame == "latched"
-        if not (want_linear or want_angular):
+        mirrored = self.mapper.operator_yaw_deg != 0.0
+        if not (want_linear or want_angular or mirrored):
             return twist
 
-        if not self.mapper.ready:
+        if (want_linear or want_angular) and not self.mapper.ready:
             if not self._warned_no_stylus:
                 self.get_logger().warn(
                     "stylus_pose 가 아직 없어 예전(프로브 body) 기준으로 낸다. "
@@ -538,14 +698,23 @@ class UsDiffIkNode(Node):
                     "touch_twist 노드가 떠 있는지 확인하라."
                 )
                 self._warned_no_stylus = True
-            return twist
+            want_linear = want_angular = False
 
         rot_base_probe = self.solver.rotation_base_probe(self.q)
         out = np.array(twist, dtype=float)
-        if want_linear:
-            out[:3] = self.mapper.to_probe(out[:3], rot_base_probe, self.rot_stylus)
-        if want_angular:
-            out[3:] = self.mapper.to_probe(out[3:], rot_base_probe, self.rot_stylus)
+        # 기준을 고정하는 축은 to_probe 로 (조작자 회전이 R_latch 안에 들어 있다),
+        # body 로 두는 축은 to_probe_body 로 조작자 회전만 받는다. 한쪽만 뒤집히면
+        # 미는 방향과 비트는 방향이 서로 다른 세계에 있게 된다.
+        out[:3] = (
+            self.mapper.to_probe(out[:3], rot_base_probe, self.rot_stylus)
+            if want_linear
+            else self.mapper.to_probe_body(out[:3], rot_base_probe)
+        )
+        out[3:] = (
+            self.mapper.to_probe(out[3:], rot_base_probe, self.rot_stylus)
+            if want_angular
+            else self.mapper.to_probe_body(out[3:], rot_base_probe)
+        )
         return out
 
     def _control_loop(self) -> None:

@@ -5,9 +5,22 @@
 부호가 뒤집히면 admittance 가 발산한다 (DESIGN_NOTES §4.4).
 """
 
-from fr5_control.px6d_axis_id import format_report, interpret, summarise
-from fr5_control.px6d_protocol import AXIS_ORDER
+import math
+
 import pytest
+
+from fr5_control.px6d_axis_id import (
+    PROBE_TRIALS,
+    SENSOR_TRIALS,
+    TRIALS,
+    format_report,
+    interpret,
+    lateral_angle_deg,
+    mounting_angle_deg,
+    pair_orthogonality,
+    summarise,
+)
+from fr5_control.px6d_protocol import AXIS_ORDER
 
 
 def _const(values, n=50):
@@ -127,3 +140,175 @@ def test_report_survives_a_trial_with_no_samples():
     res = [{"trial": "Fy+", "instruction": "", "n_baseline": 0, "n_hold": 0,
             "deltas": None, "winner": None, "separation": None}]
     assert "표본 없음" in format_report(res)
+
+
+# -- 2 단계 절차: 센서 기준 → 프로브 각도 -------------------------------
+
+
+def _lateral(key, angle_deg, magnitude=2.0, axial=0.0):
+    """가로면에서 주어진 각도로 민 시행 하나를 합성한다."""
+    radians = math.radians(angle_deg)
+    return {
+        "trial": key,
+        "deltas": [
+            magnitude * math.cos(radians),
+            magnitude * math.sin(radians),
+            axial,
+            0.0,
+            0.0,
+            0.0,
+        ],
+        "winner": "Fx",
+        "separation": 9.0,
+    }
+
+
+def test_lateral_angle_reads_the_push_direction():
+    for angle in (0.0, 45.0, 90.0, 135.0, -90.0):
+        measured, magnitude, leak = lateral_angle_deg(_lateral("Sx+", angle)["deltas"])
+        assert measured == pytest.approx(angle, abs=1e-9)
+        assert magnitude == pytest.approx(2.0)
+        assert leak == pytest.approx(0.0)
+
+
+def test_lateral_angle_reports_axial_leak():
+    """가로로 민다고 했는데 축이 밀리면 각도를 믿을 수 없다."""
+    _, _, leak = lateral_angle_deg(_lateral("Sx+", 0.0, magnitude=2.0, axial=1.0)["deltas"])
+    assert leak == pytest.approx(0.5)
+
+
+def test_lateral_angle_gives_up_on_a_push_that_did_not_happen():
+    assert lateral_angle_deg([0.0] * 6)[0] is None
+    assert lateral_angle_deg(None)[0] is None
+
+
+def test_mounting_angle_is_the_probe_direction_in_the_channel_frame():
+    """설정이 요구하는 것은 **채널 프레임에서 본 프로브 +x** 다.
+
+    센서는 민 방향의 반대로 보고하므로 반응각에서 180° 를 뺀 것이 실제 방향이다.
+    """
+    angle, _ = mounting_angle_deg([_lateral("Px+", -137.0)])
+    assert angle == pytest.approx(43.0, abs=0.1)
+
+
+def test_mounting_angle_ignores_the_printed_marking():
+    """인쇄 화살표가 어디를 향하든 채널 프레임 각도는 그대로다.
+
+    옛 구현은 Sx+ 와의 **차이** 를 냈는데, 그것은 인쇄 기준 각도라 데이터가 사는
+    프레임과 다르다. 인쇄가 30° 틀어져 있어도 결과가 흔들리면 안 된다.
+    """
+    without = mounting_angle_deg([_lateral("Px+", -137.0)])[0]
+    with_marking = mounting_angle_deg(
+        [_lateral("Px+", -137.0), _lateral("Sx+", -147.0)]
+    )[0]
+    assert with_marking == pytest.approx(without)
+
+
+def test_mounting_angle_reports_the_marking_relative_value_as_a_note_only():
+    _, notes = mounting_angle_deg([_lateral("Px+", -137.0), _lateral("Sx+", -177.1)])
+    text = " ".join(notes)
+    assert "+40.1°" in text or "+40.0°" in text
+    assert "설정에 넣지 않는다" in text
+
+
+def test_mounting_angle_cross_checks_against_the_short_side():
+    _, notes = mounting_angle_deg([_lateral("Px+", -137.0), _lateral("Py+", -47.4)])
+    text = " ".join(notes)
+    assert "교차확인" in text
+    assert "서로를 확인한다" in text
+
+
+def test_mounting_angle_flags_a_failed_cross_check():
+    _, notes = mounting_angle_deg([_lateral("Px+", -137.0), _lateral("Py+", -90.0)])
+    assert any(n.startswith("⚠️ 교차확인 실패") for n in notes)
+
+
+def test_mounting_angle_flags_axial_leak():
+    _, notes = mounting_angle_deg([_lateral("Px+", -137.0, axial=30.0)])
+    assert any("누출" in note for note in notes)
+
+
+def test_mounting_angle_always_states_the_unresolved_180():
+    """180° 애매함은 남는다. 남는다는 사실을 매번 말해야 한다."""
+    _, notes = mounting_angle_deg([_lateral("Px+", -137.0)])
+    assert any("180°" in note for note in notes)
+
+
+def test_mounting_angle_needs_the_probe_push():
+    angle, notes = mounting_angle_deg([_lateral("Sx+", 0.0)])
+    assert angle is None
+    assert any("Px+" in note for note in notes)
+
+
+def test_stages_are_disjoint_and_cover_the_old_trial_list():
+    assert not {t[0] for t in SENSOR_TRIALS} & {t[0] for t in PROBE_TRIALS}
+    assert TRIALS == SENSOR_TRIALS + PROBE_TRIALS
+
+
+def test_sensor_stage_starts_with_the_shared_axial_push():
+    """축은 센서와 프로브가 공유하므로 마운트 회전과 무관하게 먼저 확정된다."""
+    assert SENSOR_TRIALS[0][0] == "Sz+"
+
+
+def test_interpret_reads_the_normal_sign_from_the_sensor_stage():
+    results = [{
+        "trial": "Sz+",
+        "deltas": [0.0, 0.0, -4.2, 0.0, 0.0, 0.0],
+        "winner": "Fz",
+        "separation": float("inf"),
+    }]
+    text = " ".join(interpret(results))
+    assert "normal_force_sign" in text
+    assert "-1.0" in text
+
+
+def test_orthogonality_accepts_a_proper_ninety():
+    delta, note = pair_orthogonality(
+        [_lateral("Sx+", -177.1), _lateral("Sy+", -95.7)], "Sx+", "Sy+"
+    )
+    assert delta == pytest.approx(81.4, abs=0.1)
+    assert not note.startswith("⚠️")
+
+
+def test_orthogonality_catches_a_push_in_the_wrong_direction():
+    """각도 차만 보면 드러나지 않는 오류 — 차는 언제나 계산되니까."""
+    delta, note = pair_orthogonality(
+        [_lateral("Px+", 87.9), _lateral("Py+", -47.4)], "Px+", "Py+"
+    )
+    assert delta == pytest.approx(-135.3, abs=0.1)
+    assert note.startswith("⚠️")
+
+
+def test_orthogonality_points_at_the_weaker_push():
+    _, note = pair_orthogonality(
+        [_lateral("Px+", 0.0, magnitude=4.8), _lateral("Py+", 135.0, magnitude=27.9)],
+        "Px+",
+        "Py+",
+    )
+    assert "Px+ 부터 다시" in note
+
+
+def test_orthogonality_accepts_either_handedness():
+    """+y 가 +90 쪽이든 -90 쪽이든 직교는 직교다. 손잡이는 여기서 안 가른다."""
+    for angle in (90.0, -90.0):
+        _, note = pair_orthogonality(
+            [_lateral("Sx+", 0.0), _lateral("Sy+", angle)], "Sx+", "Sy+"
+        )
+        assert not note.startswith("⚠️")
+
+
+def test_orthogonality_is_silent_when_a_trial_is_missing():
+    delta, note = pair_orthogonality([_lateral("Sx+", 0.0)], "Sx+", "Sy+")
+    assert delta is None and note is None
+
+
+def test_interpret_withholds_the_mounting_angle_when_the_pair_is_broken():
+    """직교성이 깨졌으면 각도를 내되 믿지 말라고 말해야 한다."""
+    results = [
+        _lateral("Sx+", -177.1),
+        _lateral("Sy+", -95.7),
+        _lateral("Px+", 87.9),
+        _lateral("Py+", -47.4),
+    ]
+    text = " ".join(interpret(results))
+    assert "믿지 마라" in text

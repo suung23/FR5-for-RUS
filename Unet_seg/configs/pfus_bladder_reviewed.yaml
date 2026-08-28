@@ -1,0 +1,13 @@
+# 자동 생성 — review/run_loop.sh. 손으로 고치면 다음 실행에 덮어써진다.
+# 제외: P003,P006,P008,P010,P011,P013,P014,P015,P019,P020,P021,P035,P036,P039,P043,P047,P048,P055,P062,P069,P073,P075,P079,P083,P084,P098,P104
+# hydro: 0   protect: none
+defaults: pfus_bladder_edit.yaml
+experiment:
+  name: pfus_bladder_reviewed
+  output_dir: runs/pfus_bladder_reviewed
+  seed: 42
+data:
+  manifest: /home/rosotauser/datasets/pfus/manifest_reviewed.csv
+  root: /home/rosotauser/datasets/pfus
+train:
+  checkpoint_dir: checkpoints/pfus_bladder_reviewed

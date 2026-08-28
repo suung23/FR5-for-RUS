@@ -25,17 +25,29 @@
 :root {
   color-scheme: light;
 
-  --ink: #111111;
+  /* Pale green surface → muted green divider → medium green selection →
+     deep green active control. The interface stays a bright clinical white;
+     green carries hierarchy, never mood, and nothing is coloured that is not
+     also stated in words or numbers somewhere on the same panel. */
+  /* Every glyph on this screen is black. Colour is carried by rules, marks,
+     fills and tag borders — never by the text itself. An operator reading a
+     value under a bright lamp, or on a panel someone has turned the contrast
+     down on, should never have a reading that is harder to see than its
+     neighbour because of what it means. */
+  --ink: #000000;
   --white: #ffffff;
-  --panel-pale: #eff7f1;
-  --nav-selected: #cfe5d4;
-  --green: #1e6b45;
-  --rule: #d5ded7;
+  --panel-pale: #f1f8f2;
+  --sidebar: #f6fbf7;
+  --nav-selected: #d9ecdc;
+  --rule: #b9d0be;
+  --accent: #4b8b5a;
+  --green: #17683a;
   --critical: #8b1e1e;
 
-  /* De-emphasised text. Near-black rather than a grey, so labels stay legible
-     on a pale green field and nothing reads as "coloured text". */
-  --ink-soft: #4a4a4a;
+  /* Kept as a name so the intent of a rule stays readable, but it is black
+     too. De-emphasis is done with size and weight, which survive a bad
+     screen; a grey does not. */
+  --ink-soft: #000000;
 
   /* Density. An operator glances at this while looking at the patient, so rows
      are tight and type is small but never below legibility. */
@@ -43,11 +55,16 @@
   --pad: 8px;
   --panel-gap: 1px;
 
-  --font-ui: Arial, Helvetica, 'Noto Sans', sans-serif;
-  /* Raw values only — event log lines, joint angles, timestamps, packet rates.
-     Everything else is Arial; a monospaced face across the whole screen is what
-     made the previous console read as a terminal rather than an instrument. */
-  --font-mono: 'Roboto Mono', 'Consolas', monospace;
+  /* One neutral grotesque for the whole console — the face bedside monitors
+     have used for decades. Liberation Sans is named first because it is what
+     this workstation actually resolves Arial to; naming it means the console
+     looks the same here as it does on a machine that has Helvetica. */
+  --font-ui: 'Liberation Sans', Helvetica, Arial, 'Noto Sans', sans-serif;
+  /* Numbers are the same face with tabular figures, not a typewriter one.
+     A monospaced face made the console read as a terminal; what a reading
+     actually needs is that its digits do not shift column as they change,
+     and `font-variant-numeric` gives that in the interface face itself. */
+  --font-num: var(--font-ui);
 }
 
 * {
@@ -82,7 +99,7 @@ body {
 /* Raw values. Monospaced so columns align and a changing digit does not shift
    the reading — applied to readouts, not to labels or prose. */
 .num {
-  font-family: var(--font-mono);
+  font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
   font-feature-settings: 'tnum' 1;
   letter-spacing: -0.01em;
@@ -126,7 +143,7 @@ body {
 .plate__aside {
   font-size: 10px;
   letter-spacing: 0.02em;
-  color: var(--ink-soft);
+  color: var(--ink);
   white-space: nowrap;
 }
 
@@ -158,7 +175,7 @@ body {
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--ink-soft);
+  color: var(--ink);
   white-space: nowrap;
 }
 
@@ -209,7 +226,7 @@ body {
 }
 
 .tag--green {
-  border-color: var(--green);
+  border-color: var(--ink);
   background: var(--panel-pale);
 }
 
@@ -219,7 +236,7 @@ body {
 
 .tag--off {
   border-color: var(--rule);
-  color: var(--ink-soft);
+  color: var(--ink);
 }
 
 /* ---- controls ------------------------------------------------------------ */
@@ -252,12 +269,12 @@ button:focus-visible {
 
 button[aria-pressed='true'] {
   background: var(--nav-selected);
-  border-color: var(--green);
+  border-color: var(--ink);
 }
 
 button:disabled {
   border-color: var(--rule);
-  color: var(--ink-soft);
+  color: var(--ink);
   cursor: default;
 }
 

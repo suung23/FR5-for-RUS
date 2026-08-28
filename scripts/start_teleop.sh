@@ -19,8 +19,12 @@
 # The force bridge is not started here. It is a separate concern (it needs
 # dialout for the PX6D) and belongs in its own terminal so its log is readable:
 #
-#   sg dialout -c "ros2 run fr5_control telemetry_bridge \
-#     --ros-args -p bridge.px6d_port:=/dev/ttyACM0"
+#   sg dialout -c "ros2 run fr5_control telemetry_bridge --ros-args \
+#     --params-file $(ros2 pkg prefix fr5_control)/share/fr5_control/config/probe.yaml \
+#     -p bridge.px6d_port:=/dev/ttyACM0"
+#
+# The parameter file is required — the bridge derives its stack geometry from
+# probe.yaml and refuses to start without it.
 set -uo pipefail
 
 cd "$(dirname "$0")/.."

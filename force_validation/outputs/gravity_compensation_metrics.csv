@@ -1,0 +1,12 @@
+metric,unit,value,definition
+gravity_bias_N,N,0.000000,Mean of the unloaded normal-axis residual
+gravity_residual_sd_N,N,0.182140,Sample standard deviation of the residual
+gravity_rmse_N,N,0.177282,Root mean square of the residual
+gravity_max_abs_error_N,N,0.375982,Largest absolute residual over validation poses
+gravity_95pct_lower_N,N,-0.356994,mean - 1.96 x SD
+gravity_95pct_upper_N,N,0.356994,mean + 1.96 x SD
+gravity_robust_2p5pct_N,N,-0.328860,2.5th percentile of the residual
+gravity_robust_97p5pct_N,N,0.264202,97.5th percentile of the residual
+scale_standard_uncertainty_N,N,0.002831,Scale resolution / sqrt(12)
+combined_reference_uncertainty_N,N,0.182162,"sqrt(u_scale^2 + u_gravity^2); reported, never subtracted"
+n_gravity_validation_poses,count,19,Unloaded validation poses used

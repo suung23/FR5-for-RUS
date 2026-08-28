@@ -1,9 +1,12 @@
 import type {
+  ForceWaveform,
+  ForceWaveformBin,
   ProbingMode,
   RobotState,
   RobotTelemetry,
   SafetyState,
   TcpPose,
+  TeleopFrameState,
   WrenchSample,
   WrenchSource,
 } from '../types';
@@ -74,6 +77,39 @@ export function parseTelemetry(raw: unknown, receivedAt: number): RobotTelemetry
     robotState: oneOf(src.robotState ?? src.robot_state, ROBOT_STATES),
     safetyState: oneOf(src.safetyState ?? src.safety_state, SAFETY_STATES),
     probingMode: oneOf(src.probingMode ?? src.probing_mode, PROBING_MODES),
+    // Passed through as the control stack declared it, for the same reason as
+    // the calibration block below.
+    teleopFrame: teleopFrame(src.teleopFrame ?? src.teleop_frame),
+    // Passed through as the bridge sent it. The calibration block is display
+    // and gating state, not something the console recomputes — recomputing it
+    // here would let the screen disagree with the control stack about whether
+    // contact control may be enabled.
+    calibration: (src.calibration as never) ?? undefined,
+  };
+}
+
+/**
+ * The teleoperation mapping, if the bridge sent one.
+ *
+ * `operatorYawDeg` is the one field the panel cannot do without — everything
+ * else it shows is context. A frame missing it is dropped rather than rendered
+ * as 0, which would read as "alongside" and could be exactly wrong.
+ */
+function teleopFrame(raw: unknown): TeleopFrameState | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const src = raw as Record<string, unknown>;
+  if (typeof src.operatorYawDeg !== 'number' || !Number.isFinite(src.operatorYawDeg)) {
+    return undefined;
+  }
+  const pending = src.pendingYawDeg;
+  return {
+    operatorYawDeg: src.operatorYawDeg,
+    pendingYawDeg: typeof pending === 'number' && Number.isFinite(pending) ? pending : null,
+    mirrored: src.mirrored === true,
+    linearFrame: typeof src.linearFrame === 'string' ? src.linearFrame : '—',
+    angularFrame: typeof src.angularFrame === 'string' ? src.angularFrame : '—',
+    tipRollDeg: typeof src.tipRollDeg === 'number' ? src.tipRollDeg : 0,
+    engageCount: typeof src.engageCount === 'number' ? src.engageCount : 0,
   };
 }
 
@@ -97,7 +133,57 @@ export function parseWrench(raw: unknown, receivedAt: number): WrenchSample | nu
   if (typeof src.sensorHz === 'number' && Number.isFinite(src.sensorHz)) {
     sample.sensorHz = src.sensorHz;
   }
+  if (typeof src.averagedSamples === 'number' && Number.isFinite(src.averagedSamples)) {
+    sample.averagedSamples = src.averagedSamples;
+  }
+  if (Array.isArray(src.forceExtremes) && src.forceExtremes.length === 2) {
+    const [lo, hi] = src.forceExtremes as unknown[];
+    if (Array.isArray(lo) && Array.isArray(hi) && lo.length === 3 && hi.length === 3) {
+      sample.forceExtremes = [lo as number[], hi as number[]];
+    }
+  }
+  const waveform = forceWaveform(src.forceWaveform);
+  if (waveform) sample.forceWaveform = waveform;
+  if (src.compensated && typeof src.compensated === 'object') {
+    sample.compensated = src.compensated as never;
+  }
+  if (typeof src.calibrationValid === 'boolean') {
+    sample.calibrationValid = src.calibrationValid;
+  }
+  if (Array.isArray(src.calibrationIssues)) {
+    sample.calibrationIssues = (src.calibrationIssues as unknown[]).map(String);
+  }
   return sample;
+}
+
+/**
+ * The binned window, if the bridge sent one.
+ *
+ * Bins arrive as flat arrays rather than objects — a hundred of them a second
+ * is a hundred objects a second on the wire, and the field order is fixed by
+ * the same contract that reads it here. A bin that does not parse is dropped
+ * on its own; one bad bin must not cost the plot the other ninety-nine.
+ */
+function forceWaveform(raw: unknown): ForceWaveform | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const src = raw as Record<string, unknown>;
+  if (typeof src.hz !== 'number' || !Number.isFinite(src.hz) || src.hz <= 0) return undefined;
+  if (!Array.isArray(src.bins)) return undefined;
+
+  const bins: ForceWaveformBin[] = [];
+  for (const entry of src.bins) {
+    const row = numberArray(entry, 6);
+    if (!row) continue;
+    bins.push({
+      ageMs: Math.max(0, row[0]),
+      fx: row[1],
+      fy: row[2],
+      fz: row[3],
+      fzMin: row[4],
+      fzMax: row[5],
+    });
+  }
+  return bins.length > 0 ? { hz: src.hz, bins } : undefined;
 }
 
 function vec3(value: unknown): [number, number, number] | undefined {

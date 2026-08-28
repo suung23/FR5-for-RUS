@@ -1,0 +1,94 @@
+.body {
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+/* Four stations, laid out as the four sides they describe rather than as a
+   dropdown: the operator is picking a place to stand, and a list of angles
+   hides that. */
+.choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  padding: var(--pad);
+  background: var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+
+.choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 6px 8px;
+  text-transform: none;
+  letter-spacing: 0;
+  text-align: left;
+  border: 1px solid var(--rule);
+}
+
+.choiceLabel {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.choiceYaw {
+  font-family: var(--font-num);
+  font-size: 10px;
+  color: var(--ink);
+}
+
+.choiceNote {
+  font-size: 9.5px;
+  font-weight: 400;
+  color: var(--ink);
+}
+
+/* The applied station is the only filled block, matching the nav rail: one
+   filled thing per screen region means "this is the state you are in". */
+.applied {
+  background: var(--nav-selected);
+  border-color: var(--ink);
+  border-left-width: 3px;
+}
+
+/* Pending is drawn as an outline, never as a fill — it is not the state the
+   robot is in yet, and it must not be mistaken for one. */
+.pending {
+  border: 2px dashed var(--green);
+  background: var(--white);
+}
+
+.state {
+  margin: 0;
+  padding: 7px var(--pad);
+  font-size: 11px;
+  line-height: 1.5;
+  border-bottom: 1px solid var(--rule);
+}
+
+.state .tag {
+  margin-right: 5px;
+}
+
+.detail {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+  padding: 6px var(--pad);
+  gap: 4px 8px;
+}
+
+.detail dt {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.detail dd {
+  margin: 0;
+  font-size: 11px;
+}

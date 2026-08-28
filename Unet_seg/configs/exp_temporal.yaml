@@ -1,0 +1,29 @@
+# 2단계: 시간 일관성 손실만 켠다. baseline(pfus_bladder_reviewed) 대비 단 하나의 변경.
+#
+# 추론은 그대로 단일 프레임/무상태다. 광류는 학습 때만 쓰인다.
+# 매니페스트에 사전계산 광류가 없으므로 farneback 으로 즉석 계산한다.
+#
+# 모델 선택은 spatial 100% 로 유지한다 — 변경을 하나로 묶기 위해서다.
+# (시간적으로 완벽히 안정적이면서 해부학적으로 틀린 예측이 선택을 이기면 안 된다.)
+defaults: pfus_bladder_reviewed.yaml
+
+experiment:
+  name: exp_temporal
+  output_dir: runs/exp_temporal
+  seed: 42
+
+train:
+  checkpoint_dir: checkpoints/exp_temporal
+  num_workers: 4
+
+flow:
+  backend: farneback
+  require_flow: false
+
+loss:
+  temporal:
+    enabled: true
+    lambda_temp_pixel: 0.2
+    lambda_temp_control: 0.05
+    temporal_warmup_epochs: 2
+    ramp_epochs: 3

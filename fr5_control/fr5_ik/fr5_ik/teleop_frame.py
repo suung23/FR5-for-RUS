@@ -61,6 +61,32 @@ rate control 에서 그 관계는 유지되지 않는다. 스타일러스 자세
 
 병진과 회전은 **같은 ``R_latch``** 를 공유한다. 따로 잡으면 두 축이 서로 다른 순간에
 고정되어, 손을 대각선으로 움직일 때 병진과 회전이 서로 다른 "오른쪽"을 갖는다.
+
+조작자가 어디에 서 있는가 (2026-08-27)
+--------------------------------------
+위의 모든 것은 "손 좌표계 → base" 를 정할 뿐, **조작자가 로봇의 어느 쪽에 서 있는지**
+는 모른다. 지금까지는 조작자와 로봇이 같은 방향을 보고 있다고 가정한 매핑이었다.
+마주보고 서면 그 가정이 깨진다 — 조작자의 앞은 로봇의 뒤이고, 조작자의 오른쪽은
+로봇의 왼쪽이다. 조작자에게는 "밀면 반대로 온다" 로 느껴진다.
+
+고치는 방법은 base 수직축 둘레 회전 하나다::
+
+    v_base = Rz_base(operator_yaw) · (지금까지의 v_base)
+
+마주보기는 ``operator_yaw = 180°`` 다. 옆에 서면 ±90° 다.
+
+**거울(반사)이 아니라 회전인 이유.** 사람이 "미러 모드" 라고 부르는 것은 보통 이
+180° 회전이다. 진짜 거울상(``det = -1``)은 좌우만 뒤집고 앞뒤는 그대로 두는데, 로봇
+반대편으로 걸어가면 **앞뒤도 같이 뒤집힌다.** 그것이 회전이다. 게다가 반사를 넣으면
+그 twist 는 강체 운동이 아니게 되고, 각속도는 유사벡터라 회전 지령이 거울상으로
+망가진다 (§10.4 가 축 교환 대신 ``Rz`` 를 쓴 이유와 같다). 그래서 반사는 제공하지
+않는다 — 조작감으로 원하는 것은 회전 쪽이고, 그쪽만 물리적으로 성립한다.
+
+**병진과 회전에 같은 ``Rz_base`` 를 쓴다.** 한쪽만 뒤집으면 미는 방향과 비트는
+방향이 서로 다른 세계에 있게 된다.
+
+값이 바뀌어도 **다음 파지부터** 적용된다. 조작 중에 바뀌면 같은 손동작에 로봇이
+반대로 가고, 그 순간 조작자의 반사적인 교정은 상황을 악화시키는 방향이다.
 """
 from __future__ import annotations
 
@@ -68,7 +94,12 @@ import math
 
 import numpy as np
 
-__all__ = ["axis_mapping", "TeleopFrameMapper", "LinearFrameMapper"]
+__all__ = [
+    "axis_mapping",
+    "operator_rotation",
+    "TeleopFrameMapper",
+    "LinearFrameMapper",
+]
 
 
 def axis_mapping(tip_roll_deg: float) -> np.ndarray:
@@ -87,6 +118,21 @@ def axis_mapping(tip_roll_deg: float) -> np.ndarray:
     return rot_z @ np.diag([1.0, -1.0, -1.0])
 
 
+def operator_rotation(operator_yaw_deg: float) -> np.ndarray:
+    """조작자가 선 자리를 나타내는 base 수직축 둘레 회전 ``Rz_base``.
+
+    Args:
+        operator_yaw_deg: 0 이면 조작자와 로봇이 같은 방향을 본다 (지금까지의 거동).
+            180 이면 마주보고 선다 — 앞뒤와 좌우가 함께 뒤집힌다.
+
+    Returns:
+        3x3 회전. ``det = +1`` 이라 병진과 회전(유사벡터)에 똑같이 쓸 수 있다.
+    """
+    angle = math.radians(float(operator_yaw_deg))
+    cos_a, sin_a = math.cos(angle), math.sin(angle)
+    return np.array([[cos_a, -sin_a, 0.0], [sin_a, cos_a, 0.0], [0.0, 0.0, 1.0]])
+
+
 class TeleopFrameMapper:
     """teleop 지령(병진·회전)을 표류하지 않는 고정 프레임으로 옮긴다.
 
@@ -101,12 +147,49 @@ class TeleopFrameMapper:
             예측 가능하다. 조작자가 자리를 옮겨 기준을 다시 잡고 싶을 때만 참으로 둔다.
     """
 
-    def __init__(self, tip_roll_deg: float, relatch_on_engage: bool = False) -> None:
+    def __init__(
+        self,
+        tip_roll_deg: float,
+        relatch_on_engage: bool = False,
+        operator_yaw_deg: float = 0.0,
+    ) -> None:
         self.mapping = axis_mapping(tip_roll_deg)
         self.relatch_on_engage = bool(relatch_on_engage)
+        #: 지금 **적용 중인** 조작자 각도. 파지 중에는 바뀌지 않는다.
+        self.operator_yaw_deg = float(operator_yaw_deg)
+        self.operator = operator_rotation(self.operator_yaw_deg)
+        #: 다음 파지에 적용될 값. ``None`` 이면 대기 중인 변경이 없다.
+        self.pending_yaw_deg = None
         #: world → base 고정 회전. ``None`` 이면 아직 기준을 안 잡았다.
         self.latched = None
         self.engage_count = 0
+
+    # -- 조작자 위치 ------------------------------------------------------
+
+    def request_operator_yaw(self, operator_yaw_deg: float) -> bool:
+        """조작자 각도 변경을 **예약한다.** 즉시 반영하지 않는다.
+
+        조작 중에 축이 뒤집히면 같은 손동작에 로봇이 반대로 가고, 그 순간 조작자가
+        반사적으로 하는 교정은 상황을 악화시키는 방향이다. 그래서 손을 놓았다 다시
+        잡을 때 바뀐다 — ``teleop.angular_frame`` 과 같은 규약이다.
+
+        Args:
+            operator_yaw_deg: 새 각도 [도]. ``(-180, 180]`` 으로 정규화해 다룬다.
+
+        Returns:
+            대기 중인 변경이 생겼거나 남아 있으면 ``True``.
+        """
+        wanted = _normalize_deg(operator_yaw_deg)
+        if abs(wanted - self.operator_yaw_deg) < 1e-9:
+            self.pending_yaw_deg = None
+        else:
+            self.pending_yaw_deg = wanted
+        return self.pending_yaw_deg is not None
+
+    @property
+    def mirrored(self) -> bool:
+        """조작자가 로봇을 마주보는 쪽인가 (|yaw| > 90°)."""
+        return abs(self.operator_yaw_deg) > 90.0
 
     # -- 기준 잡기 --------------------------------------------------------
 
@@ -117,13 +200,37 @@ class TeleopFrameMapper:
             이번 호출에서 기준을 새로 잡았으면 ``True``.
         """
         self.engage_count += 1
+        # 파지 경계는 조작자 각도가 바뀌어도 안전한 유일한 순간이다. latch 를 다시
+        # 잡지 않는 경우에도 이것만은 적용한다 — 안 그러면 예약이 영원히 안 걸린다.
+        self._apply_pending_yaw()
         if self.latched is not None and not self.relatch_on_engage:
             return False
-        # 이 순간에는 새 매핑이 기존 매핑과 정확히 같다. 파지 시작 축은 안 바뀌고,
-        # 그 뒤로 어긋나지만 않게 된다.
-        self.latched = np.asarray(rot_base_probe, dtype=float) @ self.mapping @ np.asarray(
-            rot_stylus, dtype=float
-        ).T
+        # 이 순간에는 새 매핑이 기존 매핑과 정확히 같다 (조작자 각도가 그대로라면).
+        # 파지 시작 축은 안 바뀌고, 그 뒤로 어긋나지만 않게 된다.
+        self.latched = (
+            self.operator
+            @ np.asarray(rot_base_probe, dtype=float)
+            @ self.mapping
+            @ np.asarray(rot_stylus, dtype=float).T
+        )
+        return True
+
+    def _apply_pending_yaw(self) -> bool:
+        """예약된 조작자 각도를 적용한다. 적용했으면 ``True``.
+
+        이미 잡아 둔 ``R_latch`` 가 있으면 **다시 잡지 않고 차이만 곱한다.**
+        세션 기준을 새로 잡으면 조작자가 요청하지도 않은 축 이동이 함께 일어난다 —
+        ``relatch_on_engage`` 가 거짓인 이유가 그것이다. 조작자 회전만 갈아 끼우면
+        기준은 그대로 두고 방향만 뒤집힌다.
+        """
+        if self.pending_yaw_deg is None:
+            return False
+        previous = self.operator
+        self.operator_yaw_deg = self.pending_yaw_deg
+        self.operator = operator_rotation(self.operator_yaw_deg)
+        if self.latched is not None:
+            self.latched = self.operator @ previous.T @ self.latched
+        self.pending_yaw_deg = None
         return True
 
     @property
@@ -170,6 +277,31 @@ class TeleopFrameMapper:
         # 3) 하류가 기대하는 프로브 프레임으로
         return rot_base_probe.T @ base
 
+    def to_probe_body(self, cmd: np.ndarray, rot_base_probe: np.ndarray) -> np.ndarray:
+        """조작자 회전만 적용한다. 기준을 고정하지 **않는** 축에 쓴다.
+
+        ``teleop.angular_frame: body`` 처럼 표류 대책을 끄고 쓰는 축에도 조작자
+        위치는 적용되어야 한다. 병진만 뒤집히고 회전은 그대로면, 미는 방향과 비트는
+        방향이 서로 다른 세계에 있게 된다.
+
+        하류는 프로브 프레임 twist 를 받으므로 다시 프로브 프레임으로 돌려준다::
+
+            cmd' = R_base_probeᵀ · Rz_base(operator_yaw) · R_base_probe · cmd
+
+        Args:
+            cmd: 프로브 프레임 3벡터 (병진 또는 회전).
+            rot_base_probe: 현재 base → 프로브 회전.
+
+        Returns:
+            프로브 프레임 3벡터. 조작자 각도가 0 이면 입력 그대로다 (그때는 곱하지도
+            않는다 — 지금까지의 거동이 수치적으로 **정확히** 보존된다).
+        """
+        cmd = np.asarray(cmd, dtype=float).reshape(3)
+        if self.operator_yaw_deg == 0.0:
+            return cmd
+        rot_base_probe = np.asarray(rot_base_probe, dtype=float)
+        return rot_base_probe.T @ self.operator @ rot_base_probe @ cmd
+
     def to_base(
         self,
         cmd: np.ndarray,
@@ -180,6 +312,12 @@ class TeleopFrameMapper:
         if self.latched is None:
             return cmd
         return self.latched @ np.asarray(rot_stylus, dtype=float) @ self.mapping.T @ cmd
+
+
+def _normalize_deg(angle_deg: float) -> float:
+    """각을 ``(-180, 180]`` 으로. 180 과 -180 이 서로 다른 설정처럼 보이지 않게 한다."""
+    wrapped = (float(angle_deg) + 180.0) % 360.0 - 180.0
+    return 180.0 if wrapped == -180.0 else wrapped
 
 
 #: 옛 이름. 이 매퍼는 이제 회전에도 쓰이므로 ``TeleopFrameMapper`` 가 맞는 이름이다.

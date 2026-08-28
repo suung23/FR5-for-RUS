@@ -1,0 +1,16 @@
+# 3단계: speckle 증강만 켠다. baseline(pfus_bladder_reviewed) 대비 단 하나의 변경.
+#
+# out * (1 + N(0, 0.10)) — B-mode 의 지배적 노이즈 모델이 곱셈형이라 가산 가우시안
+# (이미 0.01 로 켜져 있음)과는 다른 불변성을 가르친다.
+defaults: pfus_bladder_reviewed.yaml
+
+experiment:
+  name: exp_speckle
+  output_dir: runs/exp_speckle
+  seed: 42
+
+train:
+  checkpoint_dir: checkpoints/exp_speckle
+
+augmentation:
+  speckle_noise_std: 0.10

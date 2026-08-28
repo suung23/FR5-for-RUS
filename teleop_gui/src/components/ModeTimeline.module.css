@@ -16,7 +16,7 @@
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.05em;
-  color: var(--ink-soft);
+  color: var(--ink);
   width: 42px;
   flex: 0 0 auto;
 }
@@ -39,7 +39,7 @@
   font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.05em;
-  color: var(--ink-soft);
+  color: var(--ink);
 }
 
 /* Approach is the open state; contact is the filled one. The fill is the pale
@@ -75,7 +75,7 @@
 }
 
 .bandApproach .bandText {
-  color: var(--ink-soft);
+  color: var(--ink);
 }
 
 .bandContact .bandText {
@@ -89,7 +89,7 @@
   padding: 3px var(--pad) 8px 58px;
   font-family: var(--font-ui);
   font-size: 9px;
-  color: var(--ink-soft);
+  color: var(--ink);
   flex: 0 0 auto;
 }
 
@@ -152,7 +152,7 @@
   font-size: 9.5px;
   font-weight: 700;
   letter-spacing: 0.04em;
-  color: var(--ink-soft);
+  color: var(--ink);
   width: 96px;
 }
 
@@ -171,5 +171,5 @@
   font-size: 9.5px;
   font-weight: 600;
   letter-spacing: 0.05em;
-  color: var(--ink-soft);
+  color: var(--ink);
 }

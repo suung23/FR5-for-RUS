@@ -1,11 +1,17 @@
 import styles from './NavRail.module.css';
 
-export type ConsoleView = 'monitoring' | 'teleoperation' | 'contact' | 'safety';
+export type ConsoleView =
+  | 'monitoring'
+  | 'teleoperation'
+  | 'contact'
+  | 'calibration'
+  | 'safety';
 
 export const CONSOLE_VIEWS: ConsoleView[] = [
   'monitoring',
   'teleoperation',
   'contact',
+  'calibration',
   'safety',
 ];
 
@@ -37,6 +43,7 @@ const ITEMS: { id: ConsoleView; label: string; note: string }[] = [
   { id: 'monitoring', label: 'Monitoring', note: 'Force trend' },
   { id: 'teleoperation', label: 'Teleoperation', note: 'Joint rates' },
   { id: 'contact', label: 'Contact', note: 'Stage timeline' },
+  { id: 'calibration', label: 'Calibration', note: 'Sensor frames' },
   { id: 'safety', label: 'Safety', note: 'Limits · events' },
 ];
 

@@ -63,6 +63,12 @@
   flex: 0 0 292px;
 }
 
+/* Dense reference pages get more of the column; the workspace keeps a floor. */
+.lowerTall {
+  flex: 1 1 auto;
+  max-height: 66%;
+}
+
 .lower > * {
   flex: 1 1 auto;
   min-height: 0;

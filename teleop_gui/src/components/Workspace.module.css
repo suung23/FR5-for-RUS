@@ -37,7 +37,7 @@
   font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.04em;
-  color: var(--ink-soft);
+  color: var(--ink);
   white-space: nowrap;
 }
 
@@ -48,6 +48,6 @@
 .caveat {
   font-size: 9px;
   letter-spacing: 0.03em;
-  color: var(--ink-soft);
+  color: var(--ink);
   white-space: nowrap;
 }

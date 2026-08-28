@@ -1,0 +1,21 @@
+sample_id,scale_mass_g,valid_trial,notes
+1,552,TRUE,entered 10x low; corrected x10
+2,160,FALSE,excluded by operator: robot recorded -0.160 N at keypress while scale read 160 g (1.569 N) — no contact load captured; entered 10x low; corrected x10
+3,426,TRUE,entered 10x low; corrected x10
+4,370,TRUE,entered 10x low; corrected x10
+5,445,TRUE,entered 10x low; corrected x10
+6,1004,TRUE,entered 10x low; corrected x10
+7,250,TRUE,entered 10x low; corrected x10
+8,444,TRUE,entered 10x low; corrected x10
+9,441,TRUE,entered 10x low; corrected x10
+10,813,TRUE,entered 10x low; corrected x10
+11,218,TRUE,entered 10x low; corrected x10
+12,176,TRUE,entered 10x low; corrected x10
+13,197,TRUE,entered 10x low; corrected x10
+14,515,TRUE,entered 10x low; corrected x10
+15,154,TRUE,entered 10x low; corrected x10
+16,286,TRUE,entered 10x low; corrected x10
+17,94,TRUE,entered 10x low; corrected x10
+18,678,TRUE,entered 10x low; corrected x10
+19,786,TRUE,entered 10x low; corrected x10
+20,135,TRUE,entered 10x low; corrected x10

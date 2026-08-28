@@ -1,16 +1,16 @@
 import { useEffect, useRef } from 'react';
-import { GATE_CONTENT, type GateTopic } from '../telemetry/guidanceGate';
+import { BRIEFING_SECTIONS } from '../telemetry/guidanceGate';
 import styles from './GuidanceGate.module.css';
 
 interface Props {
-  topic: GateTopic;
   onAcknowledge(): void;
 }
 
 /**
  * Full-screen guidance gate.
  *
- * Blocks the console until the operator acknowledges. The console stays visible
+ * Shown once per session. Blocks the console until the operator
+ * acknowledges, and does not return. The console stays visible
  * behind it and keeps updating — the point is that the operator reads the
  * checklist while looking at the live state it refers to, not at a blank
  * screen.
@@ -22,14 +22,13 @@ interface Props {
  * Focus is trapped inside the panel. Tab cannot reach the console behind it, so
  * a keystroke meant for the acknowledgement cannot land somewhere else.
  */
-export function GuidanceGate({ topic, onAcknowledge }: Props) {
-  const content = GATE_CONTENT[topic];
+export function GuidanceGate({ onAcknowledge }: Props) {
   const panelRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     buttonRef.current?.focus();
-  }, [topic]);
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -60,18 +59,23 @@ export function GuidanceGate({ topic, onAcknowledge }: Props) {
       <div className={styles.panel} ref={panelRef}>
         <p className={styles.kicker}>Operator guidance</p>
         <h2 className={styles.title} id="guidance-title">
-          {content.title}
+          Before you begin
         </h2>
         <div className={styles.rule} />
 
-        <ol className={styles.list}>
-          {content.items.map((item, i) => (
-            <li key={i}>
-              <span className={styles.index}>{i + 1}.</span>
-              <span className={styles.itemText}>{item}</span>
-            </li>
-          ))}
-        </ol>
+        {BRIEFING_SECTIONS.map((section) => (
+          <section className={styles.section} key={section.title}>
+            <h3 className={styles.sectionTitle}>{section.title}</h3>
+            <ol className={styles.list}>
+              {section.items.map((item, i) => (
+                <li key={i}>
+                  <span className={styles.index}>{i + 1}.</span>
+                  <span className={styles.itemText}>{item}</span>
+                </li>
+              ))}
+            </ol>
+          </section>
+        ))}
 
         <p className={styles.footer}>
           Review the instructions, then press ENTER to continue.

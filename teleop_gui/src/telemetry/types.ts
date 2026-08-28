@@ -46,6 +46,10 @@ export interface RobotTelemetry {
   safetyState?: SafetyState;
   /** Velocity-limit mode the control stack has entered. */
   probingMode?: ProbingMode;
+  /** How the control stack is mapping the operator's hand onto the robot. */
+  teleopFrame?: TeleopFrameState;
+  /** Sensor calibration state, forwarded by the bridge. */
+  calibration?: CalibrationStatus;
 }
 
 /**
@@ -78,6 +82,175 @@ export interface WrenchSample {
   crcErrors?: number;
   /** Frames per second measured at the sensor. Direct serial only. */
   sensorHz?: number;
+  /** How many sensor samples this frame is the mean of. 0 = not averaged. */
+  averagedSamples?: number;
+  /**
+   * Per-axis force `[min, max]` over the same window the mean covers.
+   *
+   * The displayed value is an average; a spike inside the window does not
+   * survive it. These are what the peak-hold reads, so a transient the
+   * operator needs to know about is not lost to smoothing.
+   */
+  forceExtremes?: [number[], number[]];
+  /**
+   * The shape of the window this frame summarises, folded into bins.
+   *
+   * The bridge sends one frame a second because that is the rate a number on
+   * a screen can be read at. A line is not a number: at one point per second a
+   * 20 s trend is a twenty-step staircase, which is a 1 kHz sensor drawn as if
+   * it were a 1 Hz one. This block carries the window's own shape in the same
+   * frame, so the readout stays calm while the plot shows what the sensor saw.
+   *
+   * Each bin is a mean *and* a min/max, not a chosen sample. Picking one
+   * sample per bin would alias; folding the bin cannot.
+   */
+  forceWaveform?: ForceWaveform;
+  /** Every stage of the calibration pipeline, when a profile is loaded. */
+  compensated?: CompensatedStages;
+  calibrationValid?: boolean;
+  calibrationIssues?: string[];
+}
+
+/** A window of force, binned for drawing. Bins are chronological. */
+export interface ForceWaveform {
+  /** Bins per second. 100 Hz means each bin covers 10 ms. */
+  hz: number;
+  bins: ForceWaveformBin[];
+}
+
+export interface ForceWaveformBin {
+  /** Milliseconds before the frame that carried it. Never negative. */
+  ageMs: number;
+  /** Bin mean, newtons. */
+  fx: number;
+  fy: number;
+  fz: number;
+  /** Extremes of `F_z` inside the bin — the excursion the mean would hide. */
+  fzMin: number;
+  fzMax: number;
+}
+
+/**
+ * The teleoperation mapping, as `us_diff_ik` declares it.
+ *
+ * Read, never recomputed. Which way a hand motion is read is a property of the
+ * control stack; a console that worked it out for itself could disagree with
+ * the robot about which way "right" is, and the operator would have no way to
+ * tell which of the two was lying.
+ */
+export interface TeleopFrameState {
+  /**
+   * Where the operator is standing, as a rotation about the base vertical.
+   *
+   * 0 = alongside the robot, facing the same way. 180 = facing it, which is
+   * what "mirror" means here: fore/aft and left/right both flip. Not a
+   * reflection — walking around to the other side flips both, and a reflection
+   * would break rotation commands, which are pseudovectors.
+   */
+  operatorYawDeg: number;
+  /** Requested but not yet in effect. Applies at the next grip, not mid-motion. */
+  pendingYawDeg: number | null;
+  mirrored: boolean;
+  /** `latched` removes drift; `body` is the older behaviour, kept for comparison. */
+  linearFrame: string;
+  angularFrame: string;
+  tipRollDeg: number;
+  /** Grips since the node started. The latch is taken on the first one. */
+  engageCount: number;
+}
+
+/**
+ * The compensation pipeline, stage by stage.
+ *
+ * Intermediate stages are kept because the verification page has to show
+ * "the raw value is this, and after compensation it is that" side by side —
+ * which stage a reading goes wrong at is which calibration is wrong.
+ */
+export interface CompensatedStages {
+  rawSensor: number[];
+  biasCorrectedSensor: number[];
+  externalSensor: number[];
+  externalProbe: number[];
+  contactProbe: number[];
+  normalForceN: number;
+}
+
+/** Progress of a calibration session in the bridge. */
+export interface CalibrationSession {
+  capturing: string;
+  captureLabel: string;
+  captureProgress: number;
+  captureSamples: number;
+  biasAccepted: boolean | null;
+  biasReason: string;
+  poseCount: number;
+  poseLabels: string[];
+  poseTarget: number;
+  coverage: number;
+  lastError: string;
+  /** Which direction of pose is short, said as an instruction. */
+  coverageHint?: string;
+  /**
+   * The model the operator has just fitted, before any save.
+   *
+   * Typed out rather than left as an opaque record: the calibration page reads
+   * these fields to show what `Fit model` produced. Without that the button
+   * changed nothing on screen, and the operator had to decide whether to save
+   * a result they could not see.
+   *
+   * Snake-case because it is `GravityModel.to_dict()` passed through verbatim.
+   */
+  gravity: GravityFit | null;
+}
+
+/** `GravityModel.to_dict()` from the bridge, field names unchanged. */
+export interface GravityFit {
+  mass_kg: number;
+  com_sensor_m: number[];
+  residual_bias: number[];
+  rms_force_n: number;
+  rms_torque_nm: number;
+  per_axis_force_n: number[];
+  per_axis_torque_nm: number[];
+  coverage: number;
+  poses: number;
+  valid: boolean;
+  issues: string[];
+}
+
+/** Calibration state as the bridge reports it. */
+export interface CalibrationStatus {
+  path: string;
+  /** Residual removed at the working pose, probe frame. Null when not taken. */
+  workingTare?: number[] | null;
+  /** How far the arm is now from the pose the tare was taken at, degrees. */
+  tareOffAxisDeg?: number | null;
+  /** Auto-capture is armed: a drag that settles records a pose by itself. */
+  autoCapture?: boolean;
+  /** Movement has been seen and the next settle will be taken. */
+  autoArmed?: boolean;
+  present: boolean;
+  valid: boolean;
+  issues: string[];
+  mountingAngleDeg: number;
+  axialFlip: boolean;
+  leverSensorToProbeM: number[];
+  rotationProbeFromSensor: number[][];
+  session: CalibrationSession;
+  createdAt?: number;
+  ageHours?: number;
+  mountingNote?: string;
+  biasAccepted?: boolean;
+  biasReason?: string;
+  bias?: number[];
+  massKg?: number | null;
+  comSensorM?: number[] | null;
+  rmsForceN?: number | null;
+  rmsTorqueNm?: number | null;
+  perAxisForceN?: number[] | null;
+  perAxisTorqueNm?: number[] | null;
+  coverage?: number | null;
+  poses?: number | null;
 }
 
 export type TransportKind = 'websocket' | 'http' | 'rosbridge' | 'simulation';
@@ -122,4 +295,17 @@ export interface Transport {
   readonly endpoint: string;
   start(sink: TransportSink): void;
   stop(): void;
+  /**
+   * Send a console command, if this transport has a back channel.
+   *
+   * **Never a motion command.** No transport accepts one and none ever will:
+   * the single path that moves the robot stays with the control stack that
+   * owns the velocity clamps and the watchdogs. What travels here is "capture
+   * at the pose the operator has already moved to", "fit", "save", and which
+   * side of the robot the operator is standing on — none of which move
+   * anything by themselves.
+   *
+   * Returns false when the transport cannot send (no socket, or read-only).
+   */
+  sendCommand?(command: Record<string, unknown>): boolean;
 }

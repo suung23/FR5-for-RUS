@@ -40,6 +40,13 @@ export class WebSocketTransport implements Transport {
     this.open();
   }
 
+  /** Console commands only, never motion — see `Transport.sendCommand`. */
+  sendCommand(command: Record<string, unknown>): boolean {
+    if (this.socket?.readyState !== WebSocket.OPEN) return false;
+    this.socket.send(JSON.stringify(command));
+    return true;
+  }
+
   stop(): void {
     this.stopped = true;
     if (this.retryTimer) clearTimeout(this.retryTimer);

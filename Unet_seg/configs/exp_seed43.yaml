@@ -1,0 +1,10 @@
+# 노이즈 바닥 측정: baseline 과 단 하나의 차이 — 시드. 데이터도 설정도 동일하다.
+# 이 런과 baseline 의 차이가 곧 "아무것도 안 바꿨을 때의 변동폭"이고,
+# 그보다 작은 효과는 이 설정에서 측정할 수 없다.
+defaults: pfus_bladder_reviewed.yaml
+experiment:
+  name: exp_seed43
+  output_dir: runs/exp_seed43
+  seed: 43
+train:
+  checkpoint_dir: checkpoints/exp_seed43

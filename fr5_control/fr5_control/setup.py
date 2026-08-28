@@ -41,6 +41,8 @@ setup(
             'px6d_monitor = fr5_control.px6d_monitor:main',
             # 축 배정·부호를 손으로 눌러 확정하는 절차. AXIS_ORDER 와 §4.4 검증용.
             'px6d_axis_id = fr5_control.px6d_axis_id:main',
+            'probe_tcp_id = fr5_control.probe_tcp_id:main',
+            'px6d_verify = fr5_control.px6d_verify:main',
             # teleop 콘솔 GUI 가 붙는 웹소켓 브리지. 구독 전용이다.
             'telemetry_bridge = fr5_control.telemetry_bridge:main',
             # --- 복강경 시절부터 남은 것. Phase 0 검증 후 legacy 로 옮긴다 ---

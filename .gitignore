@@ -27,3 +27,9 @@ imu_bench/mag_cal.json
 # 같은 정책이다 (보존은 archive 로 따로). 2026-08-21 에 152 MB / 101 MB CSV 두 개가
 # GitHub 하드 리밋(100 MB)에 걸려 push 가 거부되면서 규칙이 한쪽에만 있었음을 알았다.
 imu_bench/logs/
+
+# Electron/npm 의존성. package-lock.json 으로 재현되므로 리포에 담지 않는다.
+# 2026-08-29 에 teleop_gui/node_modules 12,552 개가 4ca145d 에 통째로 커밋되면서
+# 그 안의 electron 바이너리(177.7 MB)가 GitHub 하드 리밋(100 MB)에 걸려 push 가
+# 거부됐다. 미푸시 6 커밋을 filter-branch 로 재작성해 걷어냈다.
+node_modules/

@@ -39,17 +39,24 @@ logger = logging.getLogger("figures")
 
 # --- shared style ---------------------------------------------------------
 SANS = ["Arial", "Helvetica", "Liberation Sans", "Nimbus Sans", "DejaVu Sans"]
-INK = "#1A1A1A"
-INK_SOFT = "#5A5A5A"
-LEADER = "#7A7A7A"
+INK = "#000000"          # all figure text is solid black
+INK_SOFT = "#000000"
+LEADER = "#6B6B6B"       # leader lines stay gray; only text is black
 
-# Figure 1 palette
-TISSUE_FILL, TISSUE_EDGE = "#E6E1D9", "#C3BAAE"
-FLOOR_FILL, FLOOR_EDGE = "#D6CCBF", "#A89C8C"
-BLADDER_FILL, BLADDER_EDGE = "#A8C9CC", "#2F6B72"
-BONE_FILL, BONE_EDGE = "#B6B6B6", "#7C7C7C"
-BEAM_EDGE, BEAM_FILL = "#3E6FA8", "#3E6FA8"
-PROBE_FILL, PROBE_EDGE = "#FFFFFF", "#3A3A3A"
+# Figure 1 palette. Anatomy carries the saturated, conventional illustration
+# colours -- skin, ivory bone, dusky muscle, urine-filled bladder -- while the
+# beam stays a restrained technical steel blue, because it is an annotation
+# drawn over the anatomy rather than a structure of its own. Keeping those two
+# roles in different colour families is what stops the panel reading as a flat
+# pastel infographic.
+SKIN_FILL, SKIN_EDGE = "#EAB98F", "#A9724A"        # outer skin rind
+TISSUE_FILL, TISSUE_EDGE = "#F4DECC", "#C89C7C"    # subcutaneous / soft tissue
+FLOOR_FILL, FLOOR_EDGE = "#BC8071", "#8A5142"      # levator plate (muscle)
+BLADDER_FILL, BLADDER_EDGE = "#A8C6D2", "#2C5B6E"  # urine-filled lumen, muscular wall
+BONE_FILL, BONE_EDGE = "#F0E7D2", "#AF9B78"        # bone is ivory, not gray
+RECTUM_COLOR = "#A9705B"
+BEAM_EDGE, BEAM_FILL = "#2B4A6B", "#2B4A6B"
+PROBE_FILL, PROBE_EDGE = "#FFFFFF", "#2B2B2B"
 
 # Figure 2 palette (as specified)
 GT_COLOR = "#16B9D4"
@@ -109,31 +116,86 @@ def save_both(figure, output_dir: Path, stem: str, dpi: int = 600) -> tuple[Path
 # perineum and angles the beam cranially. The two approach paths are therefore
 # opposed in their vertical component, which is what the figure must show.
 
-_ANTERIOR = [(36.0, 99.0), (30.5, 88.0), (27.6, 76.0), (27.0, 64.0),
-             (29.2, 53.0), (33.6, 44.0), (39.5, 37.5), (45.5, 33.6)]
-_INFERIOR = [(45.5, 33.6), (52.0, 30.4), (60.0, 29.4), (67.5, 31.0)]
-_POSTERIOR = [(67.5, 31.0), (74.0, 38.0), (78.0, 50.0), (79.4, 64.0),
-              (79.0, 80.0), (78.2, 99.0)]
+# Outline control points, walked from the upper abdomen down the anterior wall,
+# across the perineum and back up the posterior wall. The two top points sit
+# above the axes limit on purpose, so the body is clipped by the panel edge and
+# reads as continuing cranially instead of ending in a drawn cut line.
+_OUTLINE = [
+    (30.0, 106.0), (25.6, 90.0), (21.9, 76.0), (21.2, 63.0), (23.7, 52.0),
+    (28.7, 43.4), (35.6, 36.9), (43.0, 32.8),
+    (51.5, 29.8), (60.5, 29.2), (68.8, 30.9),
+    (76.0, 36.6), (81.5, 47.0), (84.6, 60.0), (85.0, 76.0), (83.8, 90.0),
+    (82.5, 106.0),
+]
+#: Fractions of the outline that face anterior and inferior -- the two surfaces
+#: a transducer can be seated on.
+_ANTERIOR_SPAN = (0.05, 0.46)
+_INFERIOR_SPAN = (0.47, 0.66)
 
 
-def _smooth(points: Sequence[tuple[float, float]], samples: int = 200) -> np.ndarray:
-    """Spline through hand-placed control points, so the outline reads as tissue."""
+def _catmull_rom(points: Sequence[tuple[float, float]], per_segment: int = 28,
+                 closed: bool = False) -> np.ndarray:
+    """Smooth curve through every control point, with no optional dependency.
+
+    scipy is not installed on the training box, and the previous implementation
+    silently fell back to linear interpolation there -- which is why the
+    silhouette rendered as a faceted polygon. A Catmull-Rom spline is a few lines
+    of numpy, always available, and passes through its control points, which is
+    what hand-placed anatomy needs.
+    """
     pts = np.asarray(points, dtype=float)
-    if len(pts) < 3:
+    count = len(pts)
+    if count < 3:
         return pts
-    t = np.linspace(0, 1, len(pts))
-    tt = np.linspace(0, 1, samples)
-    try:
-        from scipy.interpolate import make_interp_spline
+    indices = np.arange(count)
+    out = []
+    span = count if closed else count - 1
+    for i in range(span):
+        p0 = pts[indices[(i - 1) % count]] if closed else pts[max(i - 1, 0)]
+        p1 = pts[indices[i % count]]
+        p2 = pts[indices[(i + 1) % count]]
+        p3 = pts[indices[(i + 2) % count]] if closed else pts[min(i + 2, count - 1)]
+        t = np.linspace(0.0, 1.0, per_segment, endpoint=False)[:, None]
+        out.append(0.5 * ((2 * p1) + (-p0 + p2) * t
+                          + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t ** 2
+                          + (-p0 + 3 * p1 - 3 * p2 + p3) * t ** 3))
+    curve = np.vstack(out)
+    return curve if closed else np.vstack([curve, pts[-1]])
 
-        return make_interp_spline(t, pts, k=min(3, len(pts) - 1))(tt)
-    except Exception:  # scipy is optional
-        return np.column_stack([np.interp(tt, t, pts[:, 0]), np.interp(tt, t, pts[:, 1])])
+
+def _smooth(points: Sequence[tuple[float, float]], samples: int = 0) -> np.ndarray:
+    """Smooth an open run of control points."""
+    return _catmull_rom(points)
 
 
 def _body_polygon() -> np.ndarray:
-    """Closed soft-tissue outline shared by both panels."""
-    return np.vstack([_smooth(_ANTERIOR), _smooth(_INFERIOR, 100), _smooth(_POSTERIOR)])
+    """Corner-free body outline shared by both panels."""
+    return _catmull_rom(_OUTLINE, per_segment=34)
+
+
+def _outline_span(span: tuple[float, float]) -> np.ndarray:
+    """The portion of the outline a probe may be seated on."""
+    curve = _body_polygon()
+    lo, hi = (int(round(f * len(curve))) for f in span)
+    return curve[lo:hi]
+
+
+def _offset_inward(polygon: np.ndarray, distance: float) -> np.ndarray:
+    """Offset a curve by ``distance`` along its inward normal.
+
+    Scaling toward the centroid -- the obvious shortcut -- gives a rind that is
+    thick where the outline is far from the centroid and thin where it is close.
+    A true normal offset keeps the skin an even thickness the whole way round,
+    which is the difference between a drawn body and a stretched one.
+    """
+    tangents = np.gradient(polygon, axis=0)
+    normals = np.column_stack([tangents[:, 1], -tangents[:, 0]])
+    lengths = np.linalg.norm(normals, axis=1, keepdims=True)
+    normals = np.divide(normals, np.where(lengths == 0, 1.0, lengths))
+    centroid = polygon.mean(axis=0)
+    if np.sum(normals * (centroid - polygon)) < 0:
+        normals = -normals
+    return polygon + distance * normals
 
 
 def _surface_pose(curve: np.ndarray, target: tuple[float, float]) -> tuple[np.ndarray, float]:
@@ -158,7 +220,7 @@ def _surface_pose(curve: np.ndarray, target: tuple[float, float]) -> tuple[np.nd
 
 
 def _sector(face: tuple[float, float], axis_deg: float, half_angle_deg: float,
-            depth: float, apex_setback: float = 9.0) -> np.ndarray:
+            depth: float, apex_setback: float = 12.0) -> np.ndarray:
     """Curvilinear field of view starting at the transducer face.
 
     The virtual apex sits ``apex_setback`` behind the face, which is what gives a
@@ -183,15 +245,16 @@ def _probe(ax, face: tuple[float, float], axis_deg: float,
     # the face lands exactly on the contact point.
     patch = FancyBboxPatch(
         (-length / 2, -thickness), length, thickness,
-        boxstyle="round,pad=0,rounding_size=1.8",
+        boxstyle="round,pad=0,rounding_size=2.6",
         facecolor=PROBE_FILL, edgecolor=PROBE_EDGE, linewidth=1.1, zorder=6,
+        joinstyle="round", capstyle="round",
     )
     rot = Affine2D().rotate_deg(axis_deg - 90).translate(*face)
     patch.set_transform(rot + ax.transData)
     ax.add_patch(patch)
-    face_line = rot.transform(np.array([[-length / 2 + 1.0, 0.0], [length / 2 - 1.0, 0.0]]))
-    ax.plot(face_line[:, 0], face_line[:, 1], color=PROBE_EDGE, linewidth=2.2,
-            solid_capstyle="butt", zorder=7)
+    face_line = rot.transform(np.array([[-length / 2 + 2.2, 0.0], [length / 2 - 2.2, 0.0]]))
+    ax.plot(face_line[:, 0], face_line[:, 1], color=PROBE_EDGE, linewidth=2.4,
+            solid_capstyle="round", zorder=7)
 
 
 def _label(ax, text: str, xy: tuple[float, float], xytext: tuple[float, float],
@@ -203,7 +266,7 @@ def _label(ax, text: str, xy: tuple[float, float], xytext: tuple[float, float],
                 annotation_clip=False, zorder=8)
 
 
-def _orientation_key(ax, x: float = 91.0, y: float = 92.0, arm: float = 4.2) -> None:
+def _orientation_key(ax, x: float = 95.0, y: float = 93.0, arm: float = 3.8) -> None:
     """Small anterior/posterior, superior/inferior cross in light gray."""
     ax.plot([x, x], [y - arm, y + arm], color="#BBBBBB", linewidth=0.6, zorder=8)
     ax.plot([x - arm, x + arm], [y, y], color="#BBBBBB", linewidth=0.6, zorder=8)
@@ -211,7 +274,7 @@ def _orientation_key(ax, x: float = 91.0, y: float = 92.0, arm: float = 4.2) -> 
                                  ("I", 0, -arm - 0.8, "center", "top"),
                                  ("A", -arm - 0.8, 0, "right", "center"),
                                  ("P", arm + 0.8, 0, "left", "center")):
-        ax.text(x + dx, y + dy, text, fontsize=5.4, color="#9A9A9A", ha=ha, va=va, zorder=8)
+        ax.text(x + dx, y + dy, text, fontsize=5.8, color=INK, ha=ha, va=va, zorder=8)
 
 
 def _draw_anatomy(ax, bladder: tuple[float, float, float, float]) -> tuple:
@@ -230,28 +293,37 @@ def _draw_anatomy(ax, bladder: tuple[float, float, float, float]) -> tuple:
     """
     from matplotlib.patches import Ellipse, Polygon
 
-    body = Polygon(_body_polygon(), closed=True, facecolor=TISSUE_FILL,
-                   edgecolor=TISSUE_EDGE, linewidth=1.0, zorder=1)
+    outline = _body_polygon()
+    body = Polygon(outline, closed=True, facecolor=SKIN_FILL,
+                   edgecolor=SKIN_EDGE, linewidth=1.1, zorder=1,
+                   joinstyle="round")
     ax.add_patch(body)
+    # Inner soft tissue, leaving the outer band reading as skin.
+    ax.add_patch(Polygon(_offset_inward(outline, 2.6), closed=True, facecolor=TISSUE_FILL,
+                         edgecolor=TISSUE_EDGE, linewidth=0.7, zorder=1.2,
+                         joinstyle="round"))
 
-    # Levator plate: kept a clear margin inside the perineal surface, so the band
-    # never appears to leave the body.
-    upper = _smooth([(46.5, 40.0), (53, 37.2), (60, 36.6), (66.0, 38.0)], 90)
-    lower = _smooth([(46.5, 36.4), (53, 33.6), (60, 33.0), (66.0, 34.4)], 90)
-    ax.add_patch(Polygon(np.vstack([upper, lower[::-1]]), closed=True, facecolor=FLOOR_FILL,
-                         edgecolor=FLOOR_EDGE, linewidth=0.9, zorder=2))
+    # Levator plate and rectum are drawn as round-capped strokes rather than
+    # polygon bands: a polygon cannot round its own end caps, and blunt ends read
+    # as a brick laid across the pelvis. Each is stroked twice, a darker wider
+    # pass under a lighter narrower one, which gives an outlined band whose ends
+    # are properly finished.
+    floor = _smooth([(45.0, 37.4), (52.5, 34.3), (61.0, 33.7), (68.4, 35.4)])
+    for width, color, order in ((9.0, FLOOR_EDGE, 2.0), (7.2, FLOOR_FILL, 2.1)):
+        ax.plot(floor[:, 0], floor[:, 1], color=color, linewidth=width,
+                solid_capstyle="round", solid_joinstyle="round", zorder=order)
 
-    # Rectum, stopping at the levator plate rather than crossing it.
-    rectum = _smooth([(64.5, 55.0), (65.8, 48.0), (64.4, 42.5), (62.6, 38.6)], 60)
-    ax.plot(rectum[:, 0], rectum[:, 1], color=FLOOR_EDGE, linewidth=2.6,
-            solid_capstyle="round", zorder=2.5)
+    rectum = _smooth([(67.4, 55.0), (68.8, 48.0), (67.2, 42.6), (65.2, 39.0)])
+    for width, color, order in ((3.6, "#8A5142", 2.4), (2.4, RECTUM_COLOR, 2.5)):
+        ax.plot(rectum[:, 0], rectum[:, 1], color=color, linewidth=width,
+                solid_capstyle="round", zorder=order)
 
-    ax.add_patch(Ellipse((41.5, 40.5), 8.0, 11.4, angle=28, facecolor=BONE_FILL,
+    ax.add_patch(Ellipse((38.8, 40.5), 9.6, 12.0, angle=28, facecolor=BONE_FILL,
                          edgecolor=BONE_EDGE, linewidth=0.9, zorder=4))
 
     cx, cy, w, h = bladder
     ax.add_patch(Ellipse((cx, cy), w, h, facecolor=BLADDER_FILL, edgecolor=BLADDER_EDGE,
-                         linewidth=1.3, zorder=3))
+                         linewidth=1.7, zorder=3))
 
     # The urethra leaves the neck and runs antero-caudally through the levator
     # plate. It stops AT the plate rather than at the skin: drawn to the skin, a
@@ -259,10 +331,11 @@ def _draw_anatomy(ax, bladder: tuple[float, float, float, float]) -> tuple:
     # hanging outside the body is worse than one that ends where it is crossed.
     neck = (cx - w * 0.22, cy - h * 0.48)
     urethra = _smooth([neck, (neck[0] - 1.2, neck[1] - 3.2),
-                       (neck[0] - 2.0, neck[1] - 6.2), (48.6, 35.8)], 60)
-    line, = ax.plot(urethra[:, 0], urethra[:, 1], color=BLADDER_EDGE, linewidth=1.7,
-                    solid_capstyle="round", zorder=5)
-    line.set_clip_path(body)
+                       (neck[0] - 2.0, neck[1] - 6.2), (46.6, 35.2)], 60)
+    for width, color, order in ((3.4, BLADDER_EDGE, 4.8), (2.0, BLADDER_FILL, 4.9)):
+        line, = ax.plot(urethra[:, 0], urethra[:, 1], color=color, linewidth=width,
+                        solid_capstyle="round", zorder=order)
+        line.set_clip_path(body)
     return body, neck, tuple(urethra[len(urethra) // 2])
 
 
@@ -279,7 +352,7 @@ def _beam(ax, face, axis_deg, half_angle, depth, clip_to=None):
     wash = Polygon(polygon, closed=True, facecolor=BEAM_FILL, alpha=0.10,
                    edgecolor="none", zorder=4.6)
     outline = Polygon(polygon, closed=True, facecolor="none", edgecolor=BEAM_EDGE,
-                      linewidth=1.0, zorder=5.6)
+                      linewidth=1.0, zorder=5.6, joinstyle="round")
     for patch in (wash, outline):
         ax.add_patch(patch)
         if clip_to is not None:
@@ -296,19 +369,22 @@ def build_figure1():
     figure.subplots_adjust(left=0.004, right=0.996, top=0.918, bottom=0.175, wspace=0.03)
 
     for ax in (left, right):
-        ax.set_xlim(4, 97)
-        ax.set_ylim(12, 101)
+        ax.set_xlim(1, 101)
+        ax.set_ylim(16, 100)
         ax.set_aspect("equal")
         ax.axis("off")
 
-    anterior = _smooth(_ANTERIOR)
-    inferior = _smooth(_INFERIOR, 100)
+    anterior = _outline_span(_ANTERIOR_SPAN)
+    inferior = _outline_span(_INFERIOR_SPAN)
 
     # ---------------- Panel A -- transabdominal, distended bladder ----------
-    body_a, _, _ = _draw_anatomy(left, bladder=(55.0, 62.0, 34.0, 28.0))
-    face_a, normal_a = _surface_pose(anterior, (28.0, 79.0))
+    body_a, _, _ = _draw_anatomy(left, bladder=(55.5, 62.0, 41.0, 29.0))
+    face_a, normal_a = _surface_pose(anterior, (22.5, 79.0))
     axis_a = normal_a - 30.0            # angled postero-caudally over the pubis
-    _beam(left, face_a, axis_a, 30.0, 52.0, clip_to=body_a)
+    # Depth reaches the far bladder wall measured from the virtual apex, not from
+    # the face: the apex sits `apex_setback` outside the skin, so a depth chosen
+    # by eye leaves the sector cutting through the organ it is meant to contain.
+    _beam(left, face_a, axis_a, 30.0, 58.0, clip_to=body_a)
     _probe(left, face_a, axis_a)
 
     left.set_title("Transabdominal ultrasound (HoLEP-relevant)",
@@ -317,18 +393,18 @@ def build_figure1():
               fontweight="bold", color=INK, va="bottom", ha="left")
     _orientation_key(left)
 
-    _label(left, "Abdominal wall", (30.0, 88.5), (41.0, 96.5))
-    _label(left, "Ultrasound beam", (44.0, 78.0), (60.0, 90.0))
-    _label(left, "Urinary bladder", (61.0, 62.0), (84.0, 70.0))
-    _label(left, "Pubic bone", (37.8, 44.6), (19.0, 50.0), ha="right")
+    _label(left, "Abdominal wall", (24.6, 88.0), (37.0, 95.0))
+    _label(left, "Ultrasound beam", (46.0, 79.0), (62.0, 92.0))
+    _label(left, "Urinary bladder", (66.0, 62.0), (90.0, 72.0))
+    _label(left, "Pubic bone", (35.4, 44.6), (12.0, 50.0), ha="right")
 
     # ---------------- Panel B -- transperineal, pelvic-floor plane ----------
-    body_b, _, _ = _draw_anatomy(right, bladder=(55.0, 58.0, 25.0, 20.0))
-    face_b, normal_b = _surface_pose(inferior, (53.0, 29.5))
+    body_b, _, _ = _draw_anatomy(right, bladder=(55.5, 57.5, 30.0, 21.0))
+    face_b, normal_b = _surface_pose(inferior, (52.0, 29.4))
     axis_b = normal_b + 4.0             # cranially, very slightly posterior
     # Narrower and shallower than panel A on purpose: the pelvic-floor study
     # images the neck, urethra and levator plate, not the bladder dome.
-    _beam(right, face_b, axis_b, 24.0, 32.0, clip_to=body_b)
+    _beam(right, face_b, axis_b, 25.0, 26.0, clip_to=body_b)
     _probe(right, face_b, axis_b)
 
     right.set_title("Transperineal ultrasound (PFUS1)",
@@ -337,13 +413,13 @@ def build_figure1():
                fontweight="bold", color=INK, va="bottom", ha="left")
     _orientation_key(right)
 
-    neck_b = (55.0 - 25.0 * 0.22, 58.0 - 20.0 * 0.48)
-    _label(right, "Perineal probe", face_b, (26.0, 18.0), ha="right")
-    _label(right, "Ultrasound beam", (62.0, 44.0), (82.0, 38.0))
-    _label(right, "Bladder neck", neck_b, (80.0, 55.0))
-    _label(right, "Pubic bone", (37.8, 44.6), (19.0, 50.0), ha="right")
-    _label(right, "Urethra", (47.2, 39.5), (23.0, 33.0), ha="right")
-    _label(right, "Pelvic floor", (58.5, 35.4), (80.0, 27.0))
+    neck_b = (55.5 - 30.0 * 0.22, 57.5 - 21.0 * 0.48)
+    _label(right, "Perineal probe", face_b, (24.0, 20.5), ha="right")
+    _label(right, "Ultrasound beam", (68.5, 47.0), (92.0, 42.0))
+    _label(right, "Bladder neck", neck_b, (90.0, 58.0))
+    _label(right, "Pubic bone", (35.4, 44.6), (12.0, 50.0), ha="right")
+    _label(right, "Urethra", (45.6, 39.0), (16.0, 32.0), ha="right")
+    _label(right, "Pelvic floor", (60.0, 34.6), (92.0, 27.5))
 
     # ---------------- panel annotations ----------------
     for ax, text in ((left, "Broad transabdominal view of the distended bladder"),

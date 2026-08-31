@@ -13,15 +13,16 @@ interface Props {
   telemetry: RobotTelemetry;
   wrench: WrenchSample | null;
   contact: ContactSnapshot;
+  /** Contact-point force, probe frame, `+z` compressing. Null before a wrench. */
+  contactForce: [number, number, number] | null;
+  /** False while no calibration is loaded and the stage is not judged. */
+  contactJudged: boolean;
   peakN: number;
   available: boolean;
   /** When the operator acknowledged the briefing, or null before they have. */
   acknowledged: { at: number } | null;
-  frameCount: number;
-  /** Operator's display zero, or null when the readings are untared. */
-  forceZero: { vector: [number, number, number]; mode: 'raw' | 'compensated'; at: number } | null;
-  onZeroForce(): boolean;
-  onClearForceZero(): void;
+  /** Send a console command. The Zero button is one. */
+  sendCommand(command: Record<string, unknown>): boolean;
 }
 
 /**
@@ -36,20 +37,13 @@ export function StatusColumn({
   telemetry,
   wrench,
   contact,
+  contactForce,
+  contactJudged,
   peakN,
   available,
   acknowledged,
-  frameCount,
-  forceZero,
-  onZeroForce,
-  onClearForceZero,
+  sendCommand,
 }: Props) {
-  // A zero taken on raw channels describes a different pipeline stage than a
-  // compensated reading does. Rather than subtract it from a number it was
-  // never measured against, the zero is set aside and the plate says so.
-  const mode: 'raw' | 'compensated' = wrench?.compensated ? 'compensated' : 'raw';
-  const zeroApplies = forceZero !== null && forceZero.mode === mode;
-  const zero = zeroApplies ? forceZero : null;
 
   return (
     <aside className={styles.column}>
@@ -58,25 +52,18 @@ export function StatusColumn({
           happens to publish a TCP pose today — the readings an operator acts
           on cannot scroll off the screen because an optional field arrived. */}
       <div className={styles.pinned}>
-        <StagePlate contact={contact} telemetry={telemetry} available={available} />
-        <ForceScale
+        <StagePlate
           contact={contact}
-          peakN={peakN}
-          available={available && wrench !== null}
-          sampleCount={frameCount}
-          zeroNormalN={zero ? zero.vector[2] : 0}
-          zeroed={zero !== null}
+          telemetry={telemetry}
+          available={available}
+          judged={contactJudged}
         />
-        {/* The normal force is one component of the contact force, not all of
-            it. A probe dragging sideways can sit inside the normal-force band
-            and still be loading the tool — that shear is what reaches the
-            moment limit through a 201 mm lever. */}
         <ContactForcePlate
-          wrench={available ? wrench : null}
-          zero={zero}
-          staleZero={forceZero !== null && !zeroApplies}
-          onZero={onZeroForce}
-          onClear={onClearForceZero}
+          force={available && wrench !== null ? contactForce : null}
+          peakN={peakN}
+          compensated={wrench?.compensated !== undefined}
+          onZero={() => sendCommand({ command: 'calib.tare' })}
+          onClear={() => sendCommand({ command: 'calib.tare.clear' })}
         />
         {/* The six raw channels are pinned alongside the derived normal force.
             When the sensor's axis assignment is still provisional, the raw
@@ -124,10 +111,13 @@ function StagePlate({
   contact,
   telemetry,
   available,
+  judged,
 }: {
   contact: ContactSnapshot;
   telemetry: RobotTelemetry;
   available: boolean;
+  /** False while no calibration is loaded and the stage is not being judged. */
+  judged: boolean;
 }) {
   const safety = telemetry.safetyState;
   const probingMode = telemetry.probingMode;
@@ -140,11 +130,15 @@ function StagePlate({
         <span className="plate__title">Operating stage</span>
       </div>
       <div className="plate__body">
-        <div className={`field ${contact.phase === 'contact' ? 'field--warn' : ''}`}>
+        <div className={`field ${judged && contact.phase === 'contact' ? 'field--warn' : ''}`}>
           <span className="field__label">Stage</span>
           <span className="field__value">
-            <span className={contact.phase === 'contact' ? 'tag tag--strong' : 'tag tag--off'}>
-              {available ? (contact.phase === 'contact' ? 'CONTACT' : 'APPROACH') : 'UNKNOWN'}
+            <span
+              className={
+                judged && contact.phase === 'contact' ? 'tag tag--strong' : 'tag tag--off'
+              }
+            >
+              {!available ? 'UNKNOWN' : !judged ? 'NOT JUDGED' : contact.phase === 'contact' ? 'CONTACT' : 'APPROACH'}
             </span>
           </span>
         </div>
@@ -176,8 +170,13 @@ function StagePlate({
           </span>
         </div>
         <p className={styles.note}>
-          Stage comes from the force sensor on its own USB link, not from the robot
-          controller. The two can disagree.
+          {judged
+            ? `Stage comes from the force sensor on its own USB link, not from the robot
+               controller. The two can disagree.`
+            : `Stage is not being judged: without a calibration the wrench still carries the
+               tool weighing itself, which clears the ${config.contactEnterN.toFixed(1)} N
+               threshold with nothing touching the probe. The control stack withholds the
+               same judgement.`}
         </p>
       </div>
     </section>
@@ -191,121 +190,6 @@ function StagePlate({
  * the limit as a heavy black rule. The numeric reading above it is the primary
  * source; the track exists to show margin, which a number alone does not.
  */
-function ForceScale({
-  contact,
-  peakN,
-  available,
-  sampleCount,
-  zeroNormalN,
-  zeroed,
-}: {
-  contact: ContactSnapshot;
-  peakN: number;
-  available: boolean;
-  sampleCount: number;
-  /** Offset subtracted from the reading, in newtons. Zero when untared. */
-  zeroNormalN: number;
-  zeroed: boolean;
-}) {
-  const span = config.maxForceN * 1.3;
-  // The classifier keeps running on the untared value — contact is a physical
-  // judgement, not a display preference — so only what is drawn moves here.
-  const magnitude = Math.abs(contact.normalForceN - zeroNormalN);
-  const pct = (v: number) => `${Math.min(100, Math.max(0, (v / span) * 100))}%`;
-  const overLimit = magnitude >= config.maxForceN;
-  const overWarn = magnitude >= config.warnForceN;
-
-  return (
-    <section className="plate">
-      <div className="plate__head">
-        <span className="plate__title">Normal force</span>
-        <span className="plate__aside">
-          {zeroed ? <span className="tag tag--off">ZEROED</span> : null} Fn = −Fz ·{' '}
-          {sampleCount} buffered
-        </span>
-      </div>
-      <div className={`plate__body ${styles.forceBody}`}>
-        <div className={styles.forceRead}>
-          <span className={`num ${styles.forceValue} ${overLimit ? styles.forceValueAlarm : ''}`}>
-            {available ? magnitude.toFixed(1).padStart(5, '\u2007') : '—.—'}
-          </span>
-          <span className={styles.forceUnit}>N</span>
-          {overLimit ? <span className="tag tag--strong">OVER LIMIT</span> : null}
-          {!overLimit && overWarn ? <span className="tag">WARN</span> : null}
-          {!overLimit && !overWarn && magnitude >= config.contactProbingN ? (
-            <span className="tag tag--navy">PROBING</span>
-          ) : null}
-          <span className={styles.forcePeak}>
-            <span className={styles.peakLabel}>PEAK</span>
-            <span className="num">{available ? peakN.toFixed(1) : '—'}</span>
-          </span>
-        </div>
-
-        <div className={styles.scale}>
-          {/* White gauge, black scale. The reading is a deep-green marker, not a
-              filled bar — a filled bar reads as "how much of the budget is
-              used", and what the operator needs is where the value sits
-              relative to the target band and the limit. */}
-          <div className={styles.track}>
-            <span
-              className={styles.safeBand}
-              style={{
-                left: pct(config.targetForceN - config.targetBandN),
-                width: pct(2 * config.targetBandN),
-              }}
-            />
-            <span className={styles.targetMark} style={{ left: pct(config.targetForceN) }} />
-            <span className={styles.probingMark} style={{ left: pct(config.contactProbingN) }} />
-            <span className={styles.warnMark} style={{ left: pct(config.warnForceN) }} />
-            <span className={styles.limitMark} style={{ left: pct(config.maxForceN) }} />
-            {available && peakN > 0 ? (
-              <span className={styles.peakMark} style={{ left: pct(peakN) }} />
-            ) : null}
-            {available ? (
-              <span className={styles.measuredMark} style={{ left: pct(magnitude) }} />
-            ) : null}
-          </div>
-          {/* Numbered ticks are dropped when they would collide with the one
-              after them. Warn and limit sit 1 N apart, and on a 0–15 scale
-              their labels ran together into "1415" — a tick that cannot be
-              read is worse than no tick, because it still looks like a number.
-              Every threshold is named in full in the key below, so nothing is
-              lost by leaving the crowded one unlabelled; the line stays. */}
-          <div className={styles.scaleTicks}>
-            {tickLabels(config.maxForceN, [
-              0,
-              config.targetForceN,
-              config.contactProbingN,
-              config.warnForceN,
-              config.maxForceN,
-            ]).map((value) => (
-              <span key={value} style={{ left: pct(value) }}>{value.toFixed(0)}</span>
-            ))}
-          </div>
-          <div className={styles.scaleKey}>
-            <span>
-              <i className={styles.keyMeasured} /> Measured
-            </span>
-            <span>
-              <i className={styles.keyTarget} /> Hold band {config.targetForceN.toFixed(1)} ±
-              {config.targetBandN.toFixed(1)} N
-            </span>
-            <span>
-              <i className={styles.keyProbing} /> Probing {config.contactProbingN.toFixed(1)} N
-            </span>
-            <span>
-              <i className={styles.keyWarn} /> Warn {config.warnForceN.toFixed(1)} N
-            </span>
-            <span>
-              <i className={styles.keyLimit} /> Limit {config.maxForceN.toFixed(1)} N
-            </span>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
 /**
  * TCP pose.
  *
@@ -436,62 +320,57 @@ function quantise(value: number | undefined, step: number): string {
 }
 
 /**
- * The contact force, decomposed at the probe tip.
+ * The contact force, with the regulated component carried at size.
  *
- * The big number above is one component of this vector — the part along the
- * penetration axis. It is the one the force regulator closes on, so it earns
- * the size. But a probe can sit right in the hold band and still be loaded
- * sideways, and nothing above would say so: `Fn` is blind to shear by
- * construction.
+ * This is the plate the console is built around, because holding an
+ * appropriate contact force *is* the task. What the bar reads is the normal
+ * component at the probe tip — `probe.yaml` defines `F_n = normal_force_sign ·
+ * F_z^probe` and `us_diff_ik` closes its regulator on exactly that, so the
+ * number under the operator's eye and the number the arm is servoing are one
+ * quantity. Every mark on the scale (hold band, probing, warn, limit) is a
+ * normal-force threshold from the same file; drawing the vector's magnitude
+ * against them instead would put the console into disagreement with the robot,
+ * announcing a limit the arm has not reached.
  *
- * Shear is not a curiosity here. It runs through a 201 mm lever to the sensor,
- * so 1.49 N of it reaches the 0.3 N·m moment limit — a force an operator would
- * not think twice about if they only watched the normal reading.
+ * The rest of the vector sits directly beneath, because `F_n` is blind to
+ * shear by construction. A probe can sit dead centre in the hold band and
+ * still be dragging sideways, and that shear runs through a 201 mm lever to
+ * the sensor — 1.49 N of it reaches the 0.3 N·m moment limit, a force nobody
+ * would think twice about from the headline alone. The off-axis angle is the
+ * one number that says "you are not pressing straight in"; two contacts can
+ * share a total and mean opposite things.
  *
- * The off-axis angle is the one number that says "you are not pressing
- * straight in". Two forces can share a total and mean opposite things; the
- * angle separates them without the operator doing the arithmetic.
- *
- * **Where the numbers come from is stated, every frame.** With a calibration
+ * **Where the numbers come from is stated every frame.** With a calibration
  * loaded these are the compensated contact-point values — payload removed,
- * rotated into the probe frame. Without one they are the raw channels, which
- * still carry the tool's own weight, and the plate says so rather than
- * presenting a total that is partly the probe weighing itself.
+ * rotated into the probe frame, moment reference moved to the tip. Without one
+ * they are the raw channels, which still carry the tool weighing itself, and
+ * the plate says so rather than presenting that as a contact reading.
  */
 function ContactForcePlate({
-  wrench,
-  zero,
-  staleZero,
+  force,
+  peakN,
+  compensated,
   onZero,
   onClear,
 }: {
-  wrench: WrenchSample | null;
-  zero: { vector: [number, number, number]; mode: 'raw' | 'compensated'; at: number } | null;
-  /** A zero exists but was taken against a different pipeline stage. */
-  staleZero: boolean;
-  onZero(): boolean;
+  /** Probe frame, `+z` compressing, untared. Null when there is no reading. */
+  force: [number, number, number] | null;
+  peakN: number;
+  compensated: boolean;
+  onZero(): void;
   onClear(): void;
 }) {
-  const compensated = wrench?.compensated;
-  // `contactProbe` is [Fx, Fy, Fz, Mx, My, Mz] in the probe frame, already at
-  // the contact point. Its +z is compression, so no sign flip belongs here —
-  // the flip below is only for the raw channels, which are in sensor axes.
-  const measured = compensated
-    ? (compensated.contactProbe.slice(0, 3) as number[])
-    : wrench
-      ? [wrench.force[0], wrench.force[1], config.normalForceSign * wrench.force[2]]
-      : null;
-  // The zero is subtracted as a vector, not as a magnitude. Taking it off the
-  // total instead would leave the direction untouched, and the direction is
-  // most of what this plate is for.
-  const force =
-    measured && zero
-      ? measured.map((v, i) => v - zero.vector[i])
-      : measured;
+  // Nothing is subtracted here. The operator's zero is the bridge's working
+  // tare, taken out inside `compensate` before the wrench is published, so
+  // this reading and the force the robot's mode switch compares against the
+  // 2 N threshold are already one number. A console-side offset on top would
+  // put them back out of step — the plate would read zero while the arm still
+  // saw whatever it was the plate had hidden.
+  const shown = force;
 
-  const normal = force ? force[2] : null;
-  const shear = force ? Math.hypot(force[0], force[1]) : null;
-  const total = force ? Math.hypot(force[0], force[1], force[2]) : null;
+  const normal = shown ? shown[2] : null;
+  const shear = shown ? Math.hypot(shown[0], shown[1]) : null;
+  const total = shown ? Math.hypot(shown[0], shown[1], shown[2]) : null;
   // Measured from the penetration axis. Undefined at zero load, where the
   // direction of a force that is not there would be noise dressed as an angle.
   const offAxis =
@@ -499,12 +378,33 @@ function ContactForcePlate({
       ? (Math.atan2(shear, normal) * 180) / Math.PI
       : null;
 
+  const span = config.maxForceN * 1.3;
+  // The headline is the **total**, not the normal component (2026-08-31).
+  //
+  // It is the scalar the control stack now acts on: `us_diff_ik` enters contact
+  // probing when ‖F‖ crosses 1 N and closes its regulator on the same ‖F‖
+  // (`ft_sensor.contact_force_mode: magnitude`). A headline showing `F_n` while
+  // the robot switched on `‖F‖` would sit below the probing mark at the moment
+  // the arm dropped to 10 mm/s, and the operator would read the display as
+  // wrong rather than the threshold as crossed.
+  //
+  // It also closes the hole the low threshold opened: at 1 N a probe touching
+  // even slightly off-axis puts most of the contact into shear, and `F_n` alone
+  // reads that as no contact at all. The Normal cell below keeps the component
+  // and its sign, so nothing is lost by leading with the total.
+  const magnitude = total === null ? 0 : total;
+  const pct = (v: number) => `${Math.min(100, Math.max(0, (v / span) * 100))}%`;
+  const overLimit = magnitude >= config.maxForceN;
+  const overWarn = magnitude >= config.warnForceN;
+
   // Total, shear and the angle are magnitudes and cannot go negative, so they
   // keep their width without a sign. Normal can — it goes negative the moment
   // the probe is pulled rather than pressed, and after a zero it sits either
   // side of nothing — so it always carries one.
+  // The total is not repeated here — it is the headline. Three cells that each
+  // say something the headline cannot is worth more than four where one is the
+  // number directly above it, read twice.
   const rows: [string, string, string][] = [
-    ['Total', fixed(total, 1), 'N'],
     ['Normal', signed(normal, 1), 'N'],
     ['Shear', fixed(shear, 1), 'N'],
     ['Off-axis', fixed(offAxis, 0), '°'],
@@ -515,7 +415,11 @@ function ContactForcePlate({
       <div className="plate__head">
         <span className="plate__title">Contact force</span>
         <span className="plate__aside">
-          {zero ? <span className="tag tag--off">ZEROED</span> : null}{' '}
+          {/* Which scalar the headline is, said where the headline is. The
+              control stack keys on this one, and the cells below are its
+              components — without the notation the operator has to infer from
+              the fact that Normal and Shear sit underneath. */}
+          <span className={styles.forceNotation}>‖F‖</span>{' '}
           {compensated ? (
             'probe frame · compensated'
           ) : (
@@ -529,6 +433,85 @@ function ContactForcePlate({
         </span>
       </div>
       <div className={`plate__body ${styles.contactBody}`}>
+        <div className={styles.forceBody}>
+          <div className={styles.forceRead}>
+            <span className={`num ${styles.forceValue} ${overLimit ? styles.forceValueAlarm : ''}`}>
+              {force ? magnitude.toFixed(1).padStart(5, '\u2007') : '—.—'}
+            </span>
+            <span className={styles.forceUnit}>N</span>
+            {overLimit ? <span className="tag tag--strong">OVER LIMIT</span> : null}
+            {!overLimit && overWarn ? <span className="tag">WARN</span> : null}
+            {!overLimit && !overWarn && magnitude >= config.contactProbingN ? (
+              <span className="tag tag--navy">PROBING</span>
+            ) : null}
+            <span className={styles.forcePeak}>
+              <span className={styles.peakLabel}>PEAK</span>
+              <span className="num">{force ? peakN.toFixed(1) : '—'}</span>
+            </span>
+          </div>
+
+          <div className={styles.scale}>
+            {/* White gauge, black scale. The reading is a deep-green marker, not
+                a filled bar — a filled bar reads as "how much of the budget is
+                used", and what the operator needs is where the value sits
+                relative to the target band and the limit. */}
+            <div className={styles.track}>
+              <span
+                className={styles.safeBand}
+                style={{
+                  left: pct(config.targetForceN - config.targetBandN),
+                  width: pct(2 * config.targetBandN),
+                }}
+              />
+              <span className={styles.targetMark} style={{ left: pct(config.targetForceN) }} />
+              <span className={styles.probingMark} style={{ left: pct(config.contactProbingN) }} />
+              <span className={styles.warnMark} style={{ left: pct(config.warnForceN) }} />
+              <span className={styles.limitMark} style={{ left: pct(config.maxForceN) }} />
+              {force && peakN > 0 ? (
+                <span className={styles.peakMark} style={{ left: pct(peakN) }} />
+              ) : null}
+              {force ? (
+                <span className={styles.measuredMark} style={{ left: pct(magnitude) }} />
+              ) : null}
+            </div>
+            {/* Numbered ticks are dropped when they would collide with the one
+                after them. Warn and limit sit 1 N apart, and on a 0–15 scale
+                their labels ran together into "1415" — a tick that cannot be
+                read is worse than no tick, because it still looks like a
+                number. Every threshold is named in full in the key below, so
+                nothing is lost by leaving the crowded one unlabelled. */}
+            <div className={styles.scaleTicks}>
+              {tickLabels(config.maxForceN, [
+                0,
+                config.targetForceN,
+                config.contactProbingN,
+                config.warnForceN,
+                config.maxForceN,
+              ]).map((value) => (
+                <span key={value} style={{ left: pct(value) }}>{value.toFixed(0)}</span>
+              ))}
+            </div>
+            <div className={styles.scaleKey}>
+              <span>
+                <i className={styles.keyMeasured} /> Contact ‖F‖
+              </span>
+              <span>
+                <i className={styles.keyTarget} /> Hold band {config.targetForceN.toFixed(1)} ±
+                {config.targetBandN.toFixed(1)} N
+              </span>
+              <span>
+                <i className={styles.keyProbing} /> Probing {config.contactProbingN.toFixed(1)} N
+              </span>
+              <span>
+                <i className={styles.keyWarn} /> Warn {config.warnForceN.toFixed(1)} N
+              </span>
+              <span>
+                <i className={styles.keyLimit} /> Limit {config.maxForceN.toFixed(1)} N
+              </span>
+            </div>
+          </div>
+        </div>
+
         <div className={styles.contactGrid}>
           {rows.map(([label, value, unit]) => (
             <div className={styles.contactCell} key={label}>
@@ -539,18 +522,24 @@ function ContactForcePlate({
           ))}
         </div>
         <div className={styles.contactZero}>
-          <button type="button" onClick={() => onZero()} disabled={!wrench}>
+          <button type="button" onClick={() => onZero()} disabled={!force}>
             Zero
           </button>
-          <button type="button" onClick={onClear} disabled={zero === null && !staleZero}>
+          {/* Enabled whenever there is a calibration to clear a tare from —
+              the bridge is the one that knows whether a tare exists, and it
+              says so rather than the console guessing. */}
+          <button type="button" onClick={onClear} disabled={!compensated}>
             Clear
           </button>
+          {/* This is the electronic zero, not a display offset: it is written
+              into the calibration profile and subtracted before the wrench is
+              published, so the robot's own contact threshold moves with it.
+              The bridge refuses it unless the probe is pointing down and under
+              2 N — a zero taken with something pressing would fold that load
+              in and the arm would stop reading contact as contact. */}
           <span className={styles.contactZeroNote}>
-            {zero
-              ? `offset ${Math.hypot(...zero.vector).toFixed(2)} N · display only, the robot's own thresholds are untared`
-              : staleZero
-                ? 'zero was taken on the other pipeline stage — take it again'
-                : 'takes the present reading as zero, with nothing touching the probe'}
+            takes the present reading as zero, with nothing touching the probe —
+            reaches the robot, not just this screen
           </span>
         </div>
         {!compensated ? (

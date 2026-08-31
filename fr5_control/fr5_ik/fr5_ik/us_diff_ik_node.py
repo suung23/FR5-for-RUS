@@ -133,11 +133,27 @@ class UsDiffIkNode(Node):
         self.contact_probing_enabled = bool(
             self.get_parameter("teleop.contact_probing_enabled").value
         )
+        # 이탈 문턱이 0 이하면 "되돌아가지 않는다" 는 뜻이다. ROS2 파라미터는 None 을
+        # 표현하지 못하므로 그 자리를 0 이 대신한다.
+        release_n = float(self.get_parameter("teleop.contact_probing_release_n").value)
         self.mode_switch = ProbingModeSwitch(
             enter_force_n=float(self.get_parameter("teleop.contact_probing_force_n").value),
             confirm_s=float(self.get_parameter("teleop.contact_probing_confirm_s").value),
+            release_force_n=release_n if release_n > 0.0 else None,
+            release_confirm_s=float(
+                self.get_parameter("teleop.contact_probing_release_confirm_s").value
+            ),
         )
         self.normal_sign = float(self.get_parameter("ft_sensor.normal_force_sign").value)
+        # 판정과 제어가 무엇을 "접촉력" 으로 부를지. §4.4 · probing_mode 참조.
+        self.contact_force_mode = str(
+            self.get_parameter("ft_sensor.contact_force_mode").value
+        ).strip().lower()
+        if self.contact_force_mode not in ("magnitude", "normal"):
+            raise RuntimeError(
+                f"ft_sensor.contact_force_mode 는 magnitude 또는 normal 이어야 한다: "
+                f"{self.contact_force_mode!r}"
+            )
 
         # 병진 기준 프레임. "latched" 가 표류를 없애는 쪽, "probe" 가 예전 거동이다.
         self.linear_frame = str(self.get_parameter("teleop.linear_frame").value)
@@ -159,7 +175,11 @@ class UsDiffIkNode(Node):
         # -- 상태 -------------------------------------------------------
         self.q = None
         self.twist_cmd = np.zeros(6)
+        #: 법선력 ``F_n = sign x F_z``. 양수 = 압축.
         self.normal_force = 0.0
+        #: 접촉력 크기 ``‖F‖``. 부호가 없으므로 인장도 양수로 나온다 — 아래
+        #: :meth:`_control_force` 가 그 구멍을 F_n 의 부호로 막는다.
+        self.contact_force_mag = 0.0
         self.wrench_stamp = None
         self.last_twist_time = None
         self.last_joint_time = None
@@ -238,11 +258,43 @@ class UsDiffIkNode(Node):
             f"속도 클램프: 접근 {self.approach_linear * 1000:.0f} mm/s · "
             f"{self.approach_angular:.2f} rad/s  →  접촉 "
             f"{self.contact_linear * 1000:.0f} mm/s · {self.contact_angular:.2f} rad/s "
-            + (f"(F_n {self.mode_switch.enter_force_n:.1f} N 에서 전환, 단방향)"
+            + (f"({self.mode_switch.enter_force_n:.1f} N 에서 전환, "
+               + ("복귀 가능" if self.mode_switch.reversible else "단방향") + ")"
                if self.contact_probing_enabled else "(전환 꺼짐)")
             + ("   ← 접근 상한이 이미 접촉용이다. freespace:=true 를 빠뜨린 것이다"
                if self.approach_linear <= 0.02 else "")
         )
+        # 무엇을 접촉력으로 보는지, 그리고 어느 힘을 유지하는지를 기동 로그에 남긴다.
+        # 이 두 줄이 없으면 "왜 안 잡히나 / 왜 이만큼만 누르나" 를 조작감으로만
+        # 판단하게 된다. 문턱이 한 자릿수 N 으로 내려온 뒤로는 그 차이가 눈에 잘 안 띈다.
+        self.get_logger().info(
+            f"접촉력 기준: {self.contact_force_mode}"
+            + ("  (‖F‖ = √(Fx²+Fy²+Fz²), 부호는 F_n 이 준다)"
+               if self.contact_force_mode == "magnitude"
+               else f"  (F_n = {self.normal_sign:+.0f} x F_z)")
+        )
+        self.get_logger().info(
+            f"힘 유지: 목표 {self.regulator.target_force_n:.1f} ± "
+            f"{self.regulator.deadband_n:.1f} N · B_z {self.regulator.admittance_b_z:.0f} N·s/m · "
+            f"경고 {self.regulator.warn_force_n:.1f} · 한계 {self.regulator.max_force_n:.1f} N"
+            + (f" · 이탈 {self.mode_switch.release_force_n:.1f} N / "
+               f"{self.mode_switch.release_confirm_s:.1f} s"
+               if self.mode_switch.reversible else " · 이탈 없음(단방향)")
+        )
+        if self.mode_switch.reversible and (
+            self.regulator.target_force_n - self.regulator.deadband_n
+            <= self.mode_switch.release_force_n
+        ):
+            # 유지 밴드의 아래끝이 이탈 문턱 아래로 내려가면, 힘을 정상적으로 잡고
+            # 있는 동안에도 이탈 조건이 성립한다 — 모드가 접촉과 접근을 오간다.
+            self.get_logger().warn(
+                f"⚠️ 유지 밴드 아래끝 "
+                f"{self.regulator.target_force_n - self.regulator.deadband_n:.2f} N 이 "
+                f"이탈 문턱 {self.mode_switch.release_force_n:.2f} N 이하다 — "
+                "힘을 잡고 있는 중에 접근으로 되돌아갈 수 있다. "
+                "contact_control.target_force_n 을 올리거나 "
+                "teleop.contact_probing_release_n 을 내려라."
+            )
         if not self.contact_probing_enabled:
             self.get_logger().warn(
                 "⚠️ 접촉 프로빙 전환이 꺼져 있다 (teleop.contact_probing_enabled=false). "
@@ -299,13 +351,31 @@ class UsDiffIkNode(Node):
         # 사라지고, 남는 것은 힘 한계(safety.max_normal_force_n)뿐이다. 그래서
         # 기본값은 켜짐이고, 끄면 기동 로그에 경고가 찍힌다.
         self.declare_parameter("teleop.contact_probing_enabled", True)
-        self.declare_parameter("teleop.contact_probing_force_n", 8.0)
+        # 2026-08-31: 8.0 → 1.0 → 2.0. 함께 판정 기준이 F_n 에서 접촉력 크기 ‖F‖ 로
+        # 바뀌었다 (ft_sensor.contact_force_mode). 이 크기의 문턱은 F_z 하나로는
+        # 못 잡는다 — 프로브가 조금만 기울어 닿으면 상당 부분이 횡력으로 가기 때문이다.
+        # 값의 근거는 probe.yaml 이 들고 있다. 여기 기본값은 그것을 따라간다.
+        self.declare_parameter("teleop.contact_probing_force_n", 2.0)
         self.declare_parameter("teleop.contact_probing_confirm_s", 0.02)
+        # 접근으로 되돌아가는 문턱. 0 이하 = 되돌아가지 않는다(예전 단방향 거동).
+        #
+        # 1 N 문턱에서는 스치기만 해도 전환되므로 단방향을 유지할 수 없다. 접촉
+        # 프로빙에서는 조작자의 여섯 축이 모두 0 이라 스스로 빠져나올 수단도 없다 —
+        # 데드맨을 놓아 워치독 후퇴를 부르는 것이 유일한 길이고, 그 후퇴의 종료
+        # 조건(watchdog.retreat_until_force_n)과 같은 자리에 이 값을 둔다.
+        self.declare_parameter("teleop.contact_probing_release_n", 0.3)
+        # 이탈 확인 창. 진입(20 ms)보다 훨씬 길다 — 누르는 중의 순간적인 힘 감소로
+        # 접근 속도가 되살아나는 것이 이 판정에서 가장 위험한 오작동이다.
+        self.declare_parameter("teleop.contact_probing_release_confirm_s", 0.5)
         # 교정이 유효할 때만 힘 기반 동작을 연다 (사양 §6·§7).
         self.declare_parameter("contact_control.require_valid_calibration", True)
 
         # 접촉 프로빙에서 로봇이 스스로 잡는 힘. §7 admittance 의 첫 구현이다.
-        self.declare_parameter("contact_control.target_force_n", 5.0)
+        # 2026-08-31: 5.0 → 3.0, 그리고 **무엇의 N 인지도 바뀌었다** — 법선력이 아니라
+        # 접촉력 크기다 (contact_force_mode). 진입 문턱(1.0)보다 높으므로, 닿는
+        # 순간부터 로봇이 스스로 여기까지 파고든다. probe.yaml 이 값의 출처이며
+        # 그 근거도 거기 있다.
+        self.declare_parameter("contact_control.target_force_n", 3.0)
         self.declare_parameter("contact_control.deadband_n", 0.5)
         self.declare_parameter("contact_control.admittance_b_z", 1000.0)
         self.declare_parameter("contact_control.retreat_speed_m_s", 0.005)
@@ -322,6 +392,13 @@ class UsDiffIkNode(Node):
         self.declare_parameter("watchdog.max_retreat_s", 3.0)
 
         self.declare_parameter("ft_sensor.normal_force_sign", -1.0)
+        # 접촉 판정과 힘 유지가 무엇을 "접촉력" 으로 볼 것인가.
+        #
+        #   magnitude: ‖F‖ = √(Fx²+Fy²+Fz²). 기본. 방향에 무관하므로 프로브가
+        #              기울어 닿아도 잡힌다. 1 N 문턱은 이것이 전제다.
+        #   normal:    F_n = sign x F_z. 2026-08-31 이전 거동. 전자저울 검증처럼
+        #              축방향으로만 누르는 절차에서 두 값이 같아야 함을 확인할 때 쓴다.
+        self.declare_parameter("ft_sensor.contact_force_mode", "magnitude")
         # 어느 wrench 를 볼 것인가. 우리 PX6D 는 컨트롤러에 안 물리므로 기본
         # `wrench`(us_servo 발행)는 0 이다. probe.yaml 이 `wrench_px6d` 를 준다.
         self.declare_parameter("ft_sensor.wrench_topic", "wrench")
@@ -490,10 +567,36 @@ class UsDiffIkNode(Node):
             self.get_logger().info(f"교정 유효성: {msg.data}")
         self.calibration_valid = bool(msg.data)
 
+    def _control_force(self) -> float:
+        """판정과 힘 유지가 함께 보는 스칼라 [N]. 양수 = 누름.
+
+        ``magnitude`` 에서는 ``‖F‖`` 인데, 크기에는 부호가 없으므로 프로브가 **당겨질
+        때도 양수**로 나온다. 그대로 쓰면 인장이 접촉으로 잡히고, 조절기는 "이미 충분히
+        누르고 있다" 고 판단해 물러난다 — 실제로는 붙어서 끌려가는 중인데.
+
+        그래서 법선력의 부호를 크기에 얹는다. ``F_n < 0`` (당김) 이면 음수를 돌려주고,
+        그러면 문턱을 넘지 못하며 조절기는 전진 쪽으로 판단한다. 부호만 빌려 오고
+        크기는 세 축 전부에서 온다.
+        """
+        if self.contact_force_mode == "normal":
+            return self.normal_force
+        return (
+            self.contact_force_mag if self.normal_force >= 0.0 else -self.contact_force_mag
+        )
+
     def _on_wrench(self, msg: WrenchStamped) -> None:
         now = self.get_clock().now()
         previous = self.wrench_stamp
         self.normal_force = self.normal_sign * msg.wrench.force.z
+        # 세 축 크기. 브리지가 교정을 실었으면 이 토픽은 이미 중력보상된 프로브
+        # 프레임 접촉 렌치다 (telemetry_bridge.publish_wrench).
+        self.contact_force_mag = float(
+            math.sqrt(
+                msg.wrench.force.x ** 2
+                + msg.wrench.force.y ** 2
+                + msg.wrench.force.z ** 2
+            )
+        )
         self.wrench_stamp = now
 
         # 교정이 유효하지 않으면 **모드 판정 자체를 하지 않는다.**
@@ -522,26 +625,55 @@ class UsDiffIkNode(Node):
         # 그보다 빨리 올 때 문턱을 넘는 순간을 지나칠 수 있다.
         dt = 0.0 if previous is None else (now - previous).nanoseconds / 1e9
         was_contact = self.mode_switch.in_contact_probing
-        self.mode_switch.update(self.normal_force, dt)
+        self.mode_switch.update(self._control_force(), dt)
         if self.mode_switch.in_contact_probing and not was_contact:
             self._enter_contact_probing()
+        elif was_contact and not self.mode_switch.in_contact_probing:
+            self._leave_contact_probing()
 
     def _enter_contact_probing(self) -> None:
-        """접촉 프로빙으로 넘어간다. 상한을 갈아 끼우고 알린다.
-
-        단방향이다 — 힘이 다시 떨어져도 접근 상한으로 돌아가지 않는다. 프로브를 살짝
-        떼는 것은 접촉 작업의 일부이지 작업의 끝이 아니고, 그때마다 상한이 15 배로
-        뛰면 같은 손동작에 로봇 반응이 달라진다.
-        """
+        """접촉 프로빙으로 넘어간다. 상한을 갈아 끼우고 알린다."""
         self.max_linear = self.contact_linear
         self.max_angular = self.contact_angular
         self.get_logger().warn(
-            f"접촉 프로빙 전환 — F_n {self.normal_force:.2f} N "
-            f"(문턱 {self.mode_switch.enter_force_n:.1f} N). "
+            f"접촉 프로빙 전환 — F {self._control_force():.2f} N "
+            f"({self.contact_force_mode}, 문턱 {self.mode_switch.enter_force_n:.1f} N; "
+            f"F_n {self.normal_force:+.2f} · ‖F‖ {self.contact_force_mag:.2f}). "
             f"속도 상한 {self.approach_linear * 1000:.0f} → "
             f"{self.contact_linear * 1000:.0f} mm/s · "
             f"{self.approach_angular:.2f} → {self.contact_angular:.2f} rad/s. "
-            f"되돌아가지 않는다 — 접근 속도가 다시 필요하면 세션을 새로 시작하라."
+            f"힘 유지 시작 — 목표 {self.regulator.target_force_n:.1f} ± "
+            f"{self.regulator.deadband_n:.1f} N."
+            + (
+                f" {self.mode_switch.release_force_n:.1f} N 아래로 "
+                f"{self.mode_switch.release_confirm_s:.1f} s 지속되면 접근으로 되돌아간다."
+                if self.mode_switch.reversible
+                else " 되돌아가지 않는다 — 접근 속도가 다시 필요하면 세션을 새로 시작하라."
+            )
+        )
+        self._publish_mode()
+
+    def _leave_contact_probing(self) -> None:
+        """접근으로 되돌아간다. 접촉이 확실히 끝났을 때만 여기 온다.
+
+        이탈 문턱과 확인 창이 이미 그것을 보장한다 (``probing_mode`` 참조). 여기서는
+        상한을 되돌리고 조절기의 마지막 사유를 지운다 — 그 문장이 화면에 남아 있으면
+        힘을 안 잡고 있는데 잡고 있는 것처럼 읽힌다.
+
+        ``has_contacted`` 걸쇠는 지우지 않는다. "이번 세션에 무언가에 닿았다" 는 사실은
+        모드가 되돌아간다고 사라지지 않으며, 콘솔의 접촉 걸쇠 표시가 그것을 본다.
+        """
+        self.max_linear = self.approach_linear
+        self.max_angular = self.approach_angular
+        self.regulator_reason = ""
+        self.get_logger().warn(
+            f"접근 전환 — F {self._control_force():.2f} N 이 "
+            f"{self.mode_switch.release_force_n:.1f} N 아래로 "
+            f"{self.mode_switch.release_confirm_s:.1f} s 지속됐다. "
+            f"속도 상한 {self.contact_linear * 1000:.0f} → "
+            f"{self.approach_linear * 1000:.0f} mm/s · "
+            f"{self.contact_angular:.2f} → {self.approach_angular:.2f} rad/s. "
+            f"힘 유지 해제 — z 축이 조작자에게 돌아갔다."
         )
         self._publish_mode()
 
@@ -600,7 +732,9 @@ class UsDiffIkNode(Node):
             and (now - self.wrench_stamp).nanoseconds / 1e9 < 0.5
         )
 
-        if wrench_fresh and self.normal_force < self.retreat_force:
+        # 종료 조건도 판정과 같은 스칼라를 본다. F_n 만 보면 프로브가 옆으로 눌린 채
+        # 남아 있어도 "풀렸다" 가 되고, 그 상태로 접근 속도가 되살아난다.
+        if wrench_fresh and self._control_force() < self.retreat_force:
             return None  # 접촉이 풀렸다
         if elapsed > self.max_retreat:
             self.get_logger().error(
@@ -636,11 +770,16 @@ class UsDiffIkNode(Node):
         if not self.mode_switch.in_contact_probing:
             return twist
 
+        # 전환이 꺼져 있으면 모드가 접촉 프로빙이 될 수 없으므로 위에서 이미
+        # 돌아갔다. 그래도 남겨 두되 **twist 를 돌려준다** — 예전에는 여기서 값 없이
+        # return 해 None 이 나갔고, 그 None 은 제어 루프의 솔버까지 가서 터진다.
+        # 도달하지 않는 줄이라 증상이 없었을 뿐, 조건 하나가 바뀌면 정지가 아니라
+        # 예외로 나타날 자리였다.
+        if not self.contact_probing_enabled:
+            return twist
+
         # 교정이 유효하지 않으면 힘 기반 동작을 열지 않는다. 보정되지 않은 값으로
         # 힘을 잡으면 자세가 바뀔 때마다 목표가 수 N 씩 어긋난 채로 조직을 민다.
-        if not self.contact_probing_enabled:
-            return
-
         if self.require_calibration and self.calibration_valid is not True:
             if not self._calibration_blocked_announced:
                 self.get_logger().error(
@@ -664,7 +803,7 @@ class UsDiffIkNode(Node):
             )
             return np.zeros(6)
 
-        out = self.regulator.update(self.normal_force)
+        out = self.regulator.update(self._control_force())
         self.regulator_reason = out.reason
 
         regulated = np.zeros(6)

@@ -99,13 +99,27 @@ class CalibrationProfile:
 
     # -- 유효성 -----------------------------------------------------------
 
-    def validity(self, now: float | None = None) -> tuple:
+    def validity(self, now: float | None = None,
+                 stale_after_s: float | None = None) -> tuple:
         """제어를 열어도 되는지 판정한다. ``(valid, issues)`` 를 돌려준다.
 
         A 단계만 끝난 프로파일은 **유효하지 않다.** 그 상태로 접촉 제어를 열면 자세가
         바뀌는 순간 힘이 수 N 씩 어긋난다 — 영점을 잰 자세에서만 맞는 값이다.
+
+        Args:
+            now: 기준 시각. 시험용.
+            stale_after_s: 만료 시간 [s]. ``None`` 이면 :data:`STALE_AFTER_S`.
+                0 이하이면 **나이를 보지 않는다.**
+
+                기본 24 시간은 "센서 영점이 하루면 흐른다" 는 보수적 가정이다.
+                그 가정을 측정으로 대체했다면(같은 프로파일로 여러 날에 걸쳐
+                무접촉 잔차가 유지되는 것을 확인했다면) 늘리는 것이 맞다. 다만
+                **늘린다고 흐름이 멈추지는 않는다** — 만료를 끄는 것은 "흐르지
+                않는다" 는 주장이며, 그 주장의 근거는 이 코드가 아니라 사용자가
+                들고 있어야 한다.
         """
         now = time.time() if now is None else now
+        limit = STALE_AFTER_S if stale_after_s is None else float(stale_after_s)
         issues = []
         if not self.bias.accepted:
             issues.append(f"전자 영점 거부됨: {self.bias.reason}")
@@ -114,7 +128,7 @@ class CalibrationProfile:
         elif not self.gravity.valid:
             issues.extend(f"중력 모델: {m}" for m in self.gravity.issues)
         age = now - self.created_at
-        if age > STALE_AFTER_S:
+        if limit > 0.0 and age > limit:
             issues.append(f"교정이 오래됐다 ({age / 3600:.1f} 시간 전)")
         return (not issues), issues
 

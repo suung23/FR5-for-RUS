@@ -31,8 +31,8 @@ export function severityOfSafety(state: SafetyState | undefined): Severity {
   }
 }
 
-export function severityOfForce(normalForceN: number): Severity {
-  const magnitude = Math.abs(normalForceN);
+export function severityOfForce(contactForceN: number): Severity {
+  const magnitude = Math.abs(contactForceN);
   if (magnitude >= config.maxForceN) return 'critical';
   if (magnitude >= config.warnForceN) return 'caution';
   return 'nominal';

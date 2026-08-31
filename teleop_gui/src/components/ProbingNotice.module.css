@@ -1,0 +1,88 @@
+/*
+ * Standing bar for contact probing. Sits in the same slot as the HOLD bar,
+ * directly under the status strip.
+ *
+ * Taller than HOLD because it carries two sentences rather than one, and
+ * because its job is partly to be noticed. It is still a bar and not a panel:
+ * it displaces the workspace by a fixed amount instead of covering anything,
+ * so the layout below it does not reflow into a different shape when the mode
+ * changes.
+ *
+ * The heavy left edge is the accent — which is blue for exactly as long as this
+ * bar is on screen, since the same mode drives both. Structure is doing the
+ * work: the bar exists, has a border, and says CONTACT PROBING in a tag. An
+ * operator who cannot see the colour loses nothing.
+ */
+.notice {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 12px 8px;
+  background: var(--panel-pale);
+  border-top: 1px solid var(--green);
+  border-bottom: 1px solid var(--green);
+  border-left: 4px solid var(--green);
+  color: var(--ink);
+}
+
+/* The tag keeps its own line height so the two sentences beside it can wrap
+   without dragging it off the first line. */
+.tag {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.line {
+  margin: 0;
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+/* Bold carries the number the operator is being told is under the robot's
+   control, not the console's. Weight rather than colour, per the palette rule
+   in global.css — every glyph on this screen is black. */
+.line b {
+  font-weight: 700;
+}
+
+.elapsed {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  margin-left: auto;
+  padding-left: 10px;
+}
+
+.elapsedLabel {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.elapsed .num {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* Narrow console: the elapsed clock drops below the text rather than squeezing
+   the sentences into a column two words wide. */
+@media (max-width: 1240px) {
+  .notice {
+    flex-wrap: wrap;
+  }
+
+  .elapsed {
+    margin-left: 0;
+    padding-left: 0;
+  }
+}

@@ -3,6 +3,7 @@ import { Line, OrbitControls } from '@react-three/drei';
 import { useMemo } from 'react';
 import { Fr5Model } from './Fr5Model';
 import { STACK } from './ProbeAssembly';
+import { usePalette } from '../telemetry/theme';
 import styles from './Workspace.module.css';
 
 interface Props {
@@ -148,15 +149,25 @@ function Phantom({ under }: { under?: [number, number, number] }) {
         <sphereGeometry args={[0.105, 40, 22, 0, Math.PI * 2, 0, Math.PI / 2]} />
         <meshStandardMaterial color="#dcdedb" roughness={0.94} metalness={0} />
       </mesh>
-      <mesh position={[0, 0, -0.017]}>
-        <ringGeometry args={[0.104, 0.110, 48]} />
-        <meshBasicMaterial color="#b9d0be" />
-      </mesh>
+      <PhantomRing />
     </group>
   );
 }
 
+/* Split out so the ring can take the palette without making `Phantom` a
+   consumer — it has no other colour of its own. */
+function PhantomRing() {
+  const palette = usePalette();
+  return (
+    <mesh position={[0, 0, -0.017]}>
+      <ringGeometry args={[0.104, 0.110, 48]} />
+      <meshBasicMaterial color={palette['--rule']} />
+    </mesh>
+  );
+}
+
 function GroundPlan() {
+  const palette = usePalette();
   const lines = useMemo(() => {
     const out: [number, number, number][][] = [];
     const half = 0.6;
@@ -180,7 +191,7 @@ function GroundPlan() {
         <Line
           key={i}
           points={points}
-          color="#b9d0be"
+          color={palette['--rule']}
           lineWidth={i % 2 === 0 ? 1 : 0.6}
         />
       ))}
@@ -188,10 +199,11 @@ function GroundPlan() {
   );
 }
 
-/** Flange path over the recent past — deep green, one of the three state axes. */
+/** Flange path over the recent past, drawn in the console's structural accent. */
 function Trajectory({ points }: { points: [number, number, number][] }) {
+  const palette = usePalette();
   if (points.length < 2) return null;
-  return <Line points={points} color="#17683a" lineWidth={1.2} dashed={false} />;
+  return <Line points={points} color={palette['--green']} lineWidth={1.2} dashed={false} />;
 }
 
 function ScaleBar({ contact, available }: { contact: boolean; available: boolean }) {

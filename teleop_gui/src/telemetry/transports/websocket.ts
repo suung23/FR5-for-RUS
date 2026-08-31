@@ -1,5 +1,5 @@
 import type { Transport, TransportSink } from '../types';
-import { parseTelemetry, parseWrench } from './parse';
+import { parseAck, parseTelemetry, parseWrench } from './parse';
 
 type FrameKind = 'telemetry' | 'wrench' | 'unknown';
 
@@ -93,6 +93,15 @@ export class WebSocketTransport implements Transport {
       // frame has no joint fields, so parsing it as telemetry too produced a
       // valid-looking frame with everything absent, and at 50 Hz that wiped
       // the joint state between every telemetry update.
+      // Acks first. Without this they fell through to `parseTelemetry`, which
+      // accepts almost anything — so a refusal arrived as a telemetry frame
+      // with every field absent, and the reason it carried was never seen.
+      const ack = parseAck(payload);
+      if (ack) {
+        sink.onAck(ack);
+        return;
+      }
+
       const kind = frameKind(payload);
 
       if (kind !== 'telemetry') {

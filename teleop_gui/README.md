@@ -81,15 +81,27 @@ the measured sample rate and the CRC count since the stream synchronised, so
 leaving the console.
 
 **The readout rate and the trace rate are different numbers, deliberately.**
-The bridge sends one wrench frame a second (`bridge.wrench_hz`), because that
-is the rate at which a figure on a screen can actually be read — faster and it
-is only the last digits moving. A line is not a figure, though, and at one
-point a second a 20 s trend is a twenty-step staircase drawn from a 1 kHz
-sensor. So each frame also carries that second's *shape*, folded into 10 ms
+The bridge refreshes the figure once a second (`bridge.wrench_hz`), because
+that is the rate at which a figure on a screen can actually be read — faster
+and it is only the last digits moving. A line is not a figure, though, and at
+one point a second a 20 s trend is a twenty-step staircase drawn from a 1 kHz
+sensor. So the frames also carry the *shape* of the window, folded into 10 ms
 bins of mean plus min/max (`bridge.wrench_waveform_hz`, default 100, `0`
-disables). The frame rate does not change — a 1 kHz stream sent frame-by-frame
+disables). Bins are folded, never sampled — a 1 kHz stream sent sample-by-sample
 would be a thousand JSON messages a second, and the console would spend the
 budget parsing rather than drawing.
+
+**Resolution and arrival rate are a third, separate number**
+(`bridge.wrench_stream_hz`, default 10). A whole second of 100 Hz bins handed
+over once a second draws at full resolution and *still* lurches forward in
+one-second slabs — a trace that is stamped rather than streamed. So frames go
+out ten times a second carrying only the bins closed since the last one, and
+the readout fields simply repeat in between: the figure changes once a second
+as before, while the line advances every 100 ms. Raising it makes the trace
+flow more finely at the cost of more frames; it is clamped up to
+`bridge.wrench_hz`, since the figure cannot refresh faster than frames leave.
+The console's own redraw ceiling (`CHART_HZ`, 25) must stay above it, or the
+slabs come back at that rate instead.
 
 The trend plate shades the min/max band under the mean line and labels itself
 with the bin rate, so a bin's worth of chatter that the mean erases is still on
@@ -98,6 +110,26 @@ alias, which is the failure that makes a resting probe look noisy and a
 chattering one look calm. Frames without a waveform block — a controller-sourced
 wrench, or `bridge.wrench_waveform_hz: 0` — draw one point per frame and the
 plate drops the label rather than implying a resolution it does not have.
+
+**The trend fits its axis to the signal by default** (`FIT` in the plate
+header; `FULL` puts the whole 0–limit range back). Across the full range a
+0.01 N change is an eighth of a pixel, which for a probe holding a few newtons
+means the whole point of a 100 Hz trace is invisible. Fitted, the axis snaps to
+round tick steps and opens no narrower than 0.2 N — four times the PX6D's
+±0.05 N per-axis noise — so a 0.01 N change is about 10 px and noise stays a
+band rather than the whole picture. The span is printed beside the toggle,
+because a fitted axis is only honest if the operator can see how much it
+magnified.
+
+Quantising to tick steps is what keeps it readable: an axis recomputed from the
+data every flush slides continuously as points leave the 20 s window, and a
+trace that moves because the axis moved cannot be read at all. Warn and limit
+rules are drawn only when they are actually on the plot — otherwise the key
+says they are off scale and points at the gauge, which always carries absolute
+margin. Resolution is bounded by the bin, not the axis: at 100 Hz each point
+averages ten 1 kHz samples, so per-bin noise is about 0.016 N. To resolve
+0.01 N per point rather than per few points, lower `bridge.wrench_waveform_hz`
+(50 ms bins give roughly 0.007 N).
 
 ### Other transports
 
@@ -255,14 +287,30 @@ than either being independently adjustable.
 
 | Value | Default | From |
 |---|---|---|
-| contact enter | 7.0 N | `safety.max_normal_force_n` |
-| contact release | 0.2 N | `watchdog.retreat_until_force_n` |
-| warning | 6.0 N | `safety.warn_normal_force_n` |
+| contact enter | 2.0 N | `teleop.contact_probing_force_n` |
+| contact release | 0.3 N | `teleop.contact_probing_release_n` |
+| hold band | 3.0 ± 0.5 N | `contact_control.target_force_n`, `deadband_n` |
+| warning | 14.0 N | `safety.warn_normal_force_n` |
+| limit | 15.0 N | `safety.max_normal_force_n` |
 | `F_n = sign × F_z` | −1.0 | `ft_sensor.normal_force_sign` |
 
-`ContactDetector` is a direct port of `fr5_control/contact_state.py`, including
-the hysteresis, the confirmation windows (5 ms to enter, 50 ms to release) and
-the latch. If one changes, change both.
+**All of these are compared against the contact-force magnitude** (2026-08-31).
+`ft_sensor.contact_force_mode` is `magnitude`, so `us_diff_ik` switches mode,
+runs its retreat watchdog and closes its regulator on `‖F‖ = √(Fx²+Fy²+Fz²)` in
+the compensated probe frame, signed by the normal component. The console reads
+the same scalar everywhere — headline, gauge, stage classifier, peak hold and
+the trend — because a panel showing one and a threshold drawn for the other is
+how the display comes to disagree with the arm.
+
+The threshold and the scalar moved together, and had to. At 8 N a probe
+touching in any direction put enough load on `F_z` alone; at 1 N it does not —
+tilt the probe slightly and most of the contact goes into shear, and `F_z` by
+itself reads that as no contact at all.
+
+`ContactDetector` is a direct port of `fr5_ik/probing_mode.py`, including the
+hysteresis, the confirmation windows (20 ms to enter, 500 ms to release) and
+the latch. It takes the scalar its caller chooses, exactly as the Python does.
+If one changes, change both.
 
 ### Zeroing the reading
 

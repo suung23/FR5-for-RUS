@@ -11,6 +11,7 @@ import {
   type LinkPose,
 } from '../telemetry/fr5Model';
 import { ProbeAssembly, STACK } from './ProbeAssembly';
+import { usePalette } from '../telemetry/theme';
 
 const MESH_URL = (name: string) => `./models/fr5/${name}.stl`;
 
@@ -20,8 +21,10 @@ const SHELL = '#f4f5f2';
 const ORANGE = '#e86f24';
 /** Recessed detail and mechanical edges. */
 const GRAPHITE = '#4a4a46';
-/** Deep green — reserved for state, never for structure. */
-const ACTIVE = '#17683a';
+/* State colour comes from the palette, not from a constant here: it is the
+   console's structural accent, and it turns blue with everything else when the
+   control stack enters contact probing. What it means — "this is state, not
+   structure" — does not change; only the hue does. */
 
 interface Props {
   jointPositions?: number[];
@@ -178,11 +181,12 @@ function ToolFrame() {
 }
 
 function ContactMark() {
+  const active = usePalette()['--green'];
   return (
     <group position={[0, 0, STACK.total]}>
       <mesh rotation={[Math.PI / 2, 0, 0]}>
         <ringGeometry args={[0.03, 0.038, 32]} />
-        <meshBasicMaterial color={ACTIVE} />
+        <meshBasicMaterial color={active} />
       </mesh>
       {/* Normal-force arrow, along the axis the controller regulates. */}
       <Line
@@ -190,7 +194,7 @@ function ContactMark() {
           [0, 0, 0],
           [0, 0, 0.052],
         ]}
-        color={ACTIVE}
+        color={active}
         lineWidth={2.4}
       />
     </group>
@@ -198,13 +202,14 @@ function ContactMark() {
 }
 
 function Axis({ to, width }: { to: [number, number, number]; width: number }) {
+  const active = usePalette()['--green'];
   return (
     <Line
       points={[
         [0, 0, 0],
         to,
       ]}
-      color={ACTIVE}
+      color={active}
       lineWidth={width}
     />
   );

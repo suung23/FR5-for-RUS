@@ -67,6 +67,33 @@
   --font-num: var(--font-ui);
 }
 
+/* ---- contact-probing palette ---------------------------------------------
+   The same ramp in blue, swapped in wholesale when the control stack declares
+   contact probing (`telemetry/theme.ts` flips the attribute; nothing else in
+   the app knows a colour).
+
+   Blue rather than amber or red on purpose. Contact probing is not a fault and
+   must not read as one — the console still has one alarm colour, the dark red
+   outline, and it has to keep meaning "something is wrong". This is a change of
+   *régime*, not of severity: the arm is doing something correct and different,
+   and it deserves a colour that is unmistakably not the resting one and
+   unmistakably not the alarm one.
+
+   Lightness is matched step for step against the green ramp, so nothing shifts
+   in contrast when the palette changes — the same rules stay as visible, the
+   same text stays as readable. Only the hue moves. `--critical` and `--ink` are
+   deliberately absent: the alarm outline and every glyph stay exactly as they
+   were, because those two are what the operator reads when something is wrong,
+   and the mode they are in must not change how a fault looks. */
+:root[data-probing='on'] {
+  --panel-pale: #eef4fc;
+  --sidebar: #f4f8fd;
+  --nav-selected: #d5e4f6;
+  --rule: #b2c8e5;
+  --accent: #3f77b0;
+  --green: #144a82;
+}
+
 * {
   box-sizing: border-box;
   border-radius: 0 !important;

@@ -29,13 +29,28 @@ export interface AppConfig {
   /** rosbridge topic names. */
   rosJointTopic: string;
   rosWrenchTopic: string;
-  /** Contact detection, mirroring `probe.yaml` safety limits. */
+  /**
+   * Contact detection, mirroring `probe.yaml`'s mode switch.
+   *
+   * These are compared against the **contact-force magnitude**, not the normal
+   * component — `ft_sensor.contact_force_mode: magnitude`.
+   */
   contactEnterN: number;
   contactReleaseN: number;
   warnForceN: number;
   maxForceN: number;
   /** Force at which the control stack drops to contact-probing limits. */
   contactProbingN: number;
+  /**
+   * Force below which it returns to approach, and how long it must stay there.
+   *
+   * The transition became reversible on 2026-08-31, when the entry threshold
+   * came down to 1 N. The console states the way back because the operator has
+   * no other way to learn it: in contact probing their five non-force axes are
+   * commanded to zero, so nothing they do with the stylus demonstrates it.
+   */
+  contactProbingReleaseN: number;
+  contactProbingReleaseS: number;
   /** Force the robot holds once in contact probing, and the band around it. */
   targetForceN: number;
   targetBandN: number;
@@ -99,17 +114,32 @@ export function loadConfig(): AppConfig {
     rosWrenchTopic: str('VITE_ROS_WRENCH_TOPIC', '/fr5_right/wrench'),
 
     // probe.yaml: safety.max_normal_force_n = 15.0, warn_normal_force_n = 14.0,
-    // teleop.contact_probing_force_n = 8.0, watchdog.retreat_until_force_n = 0.2,
-    // ft_sensor.normal_force_sign = -1.0.
+    // teleop.contact_probing_force_n = 1.0, contact_probing_release_n = 0.3,
+    // contact_control.target_force_n = 3.0, deadband_n = 0.5,
+    // watchdog.retreat_until_force_n = 0.2, ft_sensor.normal_force_sign = -1.0.
     //
     // The 15 N limit is a temporary value with no clinical basis — see the
     // history in probe.yaml. It must not be read here as a reviewed number.
-    contactEnterN: num('VITE_CONTACT_ENTER_N', 7.0),
-    contactReleaseN: num('VITE_CONTACT_RELEASE_N', 0.2),
+    //
+    // ⚠️ These mirror probe.yaml by hand, and nothing enforces that. The three
+    // that the gauge *draws* — probing, target, band — are the ones that lie
+    // visibly when they drift: a probing mark at 8 N while the arm switches at
+    // 1 N puts the operator's whole sense of margin in the wrong place. They
+    // were last matched on 2026-08-31, when the contact threshold moved from
+    // `F_n ≥ 8 N` to `‖F‖ ≥ 1 N` and the hold became 3.0 ± 0.5 N of ‖F‖.
+    // Enter is the same yaml key the gauge's probing mark draws
+    // (teleop.contact_probing_force_n) — the console must not claim contact at
+    // a different force from the one that changed the arm's speed limit.
+    // Release is the mode switch's own exit, not the watchdog's retreat
+    // threshold: the switch is what decides whether the console says CONTACT.
+    contactEnterN: num('VITE_CONTACT_ENTER_N', 2.0),
+    contactReleaseN: num('VITE_CONTACT_RELEASE_N', 0.3),
     warnForceN: num('VITE_WARN_FORCE_N', 14.0),
     maxForceN: num('VITE_MAX_FORCE_N', 15.0),
-    contactProbingN: num('VITE_CONTACT_PROBING_N', 8.0),
-    targetForceN: num('VITE_TARGET_FORCE_N', 5.0),
+    contactProbingN: num('VITE_CONTACT_PROBING_N', 2.0),
+    contactProbingReleaseN: num('VITE_CONTACT_PROBING_RELEASE_N', 0.3),
+    contactProbingReleaseS: num('VITE_CONTACT_PROBING_RELEASE_S', 0.5),
+    targetForceN: num('VITE_TARGET_FORCE_N', 3.0),
     targetBandN: num('VITE_TARGET_BAND_N', 0.5),
     normalForceSign: num('VITE_NORMAL_FORCE_SIGN', -1.0),
   };

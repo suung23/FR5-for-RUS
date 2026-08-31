@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { config } from '../telemetry/config';
-import type { ForcePoint } from '../store/telemetryStore';
+import { contactMagnitude, type ForcePoint } from '../store/telemetryStore';
 import type { ContactSnapshot } from '../telemetry/contactState';
 import styles from './ModeTimeline.module.css';
 
@@ -144,7 +144,9 @@ function buildBands(history: ForcePoint[]): { bands: Band[]; spanSeconds: number
   let startedAt = t0;
 
   for (const point of history) {
-    const fn = Math.abs(point.fn);
+    // Signed, not a magnitude: the switch compares the contact force as the
+    // control stack reports it, and a probe being *pulled* is not contact.
+    const fn = contactMagnitude(point);
     const next: 'approach' | 'contact' =
       phase === 'approach'
         ? fn >= config.contactEnterN

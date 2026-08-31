@@ -124,12 +124,24 @@ survive that ratio. Constraining to one took the residual from 0.183 to
 
 - **Phantom-only research use.** Nothing here is validated for patient contact.
 - The force limits were raised to 9/10 N when the contact-probing transition was
-  set at 8 N. **The original 7 N had a tissue-safety rationale (§2.1) and the
-  raise does not yet have one** — revisit before phantom work.
-- The hold force of 5 N is a placeholder for the Stage 1 force search.
-- **Compensation leaves up to 0.235 N.** Against a hold band of 5.0 ± 0.5 N that
-  is 47% of the band, so contact force should be read as 4.5–5.5 N rather than
-  4.8–5.2 N. The limit is the signal ratio — 200 g of payload under an 8.5 N
+  set at 8 N, and again to 14/15 N on 2026-08-27. **The original 7 N had a
+  tissue-safety rationale (§2.1) and neither raise has one** — revisit before
+  phantom work.
+- The hold force of 3 N is a placeholder for the Stage 1 force search.
+- **Contact is judged on ‖F‖, not on the normal component** (2026-08-31,
+  `ft_sensor.contact_force_mode`). The transition threshold came down to 1 N,
+  and at that force a probe touching slightly off-axis puts most of the contact
+  into shear — `F_z` alone would read it as no contact. The same magnitude is
+  what the regulator holds, which means `‖F‖ ≥ |F_z|` makes a given hold force
+  a *shallower* press than the old normal-force target of the same number.
+- **The threshold is now below the hold force** (1 N enter, 3 N hold), where it
+  used to be above it (8 N enter, 5 N hold). The arm therefore drives itself in
+  to the working force the moment it touches anything, with no operator command
+  — about 2 mm/s at first, slowing as it converges. Watch this on first phantom
+  contact.
+- **Compensation leaves up to 0.235 N.** Against a hold band of 3.0 ± 0.5 N that
+  is 47% of the band, so contact force should be read as 2.5–3.5 N rather than
+  2.8–3.2 N. The limit is the signal ratio — 200 g of payload under an 8.5 N
   offset — not the number of poses; adding six poses moved the alignment spread
   but not the residual.
 - Verification is operator-led: the tool names a pose and waits for a keypress.

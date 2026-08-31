@@ -9,21 +9,54 @@ import { logEvent, TransitionWatcher } from './events';
 /** One point in the rolling chart buffer. */
 export interface ForcePoint {
   t: number;
+  /**
+   * Raw sensor channels, uncompensated.
+   *
+   * Kept as the sensor reported them because the components view is the
+   * diagnostic for the axis assignment, and that check needs the raw reading.
+   */
   fx: number;
   fy: number;
   fz: number;
-  fn: number;
   /**
-   * Normal force `[min, max]` over the span this point covers.
+   * Contact-point force in the probe frame, `+z` compressing — the same vector
+   * and convention the headline plate reads.
+   *
+   * Stored as a **vector, not a magnitude**, because the operator's display
+   * zero is subtracted as a vector. Folding to `‖F‖` here would leave the plot
+   * unable to apply the zero the plate applies, and the two would disagree
+   * about the same contact by the size of the offset.
+   */
+  cx: number;
+  cy: number;
+  cz: number;
+  /**
+   * Normal channel `[min, max]` over the span this point covers.
    *
    * A point drawn from a waveform bin stands for ten milliseconds of a 1 kHz
-   * stream, not for one sample, so it has a width as well as a value. The plot
-   * shades that width; without it the folding would silently discard exactly
-   * the excursions it exists to preserve. Equal to `fn` on both sides when the
-   * frame carried a single reading and there is no width to show.
+   * stream, so it has a width as well as a value. Only the normal channel has
+   * per-bin extremes to work from — the bridge sends that envelope, not the
+   * lateral pair — so the band is the magnitude evaluated at these two ends
+   * with the bin's own mean lateral load. Equal to `cz` when the frame carried
+   * a single reading and there is no width to show.
    */
-  fnLo: number;
-  fnHi: number;
+  czLo: number;
+  czHi: number;
+}
+
+/**
+ * The contact-force magnitude a point stands for, signed by whether the probe
+ * is pressing.
+ *
+ * No zero is applied here, and none should be. The operator's zero is the
+ * bridge's working tare (`calib.tare`), subtracted inside `compensate` before
+ * the wrench is published — so everything downstream, this console and the
+ * robot's own mode switch alike, is already reading from the same zeroed
+ * value. A second offset applied here would only put the two back out of step.
+ */
+export function contactMagnitude(point: ForcePoint, normal: number = point.cz): number {
+  const magnitude = Math.hypot(point.cx, point.cy, normal);
+  return normal >= 0 ? magnitude : -magnitude;
 }
 
 /** Seconds of force history retained for the plots. */
@@ -39,17 +72,57 @@ const TRAJECTORY_HZ = 10;
  * bins at once, so the drawn line can be far finer than this. What this bounds
  * is how often the plot is asked to redraw, which is a frame-budget question
  * and nothing to do with how much of the signal is kept.
+ *
+ * 🔁 2026-08-31: 25 → 5, **deliberately below** the bridge's frame rate
+ * (`bridge.wrench_stream_hz`, 10). The earlier note here said it had to stay
+ * above that rate or frames would be held back and the trace would advance in
+ * slabs. Frames are indeed held back now — but nothing is lost, because
+ * `pendingPoints` keeps every bin until the flush, and a slab on a twenty
+ * second axis is 200 ms, one percent of the width.
+ *
+ * The reason to pay that is repaint cost. A CPU profile of the running console
+ * came back 77% idle, so the plot is not spending main-thread time; what it
+ * spends is rasterisation of two long SVG paths plus a filled band, and that
+ * scales directly with how often they are repainted. Halving the repaints is
+ * the one lever that always works on that.
  */
-const CHART_HZ = 25;
+const CHART_HZ = 5;
 
 interface TelemetryState {
   telemetry: RobotTelemetry;
   wrench: WrenchSample | null;
   contact: ContactSnapshot;
+  /**
+   * Contact-point force `[Fx, Fy, Fz]` in the probe frame, `+z` compressing.
+   *
+   * Derived once, here, so the headline reading, the stage classifier, the
+   * peak hold and the trend cannot end up describing different quantities.
+   * Null until a wrench arrives.
+   */
+  contactForce: [number, number, number] | null;
+  /**
+   * Whether the stage above is a judgement at all.
+   *
+   * False while no calibration is loaded, mirroring `us_diff_ik`'s
+   * `require_calibration` gate. Before compensation the wrench still carries
+   * the mount and probe weighing themselves — about 10 N measured — and that
+   * offset changes sign with pose, so `‖F‖` clears the 1 N threshold with
+   * nothing touching the probe. The control stack refuses to classify on a
+   * number it cannot trust; a console that classified anyway would sit at
+   * CONTACT for the whole session and teach the operator to ignore the field.
+   */
+  contactJudged: boolean;
   link: LinkStatus | null;
   history: ForcePoint[];
-  /** Largest |F_n| seen since the last operator reset. */
-  peakNormalForceN: number;
+  /**
+   * Largest contact-force magnitude ‖F‖ seen since the last operator reset.
+   *
+   * The same scalar the headline reads and the control stack switches on. Held
+   * as an upper bound when the frame carries per-axis window extremes, because
+   * the largest value on each axis need not have occurred in the same sample —
+   * a peak-hold may over-report, never under-report.
+   */
+  peakContactForceN: number;
   /** Frames received per second, measured. */
   frameRateHz: number;
   /**
@@ -61,36 +134,56 @@ interface TelemetryState {
   /** Recent flange positions in metres, oldest first, for the workspace path. */
   trajectory: [number, number, number][];
   paused: boolean;
-  /**
-   * Operator's display zero, or null when the readings are untared.
-   *
-   * With no calibration the sensor sits a few tenths of a newton off zero
-   * while nothing is touching the probe, and a plate labelled "contact force"
-   * reading 0.2 N when there is no contact is simply wrong on its face.
-   *
-   * **This is a display zero and nothing more.** The control stack keeps
-   * judging contact on its own untared reading, which is what keeps the robot's
-   * thresholds honest — so the console says, on the plate, that it is showing a
-   * zeroed number. `mode` records which pipeline stage the offset was taken
-   * from; an offset taken on raw channels means nothing once compensation
-   * arrives, so it is dropped rather than silently misapplied.
-   */
-  forceZero: { vector: [number, number, number]; mode: 'raw' | 'compensated'; at: number } | null;
 
   setPaused(paused: boolean): void;
   resetSession(): void;
-  /** Take the current reading as zero. Refused while the contact latch holds. */
-  zeroForce(): boolean;
-  /** Drop the display zero and go back to what the sensor reports. */
-  clearForceZero(): void;
   /** Send a console command. Returns false when there is no back channel. */
   sendCommand(command: Record<string, unknown>): boolean;
+}
+
+/**
+ * The contact-point force, in the sensor's sign convention.
+ *
+ * `probe.yaml` defines the normal force as `F_n = normal_force_sign · F_z^probe`,
+ * and `us_diff_ik` closes its regulator on exactly that. So the probe-frame `z`
+ * that comes back here is **negative under compression**, the same way the raw
+ * channel is, and the sign is applied once at the display boundary rather than
+ * assumed to have happened already.
+ *
+ * With a calibration loaded this is the compensated contact-point wrench — the
+ * tool's own weight removed, rotated into the probe frame, moment reference
+ * moved to the tip. Without one it falls back to the raw channels, which still
+ * carry the payload. The console must read whichever of the two the **robot**
+ * is regulating, because the bridge publishes the compensated wrench to
+ * `wrench_px6d` the moment a profile exists; a console still reading the raw
+ * channel would then disagree with the arm about how hard it is pressing.
+ */
+function contactPointForce(sample: WrenchSample): [number, number, number] {
+  const stages = sample.compensated;
+  if (!stages) return [sample.force[0], sample.force[1], sample.force[2]];
+  return [stages.contactProbe[0], stages.contactProbe[1], stages.contactProbe[2]];
+}
+
+/**
+ * The scalar the control stack acts on, mirroring `us_diff_ik._control_force`.
+ *
+ * `ft_sensor.contact_force_mode` is `magnitude`, so this is `‖F‖` carrying the
+ * sign of the normal component: positive while the probe is pressing, negative
+ * while it is being pulled. The magnitude is what crosses the 1 N threshold —
+ * at that force a probe touching even slightly off-axis puts most of the
+ * contact into shear, and the normal component alone would read it as no
+ * contact at all.
+ *
+ * @param force Contact-point force in the sensor's sign convention.
+ */
+function controlForce(force: [number, number, number]): number {
+  const magnitude = Math.hypot(force[0], force[1], force[2]);
+  return config.normalForceSign * force[2] >= 0 ? magnitude : -magnitude;
 }
 
 const detector = new ContactDetector({
   enterN: config.contactEnterN,
   releaseN: config.contactReleaseN,
-  normalForceSign: config.normalForceSign,
 });
 
 const watcher = new TransitionWatcher();
@@ -110,59 +203,17 @@ export const useTelemetryStore = create<TelemetryState>((set) => ({
   telemetry: { timestamp: 0, connected: false },
   wrench: null,
   contact: detector.snapshot(),
+  contactForce: null,
+  contactJudged: false,
   link: null,
   history: [],
-  peakNormalForceN: 0,
+  peakContactForceN: 0,
   frameRateHz: 0,
   waveformHz: null,
   trajectory: [],
   paused: false,
-  forceZero: null,
 
   setPaused: (paused) => set({ paused }),
-
-  zeroForce: () => {
-    const state = useTelemetryStore.getState();
-    const sample = state.wrench;
-    if (!sample) return false;
-    // Zeroing while something is pressing would fold that load into the offset
-    // and hide it for the rest of the session. The latch is the console's own
-    // record that contact happened, so it is the right thing to ask.
-    if (state.contact.hasContacted || state.contact.phase === 'contact') {
-      logEvent('FORCE', 'zero refused — contact latch is engaged', 'warn');
-      return false;
-    }
-    const compensated = sample.compensated;
-    const vector: [number, number, number] = compensated
-      ? [
-          compensated.contactProbe[0],
-          compensated.contactProbe[1],
-          compensated.contactProbe[2],
-        ]
-      : [
-          sample.force[0],
-          sample.force[1],
-          config.normalForceSign * sample.force[2],
-        ];
-    logEvent(
-      'FORCE',
-      `display zeroed — offset ${Math.hypot(...vector).toFixed(2)} N ` +
-        `(${compensated ? 'compensated' : 'raw'} channels)`,
-    );
-    // The peak hold is a session record of how hard the probe pressed. Against
-    // a new zero the old peak means nothing, so it goes with it.
-    set({
-      forceZero: { vector, mode: compensated ? 'compensated' : 'raw', at: Date.now() },
-      peakNormalForceN: 0,
-    });
-    return true;
-  },
-
-  clearForceZero: () => {
-    if (useTelemetryStore.getState().forceZero === null) return;
-    logEvent('FORCE', 'display zero cleared — showing what the sensor reports');
-    set({ forceZero: null, peakNormalForceN: 0 });
-  },
 
   sendCommand: (command) => {
     const sent = adapter.sendCommand(command);
@@ -186,9 +237,8 @@ export const useTelemetryStore = create<TelemetryState>((set) => ({
     set({
       history: [],
       trajectory: [],
-      peakNormalForceN: 0,
-      forceZero: null,
-      contact: detector.snapshot(),
+      peakContactForceN: 0,
+          contact: detector.snapshot(),
     });
   },
 }));
@@ -202,6 +252,7 @@ const adapter = new RobotTelemetryAdapter({
     if (useTelemetryStore.getState().paused) return;
     watcher.observeSafety(frame.safetyState);
     watcher.observeRobot(frame.robotState);
+    watcher.observeProbingMode(frame.probingMode);
 
     const patch: Partial<TelemetryState> = {
       telemetry: frame,
@@ -232,29 +283,88 @@ const adapter = new RobotTelemetryAdapter({
     const state = useTelemetryStore.getState();
     if (state.paused) return;
 
-    // Contact classification always runs on the raw F_z. It is a physical
-    // judgement, not a display preference, so it must not follow anything the
-    // operator changed about how the chart is drawn.
+    // Contact classification runs on the untared contact force. It is a
+    // physical judgement, not a display preference, so it must not follow
+    // anything the operator changed about how the plate is drawn — but it must
+    // follow the same signal the robot is acting on, which is the compensated
+    // one wherever a calibration exists.
+    const measured = contactPointForce(sample);
     const dtMs = lastWrenchAt === null ? 0 : sample.timestamp - lastWrenchAt;
     lastWrenchAt = sample.timestamp;
-    const contact = detector.update(sample.force[2], dtMs);
-    watcher.observeStage(contact.phase, contact.hasContacted, contact.normalForceN);
+
+    // No calibration, no judgement — the same gate `us_diff_ik` applies before
+    // it will let a contact decision change anything. The reading is still
+    // shown, and still labelled RAW; what is withheld is the claim that it
+    // means contact.
+    const judged = sample.calibrationValid === true;
+    const contact = judged
+      ? detector.update(controlForce(measured), dtMs)
+      : detector.snapshot();
+    if (judged) {
+      watcher.observeStage(contact.phase, contact.hasContacted, contact.contactForceN);
+    }
+
+    // How far compensation moved this frame's reading. Over one window the
+    // pose is fixed, so compensation is an affine map and the shift is a
+    // constant — which is what lets it be carried onto the waveform bins and
+    // the window extremes, neither of which the bridge compensates.
+    //
+    // On this cell the shift is *exact* on the z channel: the probe frame is a
+    // pure rotation about z (mounting 43 deg, no axial flip), so the normal
+    // channel is untouched by the rotation and only the payload term moves it.
+    const shift: [number, number, number] = [
+      measured[0] - sample.force[0],
+      measured[1] - sample.force[1],
+      measured[2] - sample.force[2],
+    ];
+    const normalShift = shift[2];
 
     // The displayed reading is the mean of its window; the peak must not be.
-    // At one frame a second a spike inside the window would be averaged away,
+    // Over a one-second readout window a spike inside it would be averaged away,
     // and the peak-hold exists to catch exactly that. The bridge sends the
     // window's own extremes alongside the mean, so the hold sees them.
+    //
+    // The hold tracks the **total**, because that is what the headline shows
+    // and what the robot switches on (2026-08-31). A peak in a different
+    // quantity from the reading it sits beside is worse than no peak: it can
+    // read *below* the live value and look like a stuck number.
+    //
+    // Per-axis extremes bound the total but do not give it — the largest |Fx|
+    // and the largest |Fy| in a window need not have happened in the same
+    // sample. Combining them is therefore an upper bound, never an
+    // under-report, which is the direction a peak-hold must err in.
+    //
+    // Every channel takes the compensation shift first. The extremes arrive as
+    // raw sensor channels, and the raw lateral pair carries the sensor's own
+    // bias — a peak built from those reads over a newton with nothing touching
+    // the probe, which is not an upper bound, it is a wrong number.
     const windowPeak = sample.forceExtremes
-      ? Math.max(
-          Math.abs(config.normalForceSign * sample.forceExtremes[0][2]),
-          Math.abs(config.normalForceSign * sample.forceExtremes[1][2]),
+      ? Math.hypot(
+          Math.max(
+            Math.abs(sample.forceExtremes[0][0] + shift[0]),
+            Math.abs(sample.forceExtremes[1][0] + shift[0]),
+          ),
+          Math.max(
+            Math.abs(sample.forceExtremes[0][1] + shift[1]),
+            Math.abs(sample.forceExtremes[1][1] + shift[1]),
+          ),
+          Math.max(
+            Math.abs(sample.forceExtremes[0][2] + shift[2]),
+            Math.abs(sample.forceExtremes[1][2] + shift[2]),
+          ),
         )
-      : Math.abs(contact.normalForceN);
+      : Math.abs(controlForce(measured));
 
     const patch: Partial<TelemetryState> = {
       wrench: sample,
       contact,
-      peakNormalForceN: Math.max(state.peakNormalForceN, windowPeak),
+      contactForce: [
+        measured[0],
+        measured[1],
+        config.normalForceSign * measured[2],
+      ],
+      contactJudged: judged,
+      peakContactForceN: Math.max(state.peakContactForceN, windowPeak),
     };
 
     // Into the chart buffer. Which path runs is decided by what arrived, not by
@@ -269,11 +379,18 @@ const adapter = new RobotTelemetryAdapter({
     const waveform = sample.forceWaveform;
     if (waveform) {
       for (const bin of waveform.bins) {
-        // The bin's own edges under the normal-force convention. A negative
-        // sign swaps which extreme is the larger press, so they are ordered
-        // after the flip rather than assumed.
-        const lo = config.normalForceSign * bin.fzMin;
-        const hi = config.normalForceSign * bin.fzMax;
+        // Every channel takes the compensation shift, not just z. The bins
+        // arrive as raw sensor channels, and the raw lateral pair carries the
+        // sensor's own bias — a magnitude built from those reads over a newton
+        // with nothing touching the probe.
+        //
+        // The lateral shift is a per-frame constant rather than an exact
+        // per-sample correction: within one window the pose is fixed, so
+        // compensation is affine and the bias term is removed exactly. What is
+        // left is a second-order term from the rotation acting on the signal's
+        // own variation inside the window.
+        const lo = config.normalForceSign * (bin.fzMin + normalShift);
+        const hi = config.normalForceSign * (bin.fzMax + normalShift);
         // Ages are relative to the frame, and the frame is stamped on arrival,
         // so network jitter could otherwise place a bin behind its predecessor.
         const t = Math.max(lastPointAt + 1, sample.timestamp - bin.ageMs);
@@ -283,9 +400,11 @@ const adapter = new RobotTelemetryAdapter({
           fx: bin.fx,
           fy: bin.fy,
           fz: bin.fz,
-          fn: config.normalForceSign * bin.fz,
-          fnLo: Math.min(lo, hi),
-          fnHi: Math.max(lo, hi),
+          cx: bin.fx + shift[0],
+          cy: bin.fy + shift[1],
+          cz: config.normalForceSign * (bin.fz + normalShift),
+          czLo: Math.min(lo, hi),
+          czHi: Math.max(lo, hi),
         });
       }
     } else if (sample.timestamp - lastChartAt >= 1000 / CHART_HZ) {
@@ -296,9 +415,11 @@ const adapter = new RobotTelemetryAdapter({
         fx: sample.force[0],
         fy: sample.force[1],
         fz: sample.force[2],
-        fn: contact.normalForceN,
-        fnLo: contact.normalForceN,
-        fnHi: contact.normalForceN,
+        cx: measured[0],
+        cy: measured[1],
+        cz: config.normalForceSign * measured[2],
+        czLo: config.normalForceSign * measured[2],
+        czHi: config.normalForceSign * measured[2],
       });
     }
 
@@ -314,6 +435,23 @@ const adapter = new RobotTelemetryAdapter({
     }
 
     useTelemetryStore.setState(patch);
+  },
+
+  /**
+   * The bridge's answer to a console command, put where the operator reads.
+   *
+   * A calibration command is refused far more often than it succeeds — the
+   * probe is not pointing down, something is resting on it, the pose has not
+   * arrived — and the reason is the whole content of the answer. Before this
+   * the ack was dropped and the button simply appeared not to work.
+   */
+  onAck(ack) {
+    const label = ack.command.replace(/^calib\./, '');
+    logEvent(
+      'CALIB',
+      ack.ok ? `${label} 완료` : `${label} 거절 — ${ack.reason ?? '사유 없음'}`,
+      ack.ok ? 'info' : 'warn',
+    );
   },
 
   onStatus(status) {

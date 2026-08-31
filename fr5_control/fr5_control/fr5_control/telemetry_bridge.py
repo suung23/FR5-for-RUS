@@ -74,14 +74,18 @@ class TelemetryBridge(Node):
         self.declare_parameter("bridge.host", "0.0.0.0")
         self.declare_parameter("bridge.port", 8765)
         self.declare_parameter("bridge.telemetry_hz", 30.0)
-        # 화면용 렌치 발행 주기. 센서는 1 kHz 지만 화면은 초당 한 번이면 된다 —
-        # 조작자가 읽는 것은 "지금 몇 뉴턴인가" 이지 그 안의 파형이 아니고, 더 자주
-        # 바꿔 봐야 읽히지 않는 자릿수만 흔들린다.
+        # 화면이 읽는 **숫자**가 바뀌는 주기. 프레임이 나가는 주기가 아니다 —
+        # 그쪽은 아래 wrench_stream_hz 다.
+        #
+        # 센서는 1 kHz 지만 조작자가 읽는 숫자는 초당 한 번이면 된다 — 읽는 것은
+        # "지금 몇 뉴턴인가" 이지 그 안의 파형이 아니고, 더 자주 바꿔 봐야 읽히지
+        # 않는 자릿수만 흔들린다. 프레임이 이보다 자주 나가는 동안 이 숫자는
+        # 붙들려 그대로 되나간다.
         #
         # **제어와는 무관하다.** us_diff_ik 는 ROS 토픽으로 전 표본을 받는다.
         # 접촉 판정과 힘 제어는 그쪽에서 1 kHz 로 돈다.
         #
-        # 각 프레임은 그 1 초의 **평균** 이다. 평균만 보내면 그 사이의 스파이크가
+        # 각 숫자는 그 1 초의 **평균** 이다. 평균만 보내면 그 사이의 스파이크가
         # 사라지므로, 같은 창의 **극값** 도 함께 보낸다 (아래 forceExtremes).
         self.declare_parameter("bridge.wrench_hz", 1.0)
         # 그래프용 파형의 구간 수 [Hz]. **읽는 숫자와 그리는 선은 다른 문제다.**
@@ -90,13 +94,27 @@ class TelemetryBridge(Node):
         # 그런데 같은 주기로 선까지 그리면 20 초 그래프가 점 스무 개짜리 계단이 되고,
         # 그러면 1 kHz 센서를 달아 놓고 초당 한 점만 보는 셈이다.
         #
-        # 그래서 프레임 주기는 그대로 두고, 그 한 장 안에 **그 1 초의 파형**을 접어
-        # 보낸다 (아래 forceWaveform). 구간마다 [평균, 최소, 최대] 라 구간 안의
+        # 그래서 숫자와 선을 갈라 놓는다: 선은 **그 창의 파형**을 접어 보낸다
+        # (아래 forceWaveform). 구간마다 [평균, 최소, 최대] 라 구간 안의
         # 스파이크도 남는다 — 화면 폭이 20 000 점을 그릴 수 없으므로 표본을 골라
         # 버리는 대신 접는 것이다. 고르면 앨리어싱이고, 접으면 아니다.
         #
         # 0 이하면 끈다. 100 Hz 면 구간 10 ms, 초당 100 구간이다.
         self.declare_parameter("bridge.wrench_waveform_hz", 100.0)
+        # 파형을 흘려보내는 주기 [Hz]. 위의 두 값과 또 다른 축이다.
+        #
+        # wrench_waveform_hz 는 선의 **해상도** 이고, 이것은 그 선이 **얼마나 자주
+        # 도착하는가** 다. 둘을 구분하지 않으면 100 Hz 파형을 1 초에 한 번 보내게
+        # 되고, 그러면 그래프는 100 개 점을 한꺼번에 받아 1 초씩 뭉텅이로 밀린다.
+        # 해상도는 100 Hz 인데 눈에는 1 Hz 로 찍히는 것이다 — 흐르지 않는다.
+        #
+        # 10 Hz 면 한 장에 구간 열 개, 100 ms 마다 도착한다. 같은 100 Hz 해상도가
+        # 이번에는 흐르는 선으로 보인다. 프레임 수는 늘지만 한 장이 그만큼 짧아
+        # 초당 바이트는 거의 그대로다.
+        #
+        # 숫자는 따라오지 않는다 — 아래 wrench_stream_frame 이 읽는 값은 붙들고
+        # 파형만 갈아 끼우므로, 조작자가 보는 자릿수는 여전히 1 초에 한 번 바뀐다.
+        self.declare_parameter("bridge.wrench_stream_hz", 10.0)
         self.declare_parameter("bridge.px6d_port", "")
 
         # 로봇 관절각을 컨트롤러에서 **읽기로만** 가져온다. bridge.px6d_port 와
@@ -124,6 +142,16 @@ class TelemetryBridge(Node):
         # 교정 프로파일. 저장·되읽기 경로이며, 없으면 원값을 그대로 낸다 —
         # 교정이 없는데 있는 척하지 않는다.
         self.declare_parameter("bridge.calibration_path", "")
+        # 교정 만료 시간 [h]. 0 이하면 나이를 보지 않는다.
+        #
+        # wrench_profile 의 기본은 24 h 이고, 그것은 "센서 영점이 하루면 흐른다" 는
+        # **가정**이다. 운영자가 그 가정을 자기 관측으로 대체했다면 여기서 늘린다.
+        # 늘린 만큼 무접촉 잔차를 주기적으로 눈으로 확인할 책임이 따라온다 —
+        # px6d_verify 가 그 확인 도구다.
+        self.declare_parameter("bridge.calibration_stale_after_h", 24.0)
+
+        # 법선력 부호. probe.yaml 의 정의 F_n = sign x F_z^probe 를 그대로 쓴다.
+        self.declare_parameter("ft_sensor.normal_force_sign", -1.0)
         # ---- 적층 기하 — probe.yaml 에서 온다 ✅ 2026-08-27 -------------------
         #
         # 예전에는 여기서 registration.mounting_angle_deg / r_sensor_to_probe_m /
@@ -198,12 +226,21 @@ class TelemetryBridge(Node):
         # GUI 가 붙어 있지 않으면 아무도 비워 주지 않는다. 5 초어치에서 오래된 것부터
         # 버린다 — 늦게 붙은 화면에 5 초 전 파형을 밀어 넣어 봐야 읽을 것이 없다.
         self._wave_cap = int(self._wave_hz * 5.0) if self._wave_hz > 0.0 else 0
+        #: 마지막으로 새로 만든 읽기용 프레임. 파형만 갈아 끼워 다시 내보낸다.
+        self._readout: dict | None = None
+        self._readout_at = 0.0
         self.session = CalibrationSession()
         self.calibration_path = str(self.get_parameter("bridge.calibration_path").value) or (
             os.path.expanduser("~/.ros/fr5_px6d_calibration.json")
         )
         self.pose_log_path = self.calibration_path.replace(".json", "") + "_poses.jsonl"
         self.registration = self._registration_from_params()
+        # **프로파일을 읽기 전에** 정해 둔다 — _load_profile 이 validity() 를 부르고,
+        # 그때 이 값들이 없으면 기동이 AttributeError 로 죽는다.
+        self._stale_after_s = (
+            float(self.get_parameter("bridge.calibration_stale_after_h").value) * 3600.0
+        )
+        self._normal_sign = float(self.get_parameter("ft_sensor.normal_force_sign").value)
         self.profile = self._load_profile()
 
         self._mode = None
@@ -341,7 +378,7 @@ class TelemetryBridge(Node):
             self.get_logger().error(f"교정 파일을 읽지 못했다 ({exc}) — 원값을 그대로 낸다")
             return None
 
-        valid, issues = profile.validity()
+        valid, issues = profile.validity(stale_after_s=self._stale_after_s)
         age_h = profile.age_s() / 3600.0
         if valid:
             self.get_logger().info(
@@ -524,7 +561,7 @@ class TelemetryBridge(Node):
         profile.save(self.calibration_path)
         self.profile = profile
         self.registration = registration
-        valid, issues = profile.validity()
+        valid, issues = profile.validity(stale_after_s=self._stale_after_s)
         return profile, valid, issues
 
     def _append_pose_log(self, pose) -> None:
@@ -791,11 +828,40 @@ class TelemetryBridge(Node):
                 time.sleep(2.0)
 
     def _publish_calibration_valid(self) -> None:
-        """교정 유효성을 주기적으로 낸다. 프로파일이 없으면 거짓이다."""
-        valid = False
-        if self.profile is not None:
-            valid, _ = self.profile.validity()
-        self.calib_pub.publish(Bool(data=bool(valid)))
+        """교정 유효성을 주기적으로 낸다.
+
+        **wrench_px6d 에 나가는 값이 보상됐는가** 와 같은 뜻이다. 제어 스택은 이
+        신호 하나로 접촉 판정과 힘 축을 열지 말지를 정하므로, 둘이 어긋나면 로봇이
+        원값을 접촉력이라고 믿게 된다 (``_compensation_state`` 참조).
+        """
+        rot, valid, _ = self._compensation_state()
+        self.calib_pub.publish(Bool(data=bool(rot is not None and valid)))
+
+    def _compensation_state(self):
+        """``(rot, valid, issues)`` — 보상이 실제로 가능한가를 **한 자리에서** 정한다.
+
+        이 셋이 서로 다른 곳에서 계산되던 동안 조용한 모순이 있었다:
+        ``_publish_calibration_valid`` 는 프로파일의 나이·적합만 보고 참을 냈고,
+        ``_publish_wrench`` 는 자세가 없으면 원값으로 떨어졌다. 그 사이에서
+        ``us_diff_ik`` 는 "교정 유효" 를 믿고 **원값** 을 문턱에 댔다 — 원값에는
+        센서 자체 오프셋이 8.5 N 실려 있으므로 2 N 문턱은 아무것도 닿지 않았는데
+        즉시 넘는다. 접촉 프로빙이 갑자기 걸리는 정체가 이것이다.
+
+        그래서 유효성의 뜻을 좁힌다: **지금 토픽에 나가는 wrench 가 실제로 보상된
+        값인가.** 자세를 모르면 보상은 일어나지 않았고, 따라서 유효하지 않다.
+
+        Returns:
+            ``rot`` 은 자세가 없으면 ``None`` 이며, 그때 ``valid`` 는 반드시 거짓이다.
+        """
+        if self.profile is None:
+            return None, False, ["교정 프로파일 없음"]
+        valid, issues = self.profile.validity(stale_after_s=self._stale_after_s)
+        rot = self.rotation_base_flange()
+        if rot is None:
+            return None, False, issues + [
+                "자세를 모른다 — 중력 보상 불가. 관절각이나 ee_wrt_base 가 오지 않는다"
+            ]
+        return rot, valid, issues
 
     def _publish_wrench(self, values) -> None:
         """제어 스택이 볼 wrench 를 낸다 — **교정이 있으면 보상된 값** 으로.
@@ -815,14 +881,12 @@ class TelemetryBridge(Node):
 
         published = values
         frame = self._wrench_frame
-        if self.profile is not None:
-            valid, _ = self.profile.validity()
-            rot = self.rotation_base_flange()
-            if valid and rot is not None:
-                published = compensate(self.profile, values, rot).contact_probe
-                # 프레임 이름도 바뀐다. 보상된 값은 센서 축이 아니라 프로브 축에
-                # 있고, 이름을 그대로 두면 TF 를 쓰는 쪽이 조용히 틀린다.
-                frame = f"{self.robot_name}_probe"
+        rot, valid, _ = self._compensation_state()
+        if rot is not None and valid:
+            published = compensate(self.profile, values, rot).contact_probe
+            # 프레임 이름도 바뀐다. 보상된 값은 센서 축이 아니라 프로브 축에
+            # 있고, 이름을 그대로 두면 TF 를 쓰는 쪽이 조용히 틀린다.
+            frame = f"{self.robot_name}_probe"
 
         msg = WrenchStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
@@ -991,30 +1055,82 @@ class TelemetryBridge(Node):
             "flangeZ": self._flange_z_component(),
         }
 
-        # 이 프레임이 덮는 구간의 파형. 한 장에 접어 보내므로 프레임 수는 늘지 않는다 —
-        # 1 kHz 를 그대로 흘리면 초당 천 장의 JSON 이고, 화면은 그것을 파싱하느라
-        # 정작 그리지 못한다. 항목: [몇 ms 전, Fx, Fy, Fz, Fz 최소, Fz 최대].
-        waveform = self._drain_waveform(now)
-        if waveform is not None:
-            sample["forceWaveform"] = waveform
+        # 파형은 여기서 싣지 않는다. 읽는 값은 1 초에 한 번 새로 만들지만 파형은
+        # 그보다 자주 나가야 하므로, 붙이는 일은 wrench_stream_frame 이 한다.
 
         # 보상 단계를 모두 싣는다. 검증 화면이 "원값은 이런데 보상 뒤엔 이렇다" 를
         # 나란히 보여 줘야 하고, 어느 단계에서 이상해지는지가 곧 어느 교정이 틀렸는지다.
-        if self.profile is not None:
-            out = compensate(self.profile, np.asarray(values, dtype=float),
-                             self.rotation_base_flange())
+        rot, valid, issues = self._compensation_state()
+        if rot is not None:
+            out = compensate(self.profile, np.asarray(values, dtype=float), rot)
             sample["compensated"] = out.to_dict()
-            valid, issues = self.profile.validity()
             sample["calibrationValid"] = valid
             sample["calibrationIssues"] = issues
         else:
+            # 프로파일이 없거나 자세를 모른다. 뒤쪽이면 compensate 가 중력 보상을
+            # **통째로 건너뛰므로**, 그 결과를 compensated 로 실어 보내면 화면이
+            # "probe frame · compensated" 라고 말하면서 공구 자중이 남은 값을
+            # 보여 준다 — 아무것도 닿지 않았는데 힘이 찍히는 정체가 이것이다.
+            # 이유는 _compensation_state 가 들고 있으므로 그대로 전한다.
             sample["calibrationValid"] = False
-            sample["calibrationIssues"] = ["교정 프로파일 없음"]
+            sample["calibrationIssues"] = issues
         # 센서 회선 지표는 직결일 때만 뜻이 있다. 컨트롤러 경유 값에 붙이면
         # 재지 않은 것을 잰 것처럼 보인다.
         if source == "px6d_serial":
             sample["crcErrors"] = int(crc)
             sample["sensorHz"] = round(sensor_hz, 1)
+        return sample
+
+    def wrench_stream_frame(self, refresh: bool) -> dict | None:
+        """GUI 로 실제로 나가는 렌치 한 장. 읽는 값은 붙들고 파형만 갈아 끼운다.
+
+        **읽는 숫자와 그리는 선의 주기가 다르기 때문에 있는 함수다.**
+
+        조작자가 읽는 값은 1 초에 한 번 바뀌어야 한다 — 더 자주 바꾸면 안 읽히는
+        자릿수만 흔들린다. 그런데 선을 1 초에 한 번 보내면 100 Hz 파형이 100 개씩
+        뭉텅이로 도착해 그래프가 1 초씩 계단으로 밀린다. 해상도는 100 Hz 인데 눈에는
+        찍히는 것으로 보인다.
+
+        그래서 프레임은 자주 내되(``bridge.wrench_stream_hz``), 읽는 값은 느린
+        주기(``bridge.wrench_hz``)에만 새로 만들고 그 사이에는 **직전 것을 그대로**
+        되보낸다. 화면은 같은 숫자를 열 번 받아 열 번 같은 값을 그리므로 자릿수가
+        흔들리지 않고, 파형만 100 ms 마다 이어져 선이 흐른다.
+
+        되보내는 값은 보상 단계까지 통째로 굳힌 것이다. 자세는 그 사이에도 움직이니
+        보상만 다시 계산하면 힘은 그대로인데 보상 결과만 바뀌는 프레임이 되고,
+        그것은 어느 쪽도 아닌 값이다.
+
+        :param refresh: 참이면 읽는 값을 새로 만든다(구간 평균·극값 누적기를 비운다).
+        """
+        if refresh or self._readout is None:
+            fresh = self.wrench_frame()
+            if fresh is not None:
+                self._readout = fresh
+                self._readout_at = time.time()
+
+        readout = self._readout
+        if readout is None:
+            return None
+        # 붙들고 있던 값이 상해도 계속 내보내면, 센서가 끊긴 뒤에도 화면은 마지막
+        # 숫자를 살아 있는 것으로 읽는다. wrench_frame 이 쓰는 것과 같은 기준이다.
+        with self._lock:
+            at = self._wrench_at
+        now = time.time()
+        if (now - at) > 0.5:
+            self._readout = None
+            return None
+
+        sample = dict(readout)
+        # 시각은 이 장이 나가는 순간이다. 파형의 나이(ageMs)가 이 시각으로부터
+        # 거슬러 세어지므로, 붙들고 있던 프레임의 옛 시각을 두면 방금 접은 구간이
+        # 1 초 전 것으로 그려진다.
+        sample["timestamp"] = int(now * 1000)
+        # 이 장이 덮는 구간의 파형. 항목: [몇 ms 전, Fx, Fy, Fz, Fz 최소, Fz 최대].
+        waveform = self._drain_waveform(now)
+        if waveform is not None:
+            sample["forceWaveform"] = waveform
+        else:
+            sample.pop("forceWaveform", None)
         return sample
 
     def calibration_summary(self) -> dict:
@@ -1038,7 +1154,7 @@ class TelemetryBridge(Node):
                             "issues": ["교정 프로파일 없음"]})
             return summary
 
-        valid, issues = self.profile.validity()
+        valid, issues = self.profile.validity(stale_after_s=self._stale_after_s)
         g = self.profile.gravity
         summary.update({
             "present": True,
@@ -1326,20 +1442,30 @@ class TelemetryBridge(Node):
             self.get_logger().info(f"GUI 접속: {peer}")
             reader = asyncio.ensure_future(pump(connection))
             tele_dt = 1.0 / max(1.0, float(self.get_parameter("bridge.telemetry_hz").value))
-            wrench_dt = 1.0 / max(1.0, float(self.get_parameter("bridge.wrench_hz").value))
-            next_tele = next_wrench = 0.0
+            read_hz = max(1.0, float(self.get_parameter("bridge.wrench_hz").value))
+            # 파형 송출은 읽기보다 느릴 수 없다 — 그러면 읽는 값을 새로 만들어 놓고도
+            # 내보내지 못해 자릿수가 설정한 주기보다 느리게 바뀐다.
+            stream_hz = max(read_hz, float(self.get_parameter("bridge.wrench_stream_hz").value))
+            read_dt = 1.0 / read_hz
+            stream_dt = 1.0 / stream_hz
+            next_tele = next_read = next_stream = 0.0
             try:
                 while True:
                     now = time.monotonic()
                     if now >= next_tele:
                         next_tele = now + tele_dt
                         await connection.send(json.dumps(self.telemetry_frame()))
-                    if now >= next_wrench:
-                        next_wrench = now + wrench_dt
-                        sample = self.wrench_frame()
+                    if now >= next_stream:
+                        next_stream = now + stream_dt
+                        # 읽는 값을 새로 만드는 것은 느린 주기에만. 그 사이의 장은
+                        # 같은 숫자에 새 파형만 얹어 나간다.
+                        refresh = now >= next_read
+                        if refresh:
+                            next_read = now + read_dt
+                        sample = self.wrench_stream_frame(refresh)
                         if sample is not None:
                             await connection.send(json.dumps(sample))
-                    await asyncio.sleep(min(tele_dt, wrench_dt) / 2.0)
+                    await asyncio.sleep(min(tele_dt, stream_dt) / 2.0)
             except Exception:
                 pass
             finally:

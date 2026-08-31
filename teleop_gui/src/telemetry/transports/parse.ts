@@ -1,4 +1,5 @@
 import type {
+  CommandAck,
   ForceWaveform,
   ForceWaveformBin,
   ProbingMode,
@@ -110,6 +111,18 @@ function teleopFrame(raw: unknown): TeleopFrameState | undefined {
     angularFrame: typeof src.angularFrame === 'string' ? src.angularFrame : '—',
     tipRollDeg: typeof src.tipRollDeg === 'number' ? src.tipRollDeg : 0,
     engageCount: typeof src.engageCount === 'number' ? src.engageCount : 0,
+  };
+}
+
+/** The bridge's `{type:"ack"}` reply, or null when this is not one. */
+export function parseAck(raw: unknown): CommandAck | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const src = raw as Record<string, unknown>;
+  if (src.type !== 'ack' || typeof src.command !== 'string') return null;
+  return {
+    command: src.command,
+    ok: src.ok === true,
+    reason: typeof src.reason === 'string' ? src.reason : undefined,
   };
 }
 

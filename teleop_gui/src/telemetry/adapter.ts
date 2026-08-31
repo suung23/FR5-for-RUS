@@ -4,6 +4,7 @@ import { RosbridgeTransport } from './transports/rosbridge';
 import { SimulationTransport } from './transports/simulation';
 import { WebSocketTransport } from './transports/websocket';
 import type {
+  CommandAck,
   LinkStatus,
   RobotTelemetry,
   Transport,
@@ -15,6 +16,7 @@ export interface AdapterListeners {
   onTelemetry(frame: RobotTelemetry): void;
   onWrench(sample: WrenchSample): void;
   onStatus(status: LinkStatus): void;
+  onAck(ack: CommandAck): void;
 }
 
 /**
@@ -67,6 +69,7 @@ export class RobotTelemetryAdapter {
       onTelemetry: (frame) => this.listeners.onTelemetry(frame),
       onWrench: (sample) => this.listeners.onWrench(sample),
       onStatus: (patch) => this.patchStatus(patch),
+      onAck: (ack) => this.listeners.onAck(ack),
     };
     this.transport.start(sink);
 

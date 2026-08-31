@@ -54,8 +54,10 @@ export class SimulationTransport implements Transport {
   private contactForce = 0;
   /** Latched safety level, so the state does not chatter at the threshold. */
   private safety: SafetyState = 'normal';
-  /** Velocity-limit mode. One-way, mirroring the control stack. */
+  /** Velocity-limit mode, with the control stack's hysteresis. */
   private probing: ProbingMode = 'approach';
+  /** Seconds the contact force has been continuously under the release level. */
+  private belowReleaseS = 0;
   /**
    * Operator station, as the control stack would declare it.
    *
@@ -111,7 +113,34 @@ export class SimulationTransport implements Transport {
    * the change is announced as pending and only takes effect a beat later,
    * standing in for the next grip.
    */
+  /**
+   * Working-pose zero, as the bridge would hold it.
+   *
+   * Simulated because a Zero button that does nothing without hardware teaches
+   * the operator it does nothing at all. The refusals are simulated too: this
+   * zero is a constant, so taking it with load on the probe folds that load in
+   * and the arm stops reading contact as contact.
+   */
+  private tare: [number, number, number] = [0, 0, 0];
+
   sendCommand(command: Record<string, unknown>): boolean {
+    if (command.command === 'calib.tare') {
+      const magnitude = Math.hypot(...this.contactProbe());
+      if (magnitude > 2.0) {
+        this.ack('calib.tare', false,
+          `지금 ${magnitude.toFixed(2)} N 이 실려 있다 — 무언가 닿아 있다`);
+        return true;
+      }
+      const [x, y, z] = this.contactProbe();
+      this.tare = [this.tare[0] + x, this.tare[1] + y, this.tare[2] + z];
+      this.ack('calib.tare', true);
+      return true;
+    }
+    if (command.command === 'calib.tare.clear') {
+      this.tare = [0, 0, 0];
+      this.ack('calib.tare.clear', true);
+      return true;
+    }
     if (command.command !== 'teleop.operator_frame') return false;
     const yaw = Number(command.yawDeg);
     if (!Number.isFinite(yaw)) return false;
@@ -124,7 +153,23 @@ export class SimulationTransport implements Transport {
     return true;
   }
 
+  /** The compensated contact-point force before the working zero. */
+  private contactProbe(): [number, number, number] {
+    return [this.lateralX, this.lateralY, -this.contactForce];
+  }
+
+  private ack(command: string, ok: boolean, reason?: string): void {
+    // Answered on the next tick, as a socket would: a button that reports back
+    // before the frame it changed has arrived teaches the wrong cadence.
+    setTimeout(() => this.sink?.onAck({ command, ok, reason }), 20);
+  }
+
+  private sink: TransportSink | null = null;
+  private lateralX = 0;
+  private lateralY = 0;
+
   start(sink: TransportSink): void {
+    this.sink = sink;
     this.t0 = Date.now();
     this.phaseStart = this.t0;
     sink.onStatus({ phase: 'connected', attempts: 0, error: undefined });
@@ -183,24 +228,26 @@ export class SimulationTransport implements Transport {
     if (this.phase === 'contact') {
       // Two episodes, because the display has to be seen doing all of its job.
       //
-      //   0-9 s   light coupling. Total F_n lands near 5.5 N: the working band,
-      //           below the 6 N warning. This is where a session mostly lives.
-      //   9-14 s  a firmer press that crosses 7 N, so the contact stage, the
-      //           latch, the amber warning and the red limit are all exercised
-      //           rather than sitting unused behind a threshold nothing reaches.
+      //   0-9 s   the hold band. This is where a session mostly lives, and it
+      //           is where the robot's own regulator would be holding it.
+      //   9-14 s  a firmer press that crosses warn and limit, so the amber
+      //           warning and the red outline are exercised rather than sitting
+      //           unused behind a threshold nothing reaches.
       //
       // Living permanently in protective stop would be just as wrong — it
       // teaches the operator to ignore the colour that matters most.
+      //
+      // Both levels are sized from the configuration rather than from constants.
+      // The thresholds have moved twice (contact 8 → 1 N, hold 5 → 3 N) and each
+      // time a hard-coded episode would have quietly stopped crossing the line
+      // it existed to cross — which is the failure a simulator cannot report,
+      // because it looks exactly like an interface that has nothing to show.
       const ramp = Math.min(1, held / 1.5);
-      // The firm episode has to clear the contact-probing threshold, so it is
-      // sized from the configured value rather than a constant that would
-      // silently stop exercising the transition when the threshold moves.
-      const firmPeak = config.contactProbingN - 3.9 - 1.55 + 1.2;
-      const firm = held > 9 ? Math.min(1, (held - 9) / 1.2) * Math.max(0, firmPeak) : 0;
-      // Light episode sits at F_n ~5.3 N with a narrow wobble so it stays
-      // clearly inside the working band; the firm episode is what crosses.
+      const firmPeak = Math.max(0, config.maxForceN + 0.5 - config.targetForceN);
+      const firm = held > 9 ? Math.min(1, (held - 9) / 1.2) * firmPeak : 0;
       this.contactForce =
-        ramp * (3.75 + firm + 0.22 * Math.sin(held * 1.9) + 0.09 * Math.sin(held * 5.3));
+        ramp *
+        (config.targetForceN + firm + 0.22 * Math.sin(held * 1.9) + 0.09 * Math.sin(held * 5.3));
     } else if (this.phase === 'retract') {
       this.contactForce = Math.max(0, this.contactForce - 0.35);
     } else {
@@ -211,22 +258,46 @@ export class SimulationTransport implements Transport {
     const fz = gravityFz - this.contactForce + noise(0.05);
     const lateral = this.phase === 'contact' ? 0.35 : 0.05;
 
-    const force: [number, number, number] = [
-      Math.sin(t * 0.55) * lateral + noise(0.05),
-      Math.cos(t * 0.43) * lateral + noise(0.05),
-      fz,
+    this.lateralX = Math.sin(t * 0.55) * lateral + noise(0.05);
+    this.lateralY = Math.cos(t * 0.43) * lateral + noise(0.05);
+    const force: [number, number, number] = [this.lateralX, this.lateralY, fz];
+
+    // The compensated contact-point wrench: the same contact, with the tool's
+    // own weight taken out. Emitted because the console's stage machine now
+    // judges on `‖F‖` at a 1 N threshold, and refuses to judge at all without a
+    // calibration — so a simulator that never declared one would leave the
+    // stage, the latch and the timeline permanently unexercised, which is the
+    // half of the interface most worth reviewing before hardware.
+    // The working zero comes off here, upstream of everything the console
+    // reads — exactly where the bridge subtracts its own working tare, so the
+    // plot, the plate and the stage classifier all move together.
+    const contactProbe: [number, number, number] = [
+      force[0] - this.tare[0],
+      force[1] - this.tare[1],
+      -this.contactForce + noise(0.02) - this.tare[2],
+    ];
+    const torque: [number, number, number] = [
+      this.contactForce * 0.004 + noise(0.002),
+      this.contactForce * 0.003 + noise(0.002),
+      noise(0.002),
     ];
 
     sink.onWrench({
       timestamp: now,
       source: 'simulation',
       force,
-      torque: [
-        this.contactForce * 0.004 + noise(0.002),
-        this.contactForce * 0.003 + noise(0.002),
-        noise(0.002),
-      ],
+      torque,
       forceWaveform: this.waveform(force),
+      calibrationValid: true,
+      calibrationIssues: [],
+      compensated: {
+        rawSensor: [...force, ...torque],
+        biasCorrectedSensor: [...force, ...torque],
+        externalSensor: [...contactProbe, ...torque],
+        externalProbe: [...contactProbe, ...torque],
+        contactProbe: [...contactProbe, ...torque],
+        normalForceN: contactProbe[2],
+      },
     });
 
     // --- state ------------------------------------------------------------
@@ -250,9 +321,35 @@ export class SimulationTransport implements Transport {
     } else if (fn < warnForceN - 1.0) this.safety = 'normal';
     const safetyState: SafetyState = this.safety;
 
-    // The control stack's mode switch is one-way; mirror that here so the
-    // console's gate and its VELOCITY LIMITS field are exercised.
-    if (fn >= contactProbingN) this.probing = 'contact_probing';
+    // The mode switch, with the hysteresis the control stack gained on
+    // 2026-08-31 — enter on ‖F‖, leave once it has stayed under the release
+    // level for the confirmation window.
+    //
+    // Mirroring the release matters more than it sounds. While this was modelled
+    // as one-way, a threshold of 1 N meant the simulated console latched into
+    // contact probing seconds after starting and stayed there for the rest of
+    // the session — so the palette, the standing notice and the VELOCITY LIMITS
+    // field were all permanently on, and the transition they exist to show was
+    // visible exactly once, before anyone had looked.
+    // Judged on the **compensated** contact-point wrench, which is what
+    // `us_diff_ik` subscribes to. The raw channels still carry the tool's own
+    // weight — about 1.5 N here, above the 1 N threshold — so a simulator that
+    // switched on those would declare contact while hanging in free space, and
+    // would be reproducing a bug the real stack fixed rather than the stack.
+    const magnitude = Math.hypot(contactProbe[0], contactProbe[1], contactProbe[2]);
+    if (this.probing === 'approach') {
+      if (magnitude >= contactProbingN) {
+        this.probing = 'contact_probing';
+        this.belowReleaseS = 0;
+      }
+    } else if (magnitude <= config.contactProbingReleaseN) {
+      this.belowReleaseS += 0.02;
+      if (this.belowReleaseS >= config.contactProbingReleaseS) {
+        this.probing = 'approach';
+      }
+    } else {
+      this.belowReleaseS = 0;
+    }
 
     // Stand-in for the next grip: the requested station lands a beat after it
     // was asked for, never on the click itself.

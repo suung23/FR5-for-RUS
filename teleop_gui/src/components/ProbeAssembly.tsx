@@ -3,6 +3,7 @@ import { useLoader } from '@react-three/fiber';
 import { CatmullRomCurve3, Vector3, type BufferGeometry } from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { useMemo } from 'react';
+import { usePalette } from '../telemetry/theme';
 
 /**
  * The stack below the flange, in metres.
@@ -61,7 +62,6 @@ const GRAPHITE = '#5c5f5a';
 const PROBE_SHELL = '#d7d9d6';
 /** Cable and strain relief. */
 const CABLE = '#6e716d';
-const ACTIVE = '#17683a';
 
 /**
  * Where the probe's image plane lies, in the flange frame.
@@ -284,6 +284,10 @@ function ConvexProbe({ opacity, contact }: { opacity: number; contact: boolean }
  * array is: curved across the image plane, straight along the elevation.
  */
 function AcousticFace({ contact, opacity }: { contact: boolean; opacity: number }) {
+  // The lit face is the console's structural accent, so it turns blue with
+  // everything else on entering contact probing. Its own meaning — "this
+  // surface is loaded" — is unchanged; it is the palette underneath that moved.
+  const palette = usePalette();
   return (
     <mesh
       // No rotation: three.js builds a cylinder about its own +y, which is the
@@ -304,7 +308,7 @@ function AcousticFace({ contact, opacity }: { contact: boolean; opacity: number 
         ]}
       />
       <meshStandardMaterial
-        color={contact ? ACTIVE : '#7f837e'}
+        color={contact ? palette['--green'] : '#7f837e'}
         roughness={0.3}
         metalness={0.04}
         side={2}

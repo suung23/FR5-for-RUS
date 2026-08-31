@@ -2,9 +2,10 @@
 #
 # 한 세션을 통째로: 정리 → 센서 송출 → teleop.
 #
-#   ./scripts/start_session.sh                       # freespace, 실로봇
+#   ./scripts/start_session.sh                       # ★ 기본: 접촉 전환 + 힘 유지
 #   ./scripts/start_session.sh backend:=mock         # mock
 #   ./scripts/start_session.sh freespace:=false      # 접촉용 상한
+#   ./scripts/start_session.sh contact_probing:=false  # ⚠️ 접촉 전환·힘 유지 끔
 #   ./scripts/start_session.sh --px6d /dev/ttyACM1   # 센서 포트 지정
 #   ./scripts/start_session.sh --no-px6d             # 센서 없이
 #   ./scripts/start_session.sh --no-gui              # GUI 없이
@@ -13,6 +14,29 @@
 #
 # `--` 로 시작하지 않는 인자는 us_phase0.launch.py 로 넘어간다.
 #
+# 기본 커멘드가 하는 일 (2026-08-31)
+# ----------------------------------
+# 인자 없이 띄우면 이렇게 돈다:
+#
+#   접근    freespace 상한 150 mm/s · 0.9 rad/s. 조작자가 여섯 축을 다 쥔다.
+#   ↓       접촉력 ‖F‖ 가 1 N 을 20 ms 넘으면
+#   접촉    상한 10 mm/s · 0.2 rad/s 로 내려가고, **로봇이 z 를 잡는다** —
+#           목표 ‖F‖ 3.0 ± 0.5 N. 나머지 다섯 축은 0 이다.
+#           ⚠️ 목표가 진입 문턱보다 높다. 닿는 순간부터 조작자가 아무 지령도 주지
+#           않는 동안 로봇이 스스로 3 N 까지 파고든다 (처음 약 2 mm/s, 붙으며 감속).
+#   ↓       ‖F‖ 가 0.3 N 아래로 0.5 s 지속되면
+#   접근    상한과 z 가 조작자에게 돌아온다. 세션을 다시 띄울 필요가 없다.
+#
+# 값은 전부 probe.yaml 에 있고 기동할 때 아래 5/5 에 찍힌다. 화면에 찍힌 수와
+# 로봇의 거동이 다르면 그것이 곧 버그다 — 눈으로 맞춰 볼 수 있게 찍는다.
+#
+# ⚠️ **힘 유지는 교정이 유효할 때만 열린다** (contact_control.require_valid_calibration).
+# 교정이 없으면 접촉 판정 자체가 보류되고 접근 상한을 유지한다 — 보상 전 렌치에는
+# 마운트·프로브 자중 10 N 이 자세에 따라 실려 있어 1 N 문턱과 구별되지 않는다.
+# 먼저 `--calib` 로 전자영점과 다자세 중력을 마쳐라.
+#
+# contact_probing:=false 는 이 층을 통째로 끈다. 전자저울 검증처럼 의도적으로 문턱을
+# 넘겨 누르면서 teleop 을 계속해야 하는 절차 전용이며, 그때는 힘 유지도 함께 꺼진다.
 # 왜 하나로 묶는가
 # ----------------
 # 세 가지를 각각 띄우면 하나를 빠뜨리거나 두 번 띄우기 쉽다. 2026-08-25 에 실로봇에
@@ -59,7 +83,10 @@ while (( $# )); do
     --calib)    CALIB=1; shift ;;
     --ip)       ROBOT_IP="${2:-}"; shift 2 ;;
     --dry-run)  DRY_RUN=1; shift ;;
-    -h|--help)  sed -n '2,30p' "$0" | sed 's/^# \?//'; exit 0 ;;
+    # 도움말은 헤더의 사용법 절 그대로다. 접촉 전환·힘 유지 설명이 그 안에 있으므로
+    # 범위를 늘려 함께 나오게 한다 — 기본 커멘드가 무엇을 하는지가 도움말에 없으면
+    # `-h` 를 본 조작자는 그것을 모른 채 로봇을 띄운다.
+    -h|--help)  sed -n '2,55p' "$0" | sed 's/^# \?//'; exit 0 ;;
     *)          LAUNCH_ARGS+=("$1"); shift ;;
   esac
 done
@@ -196,11 +223,74 @@ else
   echo "  생략 (--no-gui)"
 fi
 
+# 접촉 전환과 힘 유지를 **probe.yaml 에서 읽어** 찍는다.
+#
+# 여기에 값을 적어 넣지 않는 이유: 적어 넣으면 파일이 바뀐 뒤에도 화면은 옛 수를
+# 계속 말하고, 조작자는 로봇이 실제로 쓰는 값이 아니라 이 스크립트가 기억하는 값을
+# 보게 된다. 화면에 찍힌 수와 거동이 다르면 그것이 곧 버그여야 한다.
+print_contact_summary() {
+  local enabled="$1"
+  python3 - "$PROBE_YAML" "$enabled" <<'PY' 2>/dev/null || echo "  (probe.yaml 을 읽지 못했다 — 노드 기동 로그에서 확인하라)"
+import sys
+
+import yaml
+
+path, enabled = sys.argv[1], sys.argv[2] == "1"
+params = yaml.safe_load(open(path))["/**"]["ros__parameters"]
+teleop, control = params["teleop"], params["contact_control"]
+sensor, safety = params["ft_sensor"], params["safety"]
+
+if not enabled:
+    print("  ⚠️ 접촉 전환·힘 유지 꺼짐 (contact_probing:=false) — 힘이 얼마가 되든")
+    print(f"     접근 상한을 유지한다. 남는 안전층은 힘 한계 "
+          f"{safety['max_normal_force_n']:.1f} N 뿐이다.")
+    sys.exit(0)
+
+mode = sensor.get("contact_force_mode", "magnitude")
+label = "‖F‖" if mode == "magnitude" else "F_n"
+enter = teleop["contact_probing_force_n"]
+release = teleop.get("contact_probing_release_n", 0.0)
+target, band = control["target_force_n"], control["deadband_n"]
+
+print(f"  접촉 판정   {label} ≥ {enter:.1f} N "
+      f"({teleop['contact_probing_confirm_s'] * 1000:.0f} ms 연속)")
+print(f"  힘 유지     {target:.1f} ± {band:.1f} N   "
+      f"(경고 {safety['warn_normal_force_n']:.1f} · 한계 {safety['max_normal_force_n']:.1f} N)")
+if release > 0.0:
+    print(f"  접근 복귀   {label} ≤ {release:.1f} N "
+          f"({teleop.get('contact_probing_release_confirm_s', 0.5):.1f} s 연속)")
+else:
+    print("  접근 복귀   없음 — 단방향 전환이다. 되돌리려면 세션을 새로 시작한다")
+
+# 유지 밴드의 아래끝이 이탈 문턱 아래로 내려가면, 힘을 정상적으로 잡고 있는 동안에도
+# 이탈 조건이 성립한다. 노드도 기동할 때 경고하지만, 여기가 먼저 눈에 든다.
+if release > 0.0 and target - band <= release:
+    print(f"  ⚠️ 유지 밴드 아래끝 {target - band:.2f} N 이 복귀 문턱 {release:.2f} N "
+          "이하다 — 힘을 잡는 중에 모드가 오간다")
+if not control.get("require_valid_calibration", True):
+    print("  ⚠️ 교정 게이트가 꺼져 있다 — 보상 안 된 값으로 힘을 잡는다")
+else:
+    print("  (교정이 유효할 때만 열린다 — 아니면 접근 상한을 유지한다)")
+PY
+}
+
+# contact_probing 인자를 읽는다. SESSION_DEFAULTS 가 채우지 않는 인자라 기본은 launch
+# 쪽 기본값(true)이다.
+CONTACT_PROBING_ON=1
+for given in ${LAUNCH_ARGS[@]+"${LAUNCH_ARGS[@]}"}; do
+  if [[ "${given%%:=*}" == "contact_probing" ]]; then
+    case "${given#*:=}" in
+      false|False|FALSE|0|no) CONTACT_PROBING_ON=0 ;;
+    esac
+  fi
+done
+
 echo
 if (( CALIB )); then
   echo "5/5  교정 모드 — 제어 스택을 띄우지 않는다 (로봇에 명령을 보내지 않는다)"
 else
   echo "5/5  teleop:  ros2 launch fr5_launch us_phase0.launch.py ${LAUNCH_ARGS[*]}"
+  print_contact_summary "$CONTACT_PROBING_ON"
 fi
 
 if (( DRY_RUN )); then

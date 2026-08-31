@@ -55,11 +55,27 @@
   margin-bottom: 9px;
 }
 
+/* The one number the operator watches while the arm is pressing.
+   2026-08-31: 28 -> 46 px. It carries more than it used to — it is now the
+   contact-force magnitude the control stack both switches on (1 N) and holds
+   (3.0 +/- 0.5 N), and between those two the arm drives itself in without a
+   command from the operator — so the number has to be readable from a step
+   back from the console, not only from the chair. The plate is the same height: the ruled track below it
+   gives up nothing, and the components sit beneath in their own cells. */
 .forceValue {
-  font-size: 28px;
+  font-size: 46px;
   font-weight: 600;
   line-height: 1;
   letter-spacing: -0.03em;
+  color: var(--ink);
+}
+
+/* Which scalar the headline is, set beside the plate title. Small on purpose:
+   it is read once to learn the plate, not every glance. */
+.forceNotation {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
   color: var(--ink);
 }
 
@@ -71,7 +87,7 @@
 }
 
 .forceUnit {
-  font-size: 12px;
+  font-size: 15px;
   color: var(--ink);
 }
 
@@ -90,7 +106,7 @@
 }
 
 .forcePeak .num {
-  font-size: 12px;
+  font-size: 15px;
 }
 
 .scale {
@@ -508,11 +524,13 @@
   padding: 0;
 }
 
-/* Four cells rather than four rows: the reading is one vector taken apart, and
-   a column of rows would read as four unrelated measurements. */
+/* Cells rather than rows: the reading is one vector taken apart, and a column
+   of rows would read as unrelated measurements. Three across since the total
+   moved up to the headline (2026-08-31) — a 2x2 with one empty cell reads as a
+   reading that failed to arrive. */
 .contactGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1px;
   background: var(--rule);
   border-bottom: 1px solid var(--rule);
@@ -528,23 +546,26 @@
 
 .contactLabel {
   flex: 1 1 auto;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--ink);
 }
 
-/* Same size as the joint table, deliberately smaller than the normal-force
-   readout. The regulator closes on that one; these qualify it. */
+/* Deliberately smaller than the headline. That one is the total the regulator
+   closes on; these three take it apart. Bumped 13 -> 16 px with the headline so
+   the split stays legible rather than becoming fine print beside a 46 px
+   number — the normal component and the off-axis angle are what say whether
+   the total is a press or a drag. */
 .contactValue {
-  font-size: 13px;
+  font-size: 16px;
   font-variant-numeric: tabular-nums;
 }
 
 .contactUnit {
-  width: 18px;
-  font-size: 9px;
+  width: 20px;
+  font-size: 10px;
   color: var(--ink);
 }
 

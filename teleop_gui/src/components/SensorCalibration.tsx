@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { config } from '../telemetry/config';
 import type { CalibrationStatus, CompensatedStages, RobotTelemetry, WrenchSample } from '../telemetry/types';
 import styles from './SensorCalibration.module.css';
 
@@ -262,7 +263,9 @@ function Pipeline({ wrench, available }: { wrench: WrenchSample | null; availabl
       </table>
       <p className={styles.note}>
         {stages
-          ? `Normal force F(zP) = ${stages.normalForceN.toFixed(3)} N — positive is compression.`
+          ? `Probe-frame F(zP) = ${stages.normalForceN.toFixed(3)} N — the normal force is ` +
+            `sign × this (${config.normalForceSign > 0 ? '+' : '−'}), so compression reads ` +
+            `${config.normalForceSign > 0 ? 'positive' : 'negative'} here.`
           : 'No calibration profile loaded; only raw sensor values are available.'}
       </p>
     </div>

@@ -3,6 +3,17 @@
 접촉 프로빙 모드에서 **침투축(프로브 +z)은 로봇이 스스로 잡는다.** 조작자가 손으로
 누르는 깊이를 맞추는 것이 아니라, 목표 힘 구간 안에 들어오도록 로봇이 z 를 움직인다.
 
+**무엇을 잡는가.** 이 조절기는 스칼라 하나를 받아 목표에 맞춘다. 그 스칼라가 법선력
+``F_n`` 인지 접촉력 크기 ``‖F‖`` 인지는 호출자가 정한다 (``us_diff_ik_node`` 의
+``ft_sensor.contact_force_mode``, 기본 ``magnitude``). 2026-08-31 이전에는 법선력
+전용이었다.
+
+⚠️ 크기로 잡을 때의 성질 하나: ``‖F‖ ≥ |F_z|`` 이므로 횡력이 실리면 z 를 덜 눌러도
+목표에 도달한다. 즉 프로브가 옆으로 끌리는 동안에는 **침투 깊이가 줄어드는 쪽**으로
+동작한다. 조직에 과하게 파고드는 방향이 아니므로 안전한 쪽으로 틀리지만, "목표 힘을
+유지 중" 이 곧 "법선으로 목표만큼 누르는 중" 은 아니다 — 화면이 총합·법선·횡력을
+따로 보여 주는 이유다.
+
 이것은 §7 admittance 의 첫 구현이다. 아직 policy 도 QP arbiter 도 없으므로 힘 축
 하나만 닫는다. 나머지 축은 호출자가 정한다 (기본은 0 — 프로브가 제자리에서 힘만
 유지한다).
@@ -59,7 +70,7 @@ class RegulatorOutput:
 
 
 class ForceRegulator:
-    """법선력을 목표 구간 안에 잡아 두는 1 축 admittance."""
+    """접촉력을 목표 구간 안에 잡아 두는 1 축 admittance."""
 
     def __init__(
         self,
@@ -107,16 +118,17 @@ class ForceRegulator:
         self.max_force_n = float(max_force_n)
         self.retreat_speed_m_s = float(retreat_speed_m_s)
 
-    def update(self, normal_force_n: float) -> RegulatorOutput:
-        """법선력 하나를 보고 이 주기의 z 속도를 정한다.
+    def update(self, contact_force_n: float) -> RegulatorOutput:
+        """접촉력 하나를 보고 이 주기의 z 속도를 정한다.
 
         Args:
-            normal_force_n: 현재 법선력 [N]. 양수 = 압축.
+            contact_force_n: 현재 접촉력 [N]. 양수 = 누름. 크기 ``‖F‖`` 인지 법선력
+                ``F_n`` 인지는 호출자가 정한다.
 
         Returns:
             :class:`RegulatorOutput`.
         """
-        force = float(normal_force_n)
+        force = float(contact_force_n)
 
         # 1) 한계 초과 — 목표와 무관하게 후퇴한다.
         if force >= self.max_force_n:

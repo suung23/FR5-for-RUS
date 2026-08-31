@@ -70,6 +70,7 @@ public:
         double angular_deadzone;  // rad/s, 위와 같음
         double lin_sign[3];       // 축별 부호 뒤집개 (프로파일 무관)
         double ang_sign[3];
+        double lin_gain[3];       // 축별 병진 이득, **장치 world 기준** (프로파일 무관)
         double tip_roll_deg;      // 침투축 둘레 회전 (프레임 정합의 남은 자유도)
     };
 
@@ -117,6 +118,13 @@ public:
         this->declare_parameter<std::vector<double>>("teleop.linear_sign", {1.0, 1.0, 1.0});
         this->declare_parameter<std::vector<double>>("teleop.angular_sign", {1.0, 1.0, 1.0});
 
+        // 축별 병진 이득 [좌우, 상하, 앞뒤]. linear_scale 위에 곱해진다.
+        // linear_sign 과 달리 프로브 축이 아니라 **장치 world 축**(조작자의 손 기준)에
+        // 걸린다 — 자세한 근거는 아래 processDevice 의 주석. 매 주기 읽으므로
+        // 조작하면서 확정할 수 있다:
+        //   ros2 param set /touch_teleop_node teleop.linear_axis_gain "[1.0, 2.0, 2.0]"
+        this->declare_parameter<std::vector<double>>("teleop.linear_axis_gain", {1.0, 1.0, 1.0});
+
         this->declare_parameter<std::string>("left_dev_name", "");
         this->declare_parameter<std::string>("right_dev_name", "default");
 
@@ -152,6 +160,9 @@ public:
                 p.linear_scale, p.linear_deadzone, p.angular_scale, p.angular_deadzone, p.filter_alpha);
             RCLCPP_INFO(this->get_logger(),
                 "프레임 정합: 촉(-Z) ≡ 침투(+z), 침투축 둘레 %.0f°", p.tip_roll_deg);
+            RCLCPP_INFO(this->get_logger(),
+                "축별 병진 이득 (장치 world, 좌우/상하/앞뒤): x%.2f / x%.2f / x%.2f",
+                p.lin_gain[0], p.lin_gain[1], p.lin_gain[2]);
     }
 
     ~TouchTeleopNode() {
@@ -276,13 +287,16 @@ private:
             this->get_parameter(p + "angular_deadzone").as_double(),
             {1.0, 1.0, 1.0},
             {1.0, 1.0, 1.0},
+            {1.0, 1.0, 1.0},
             this->get_parameter("teleop.tip_roll_deg").as_double(),
         };
         const auto ls = this->get_parameter("teleop.linear_sign").as_double_array();
         const auto as = this->get_parameter("teleop.angular_sign").as_double_array();
+        const auto lg = this->get_parameter("teleop.linear_axis_gain").as_double_array();
         for (size_t i = 0; i < 3; ++i) {
             if (i < ls.size()) out.lin_sign[i] = ls[i];
             if (i < as.size()) out.ang_sign[i] = as[i];
+            if (i < lg.size()) out.lin_gain[i] = lg[i];
         }
         return out;
     }
@@ -469,7 +483,33 @@ private:
              0.0, 0.0, 1.0;
         const Eigen::Matrix3d A = Rz * A0;
 
-        const Eigen::Vector3d v = A * s.filtered_lin_vel * l_scale;
+        // ---- 축별 병진 이득 (조작자 손 기준, 2026-08-31) ----
+        //
+        // 조작 피드백: 앞뒤·상하 병진이 손 움직임에 비해 답답하다. 좌우는 그대로 두고
+        // 두 축만 키우려면 이득이 **장치 world 프레임**에 걸려야 한다
+        // (+X 오른쪽, +Y 위, +Z 조작자 쪽 → 상하는 y, 앞뒤는 z).
+        //
+        // filtered_lin_vel 은 스타일러스 body 프레임이다. 거기에 그냥 곱하면 이득 축이
+        // 손목을 따라 돌아, 같은 "앞으로 밀기" 가 파지 각도마다 다르게 증폭된다.
+        // 그래서 world 로 되돌려 곱하고 body 로 돌아온다:
+        //     v_body' = Rᵀ · diag(gain) · R · v_body
+        //
+        // 하류(us_diff_ik, teleop.linear_frame: latched)는 R_stylus·Aᵀ 로 지령을 장치
+        // world 로 되돌린 뒤 고정 행렬 하나로 base 에 싣는다 (§10.5). 그 경로를 지나면
+        // 이득은 정확히 diag(gain)·v_world 로 남는다 — 스타일러스 자세와 무관하다.
+        //
+        // 데드존 **뒤**에 곱한다. 앞에 곱하면 문턱이 축마다 달라져, 이득을 올린 축의
+        // 손떨림이 그만큼 더 통과한다 (데드존 값은 손 잡음 실측이다).
+        //
+        // 방향이 아니라 축에 걸린다 — 앞으로 밀 때와 뒤로 뺄 때의 배율이 같다.
+        // 다르면 왔던 경로를 같은 손동작으로 되짚을 수 없다.
+        const Eigen::Vector3d gain(profile.lin_gain[0], profile.lin_gain[1], profile.lin_gain[2]);
+        Eigen::Vector3d lin_body = s.filtered_lin_vel;
+        if (gain != Eigen::Vector3d::Ones()) {
+            lin_body = s.rotation.transpose() * gain.cwiseProduct(s.rotation * lin_body);
+        }
+
+        const Eigen::Vector3d v = A * lin_body * l_scale;
         const Eigen::Vector3d w = A * s.filtered_ang_vel * a_scale;
 
         twist.linear.x  = profile.lin_sign[0] * v.x();

@@ -1,5 +1,5 @@
 import type { ContactPhase } from '../telemetry/contactState';
-import type { LinkPhase, RobotState, SafetyState } from '../telemetry/types';
+import type { LinkPhase, ProbingMode, RobotState, SafetyState } from '../telemetry/types';
 
 /**
  * Event log.
@@ -71,6 +71,7 @@ export class TransitionWatcher {
   private latched = false;
   private safety?: SafetyState;
   private robot?: RobotState;
+  private probing?: ProbingMode;
 
   observeLink(phase: LinkPhase, endpoint: string): void {
     if (phase === this.link) return;
@@ -82,14 +83,14 @@ export class TransitionWatcher {
     logEvent('LINK', `${phase} — ${endpoint}`, severity);
   }
 
-  observeStage(stage: ContactPhase, latched: boolean, normalForceN: number): void {
+  observeStage(stage: ContactPhase, latched: boolean, contactForceN: number): void {
     if (stage !== this.stage) {
       const previous = this.stage;
       this.stage = stage;
       if (previous !== undefined) {
         logEvent(
           'STAGE',
-          `${previous} to ${stage} at ${normalForceN.toFixed(2)} N`,
+          `${previous} to ${stage} at ${contactForceN.toFixed(2)} N`,
           stage === 'contact' ? 'warn' : 'info',
         );
       }
@@ -101,6 +102,39 @@ export class TransitionWatcher {
     if (!latched && this.latched) {
       this.latched = false;
       logEvent('STAGE', 'contact latch cleared by operator', 'info');
+    }
+  }
+
+  /**
+   * The velocity-limit mode the control stack declares.
+   *
+   * Distinct from `observeStage`, which watches the console's own contact
+   * classification. This one is the robot speaking: it is what the arm is
+   * actually clamping to. The two can disagree, and when they do the log is
+   * where that shows — which is the whole reason both are recorded rather than
+   * one being derived from the other.
+   *
+   * Entering is a `warn`: nothing is wrong, but the machine the operator is
+   * driving has changed under them. Leaving is `info` — it is a return to the
+   * state the session started in.
+   */
+  observeProbingMode(mode: ProbingMode | undefined): void {
+    if (!mode || mode === this.probing) return;
+    const previous = this.probing;
+    this.probing = mode;
+    // The first frame tells us where the robot already was; that is not a
+    // transition and must not be logged as one. A console attached mid-session
+    // would otherwise announce a switch that happened before it was watching.
+    if (previous === undefined) return;
+    if (mode === 'contact_probing') {
+      logEvent(
+        'MODE',
+        'approach to contact probing — velocity limits tightened, ' +
+          'the robot is holding force on the penetration axis',
+        'warn',
+      );
+    } else {
+      logEvent('MODE', 'contact probing to approach — force hold released', 'info');
     }
   }
 

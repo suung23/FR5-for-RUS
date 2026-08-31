@@ -95,11 +95,18 @@ export interface WrenchSample {
   /**
    * The shape of the window this frame summarises, folded into bins.
    *
-   * The bridge sends one frame a second because that is the rate a number on
-   * a screen can be read at. A line is not a number: at one point per second a
-   * 20 s trend is a twenty-step staircase, which is a 1 kHz sensor drawn as if
-   * it were a 1 Hz one. This block carries the window's own shape in the same
-   * frame, so the readout stays calm while the plot shows what the sensor saw.
+   * The bridge refreshes the readout once a second because that is the rate a
+   * number on a screen can be read at. A line is not a number: at one point per
+   * second a 20 s trend is a twenty-step staircase, which is a 1 kHz sensor
+   * drawn as if it were a 1 Hz one. This block carries the window's own shape,
+   * so the readout stays calm while the plot shows what the sensor saw.
+   *
+   * Frames arrive faster than the readout changes (`bridge.wrench_stream_hz`,
+   * 10 Hz) and each carries only the bins closed since the last one — the
+   * readout fields simply repeat in between. Resolution and arrival rate are
+   * separate: a second's worth of bins delivered once a second would draw at
+   * full 100 Hz resolution and still lurch forward in one-second slabs, which
+   * is a trace that is stamped rather than streamed.
    *
    * Each bin is a mean *and* a min/max, not a chosen sample. Picking one
    * sample per bin would alias; folding the bin cannot.
@@ -279,10 +286,25 @@ export interface LinkStatus {
 }
 
 /** Callbacks a transport uses to push into the adapter. */
+/**
+ * The bridge's answer to a console command.
+ *
+ * Every calibration command can be refused, and the refusal carries the only
+ * explanation the operator will get — the probe is not pointing down, there is
+ * load on it, the pose has not arrived. Dropping these on the floor is what
+ * makes a button look dead when it is in fact being turned away.
+ */
+export interface CommandAck {
+  command: string;
+  ok: boolean;
+  reason?: string;
+}
+
 export interface TransportSink {
   onTelemetry(frame: RobotTelemetry): void;
   onWrench(sample: WrenchSample): void;
   onStatus(patch: Partial<LinkStatus>): void;
+  onAck(ack: CommandAck): void;
 }
 
 /**

@@ -126,6 +126,21 @@ outputs/
 └── gravity_compensation_validation.png/.pdf  Figure 2
 ```
 
+## The pipeline does *not* correct what this tool measured
+
+A correction derived from the 2026-08-28 run was carried in the bridge for part
+of 2026-08-31 and then **removed**. The measurement stands; what did not stand
+was applying it silently, because it put the configured numbers and the real
+ones on different scales — a 3.0 N hold target became 2.71 N in the units the
+scale had measured, and a 2.0 N mode threshold fired at 1.71 N. On a console an
+operator reads, a setpoint that means something else is worse than a known
+offset.
+
+So the residual below is what the deployed pipeline still has. It is reported,
+not corrected. Before reinstating a correction, repeat the comparison under
+phantom contact: nineteen axial presses onto a scale do not constrain a contact
+carrying shear, and the threshold and target have to be converted with it.
+
 ## What this tool will not do
 
 **The gravity residual is never subtracted from the captured force.** Removing

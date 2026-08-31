@@ -1,16 +1,22 @@
 /**
- * Approach / contact classification from the normal force.
+ * Approach / contact classification from the contact force.
  *
- * A TypeScript port of `fr5_control/contact_state.py`, kept deliberately
- * faithful so the panel on screen and the node in the control stack can never
- * disagree about what "contact" means. If one changes, change both.
+ * A TypeScript port of `fr5_ik/probing_mode.py`, kept deliberately faithful so
+ * the panel on screen and the node in the control stack can never disagree
+ * about what "contact" means. If one changes, change both.
  *
- * Sign convention (DESIGN_NOTES §4.4):
+ * **What crosses the threshold is the caller's decision, not this class's**
+ * (2026-08-31). It takes one scalar, positive when pressing, and compares it.
+ * The control stack picks between the contact-force magnitude and the normal
+ * component in `ft_sensor.contact_force_mode`, and the console has to feed in
+ * whichever that is — a classifier holding its own opinion about which scalar
+ * counts is a classifier that will eventually disagree with the arm.
  *
- *     F_n = normalForceSign x F_z^probe        positive = compression
- *
- * With `normalForceSign = -1`, compression arrives as a negative `F_z`, so the
- * `F_z <= -7 N` boundary the operator cares about is `F_n >= 7 N` here.
+ * It used to take a probe-frame `F_z` and apply `normalForceSign` itself. That
+ * baked the normal component in, which stopped being right when the stack
+ * moved to `‖F‖` at a 1 N threshold: a probe touching even slightly off-axis
+ * puts most of the contact into shear, and `F_z` alone reads that as no
+ * contact at all.
  *
  * Three behaviours matter, and none of them are optional:
  *
@@ -30,8 +36,7 @@ export type ContactPhase = 'approach' | 'contact';
 export interface ContactOptions {
   enterN: number;
   releaseN: number;
-  normalForceSign: number;
-  /** Constant offset subtracted from F_n, in newtons. */
+  /** Constant offset subtracted from the reading, in newtons. */
   biasN?: number;
   confirmMs?: number;
   releaseConfirmMs?: number;
@@ -40,7 +45,8 @@ export interface ContactOptions {
 export interface ContactSnapshot {
   phase: ContactPhase;
   hasContacted: boolean;
-  normalForceN: number;
+  /** The scalar the judgement was made on. Positive = pressing. */
+  contactForceN: number;
   /** 0..1 progress through the active confirmation window. */
   confirmProgress: number;
 }
@@ -49,7 +55,7 @@ export class ContactDetector {
   private readonly opts: Required<ContactOptions>;
   private phase: ContactPhase = 'approach';
   private latched = false;
-  private normalForceN = 0;
+  private contactForceN = 0;
   private aboveMs = 0;
   private belowMs = 0;
 
@@ -60,17 +66,16 @@ export class ContactDetector {
           'without hysteresis the phase chatters at the threshold',
       );
     }
+    // probe.yaml: teleop.contact_probing_confirm_s = 0.02,
+    // teleop.contact_probing_release_confirm_s = 0.5. Release is confirmed far
+    // more slowly than entry, because a momentary dip while still pressing
+    // must not read as "clear".
     this.opts = {
       biasN: 0,
-      confirmMs: 5,
-      releaseConfirmMs: 50,
+      confirmMs: 20,
+      releaseConfirmMs: 500,
       ...options,
     };
-  }
-
-  /** Convert a probe-frame F_z into the signed normal force. */
-  normalForce(fz: number): number {
-    return this.opts.normalForceSign * fz - this.opts.biasN;
   }
 
   reset(unlatch = false): void {
@@ -80,9 +85,15 @@ export class ContactDetector {
     if (unlatch) this.latched = false;
   }
 
-  update(fz: number, dtMs: number): ContactSnapshot {
-    const fn = this.normalForce(fz);
-    this.normalForceN = fn;
+  /**
+   * Feed one sample.
+   *
+   * @param contactForceN Contact force in newtons, positive when pressing.
+   *   Which scalar that is — `‖F‖` or `F_n` — is the caller's to decide.
+   */
+  update(contactForceN: number, dtMs: number): ContactSnapshot {
+    const fn = contactForceN - this.opts.biasN;
+    this.contactForceN = fn;
     const dt = Math.max(0, dtMs);
 
     if (this.phase === 'approach') {
@@ -118,7 +129,7 @@ export class ContactDetector {
     return {
       phase: this.phase,
       hasContacted: this.latched,
-      normalForceN: this.normalForceN,
+      contactForceN: this.contactForceN,
       confirmProgress: window > 0 ? Math.min(1, elapsed / window) : elapsed > 0 ? 1 : 0,
     };
   }

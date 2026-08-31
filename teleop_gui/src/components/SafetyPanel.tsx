@@ -65,7 +65,7 @@ export function SafetyPanel({ telemetry, contact, available }: Props) {
           <div className="field">
             <span className="field__label">Stage classifier</span>
             <span className="field__value num">
-              {contact.phase.toUpperCase()} · {Math.abs(contact.normalForceN).toFixed(2)} N
+              {contact.phase.toUpperCase()} · {Math.abs(contact.contactForceN).toFixed(2)} N
             </span>
           </div>
           <div className="field">

@@ -89,6 +89,8 @@
   width: 16px;
   height: 8px;
   border-top: none;
-  background: #17683a;
+  /* The accent token, so the key matches the band the plot actually drew —
+     both follow the palette into contact probing. */
+  background: var(--green);
   opacity: 0.2;
 }

@@ -6,6 +6,7 @@ import { JointRates } from './components/JointRates';
 import { ModeTimeline } from './components/ModeTimeline';
 import { NavRail, viewFromHash, type ConsoleView } from './components/NavRail';
 import { OperatorFrame } from './components/OperatorFrame';
+import { ProbingNotice } from './components/ProbingNotice';
 import { SafetyPanel } from './components/SafetyPanel';
 import { SensorCalibration } from './components/SensorCalibration';
 import { StatusColumn } from './components/StatusColumn';
@@ -14,6 +15,7 @@ import { Workspace } from './components/Workspace';
 import { isStale } from './store/selectors';
 import { logEvent } from './store/events';
 import { subscribeEvents } from './store/events';
+import { refreshPalette, setProbingTheme } from './telemetry/theme';
 import { useTelemetryStore } from './store/telemetryStore';
 import styles from './App.module.css';
 
@@ -21,19 +23,18 @@ export function App() {
   const telemetry = useTelemetryStore((s) => s.telemetry);
   const wrench = useTelemetryStore((s) => s.wrench);
   const contact = useTelemetryStore((s) => s.contact);
+  const contactForce = useTelemetryStore((s) => s.contactForce);
+  const contactJudged = useTelemetryStore((s) => s.contactJudged);
   const link = useTelemetryStore((s) => s.link);
   const history = useTelemetryStore((s) => s.history);
   const waveformHz = useTelemetryStore((s) => s.waveformHz);
   const trajectory = useTelemetryStore((s) => s.trajectory);
-  const peak = useTelemetryStore((s) => s.peakNormalForceN);
+  const peak = useTelemetryStore((s) => s.peakContactForceN);
   const frameRateHz = useTelemetryStore((s) => s.frameRateHz);
   const paused = useTelemetryStore((s) => s.paused);
   const setPaused = useTelemetryStore((s) => s.setPaused);
   const resetSession = useTelemetryStore((s) => s.resetSession);
   const sendCommand = useTelemetryStore((s) => s.sendCommand);
-  const forceZero = useTelemetryStore((s) => s.forceZero);
-  const zeroForce = useTelemetryStore((s) => s.zeroForce);
-  const clearForceZero = useTelemetryStore((s) => s.clearForceZero);
 
   // The selected view lives in the URL hash. A reload — or a crash and restart
   // mid-procedure — returns to the panel the operator was on rather than to a
@@ -83,6 +84,31 @@ export function App() {
 
   const blocked = gate;
 
+  // Contact probing repaints the whole console blue and raises a standing
+  // notice. Both are driven from the mode the **control stack declares**, never
+  // from the console's own contact classification — the two can disagree, and
+  // if they do, what the operator needs to see is what the arm is actually
+  // clamping to.
+  //
+  // Gated on `available` so a dead link cannot leave the console sitting in the
+  // probing palette on the strength of a frame that stopped arriving minutes
+  // ago. When the link drops, the colour goes back to resting and the status
+  // strip says the link is stale — which is the true statement of what is
+  // known.
+  const probing = available && telemetry.probingMode === 'contact_probing';
+
+  useEffect(() => {
+    setProbingTheme(probing);
+  }, [probing]);
+
+  // On unmount put the palette back. The attribute lives on the document, not
+  // in React's tree, so nothing else would. The mount side re-resolves the
+  // tokens now that the document is fully styled.
+  useEffect(() => {
+    refreshPalette();
+    return () => setProbingTheme(false);
+  }, []);
+
   return (
     <div className={styles.console}>
       {/* The console stays visible and keeps updating behind the gate — the
@@ -101,6 +127,8 @@ export function App() {
           onTogglePause={() => setPaused(!paused)}
           onReset={resetSession}
         />
+
+        {probing ? <ProbingNotice /> : null}
 
         {paused ? (
           <div className={styles.hold} role="status">
@@ -134,7 +162,10 @@ export function App() {
             } ${view === 'calibration' || view === 'safety' ? styles.lowerTall : ''}`}
             >
               {view === 'monitoring' ? (
-                <ForceTrend history={history} waveformHz={waveformHz} />
+                <ForceTrend
+                  history={history}
+                  waveformHz={waveformHz}
+                />
               ) : null}
               {view === 'teleoperation' ? (
                 <>
@@ -165,13 +196,12 @@ export function App() {
             telemetry={telemetry}
             wrench={wrench}
             contact={contact}
+            contactForce={contactForce}
+            contactJudged={contactJudged}
             peakN={peak}
             available={available}
             acknowledged={acknowledged}
-            frameCount={history.length}
-            forceZero={forceZero}
-            onZeroForce={zeroForce}
-            onClearForceZero={clearForceZero}
+            sendCommand={sendCommand}
           />
         </div>
 

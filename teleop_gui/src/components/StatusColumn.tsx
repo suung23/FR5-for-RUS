@@ -57,6 +57,7 @@ export function StatusColumn({
           telemetry={telemetry}
           available={available}
           judged={contactJudged}
+          sendCommand={sendCommand}
         />
         <ContactForcePlate
           force={available && wrench !== null ? contactForce : null}
@@ -112,15 +113,22 @@ function StagePlate({
   telemetry,
   available,
   judged,
+  sendCommand,
 }: {
   contact: ContactSnapshot;
   telemetry: RobotTelemetry;
   available: boolean;
   /** False while no calibration is loaded and the stage is not being judged. */
   judged: boolean;
+  sendCommand(command: Record<string, unknown>): boolean;
 }) {
   const safety = telemetry.safetyState;
   const probingMode = telemetry.probingMode;
+  // Selected is what the operator asked for; active is what the arm is doing.
+  // During approach the two differ, and that gap is the whole reason the mode
+  // can be chosen ahead of the contact it applies to.
+  const inplaneSelected = telemetry.inplaneRotation === true;
+  const inplaneActive = probingMode === 'contact_probing_inplane';
   const alarm = safety === 'protective_stop' || safety === 'emergency_stop';
   const warn = safety === 'warning';
 
@@ -159,16 +167,76 @@ function StagePlate({
         {/* What the robot is actually clamping to, as reported by the control
             stack — not the console's own guess. When these two disagree the
             operator needs to see it, so the declared mode is its own field. */}
-        <div className={`field ${probingMode === 'contact_probing' ? 'field--warn' : ''}`}>
+        <div
+          className={`field ${probingMode && probingMode !== 'approach' ? 'field--warn' : ''}`}
+        >
           <span className="field__label">Velocity limits</span>
           <span className="field__value num">
             {!available || !probingMode
               ? '—'
-              : probingMode === 'contact_probing'
-                ? 'CONTACT PROBING'
-                : 'APPROACH'}
+              : probingMode === 'contact_probing_inplane'
+                ? 'CONTACT · IN-PLANE'
+                : probingMode === 'contact_probing'
+                  ? 'CONTACT PROBING'
+                  : 'APPROACH'}
           </span>
         </div>
+        {/* Which axes the operator still has. In contact probing the answer is
+            normally "none" — the six axes are the robot's while it holds the
+            force — and that is worth saying rather than leaving the operator to
+            discover it by moving the stylus and getting nothing. */}
+        <div className="field">
+          <span className="field__label">Operator axes</span>
+          <span className="field__value num">
+            {!available || !probingMode
+              ? '—'
+              : probingMode === 'approach'
+                ? 'ALL SIX'
+                : probingMode === 'contact_probing_inplane'
+                  ? 'ROCK ONLY (ω\u2009y)'
+                  : 'NONE'}
+          </span>
+        </div>
+        {/* Selected here rather than only while contact is under way. Contact
+            starts without warning and the operator's hand is on the stylus when
+            it does, so the choice has to be one they can make beforehand — the
+            selection is remembered and takes effect at the transition.
+
+            The mode hands back exactly one axis: rotation about the elevational
+            axis, the only rotation that maps the imaging plane onto itself. The
+            force loop keeps `z` either way, so it does not change how hard the
+            probe presses — only whether the operator may rock it while it does. */}
+        <div className={`field ${inplaneActive ? 'field--warn' : ''}`}>
+          <span className="field__label">
+            In-plane rock <span className="tag tag--off">TEST</span>
+          </span>
+          <span className="field__value">
+            <button
+              type="button"
+              className={styles.modeSelect}
+              aria-pressed={inplaneSelected}
+              disabled={!available || telemetry.inplaneRotation === undefined}
+              onClick={() =>
+                sendCommand({ command: 'contact.inplane', enabled: !inplaneSelected })
+              }
+            >
+              {telemetry.inplaneRotation === undefined
+                ? '—'
+                : inplaneActive
+                  ? 'ACTIVE'
+                  : inplaneSelected
+                    ? 'ARMED'
+                    : 'OFF'}
+            </button>
+          </span>
+        </div>
+        <p className={styles.note}>
+          {inplaneSelected
+            ? `Rotation about the elevational axis is the operator's; the imaging plane
+               stays where it is. Force is still the robot's.
+               ${inplaneActive ? '' : 'Takes effect when contact probing begins.'}`
+            : 'Test mode. Hands ω y back to the operator during contact probing.'}
+        </p>
         <p className={styles.note}>
           {judged
             ? `Stage comes from the force sensor on its own USB link, not from the robot

@@ -122,6 +122,8 @@ export class SimulationTransport implements Transport {
    * and the arm stops reading contact as contact.
    */
   private tare: [number, number, number] = [0, 0, 0];
+  /** Selected in-plane mode. Applies at the next contact transition. */
+  private inplane = false;
 
   sendCommand(command: Record<string, unknown>): boolean {
     if (command.command === 'calib.tare') {
@@ -139,6 +141,16 @@ export class SimulationTransport implements Transport {
     if (command.command === 'calib.tare.clear') {
       this.tare = [0, 0, 0];
       this.ack('calib.tare.clear', true);
+      return true;
+    }
+    if (command.command === 'contact.inplane') {
+      // Accepted during approach too — arming it beforehand is the normal way
+      // to use it, because contact starts without warning.
+      this.inplane = command.enabled === true;
+      if (this.probing !== 'approach') {
+        this.probing = this.inplane ? 'contact_probing_inplane' : 'contact_probing';
+      }
+      this.ack('contact.inplane', true);
       return true;
     }
     if (command.command !== 'teleop.operator_frame') return false;
@@ -339,7 +351,7 @@ export class SimulationTransport implements Transport {
     const magnitude = Math.hypot(contactProbe[0], contactProbe[1], contactProbe[2]);
     if (this.probing === 'approach') {
       if (magnitude >= contactProbingN) {
-        this.probing = 'contact_probing';
+        this.probing = this.inplane ? 'contact_probing_inplane' : 'contact_probing';
         this.belowReleaseS = 0;
       }
     } else if (magnitude <= config.contactProbingReleaseN) {
@@ -366,6 +378,7 @@ export class SimulationTransport implements Transport {
       robotState,
       safetyState,
       probingMode: this.probing,
+      inplaneRotation: this.inplane,
       teleopFrame: {
         operatorYawDeg: this.operatorYawDeg,
         pendingYawDeg: this.pendingYawDeg,

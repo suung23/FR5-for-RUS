@@ -275,6 +275,30 @@ class TelemetryBridge(Node):
         # 지령을 어느 방향으로 읽을지만 바꾼다. 그래도 안전과 무관하지 않아서,
         # 적용은 us_diff_ik 가 다음 파지 경계까지 미룬다. 여기서 즉시 반영하면
         # 조작 중에 축이 뒤집힐 수 있다.
+        # 면내 회전 모드의 **상태**. us_diff_ik 가 latched 로 내므로 늦게 떠도 받는다.
+        self._inplane = None
+        self.create_subscription(
+            Bool,
+            f"{ns}/inplane_rotation_state",
+            self._on_inplane_state,
+            QoSProfile(
+                depth=1,
+                reliability=ReliabilityPolicy.RELIABLE,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            ),
+        )
+
+        # 면내 회전 모드 요청. us_diff_ik 가 파라미터로 받아 두므로 여기서는
+        # 창구만 낸다 — 상태의 진실은 그쪽에 있다.
+        self.inplane_req = self.create_publisher(
+            Bool,
+            f"{ns}/inplane_rotation_request",
+            QoSProfile(
+                depth=1,
+                reliability=ReliabilityPolicy.RELIABLE,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            ),
+        )
         self.teleop_frame_req = self.create_publisher(
             Float64,
             f"{ns}/teleop_frame_request",
@@ -827,6 +851,10 @@ class TelemetryBridge(Node):
                     self._wrench_source = "none"
                 time.sleep(2.0)
 
+    def _on_inplane_state(self, msg: Bool) -> None:
+        """면내 회전 모드가 걸려 있는가. us_diff_ik 가 진실을 되돌려 준 값이다."""
+        self._inplane = bool(msg.data)
+
     def _publish_calibration_valid(self) -> None:
         """교정 유효성을 주기적으로 낸다.
 
@@ -933,6 +961,12 @@ class TelemetryBridge(Node):
 
         if self._teleop_frame is not None:
             frame["teleopFrame"] = self._teleop_frame
+
+        # 모드 문자열과 **따로** 낸다. probingMode 는 지금 실제 속도 상한이 무엇인가
+        # 이고, 이쪽은 접촉하면 그렇게 될 것인가다. 접근 중에 걸어 둔 상태를
+        # 모드로 말하면 아직 아닌 것을 이미 그렇다고 말하게 된다.
+        if self._inplane is not None:
+            frame["inplaneRotation"] = self._inplane
 
         frame["calibration"] = self.calibration_summary()
 
@@ -1377,6 +1411,24 @@ class TelemetryBridge(Node):
                 f"{'유효' if valid else '무효: ' + '; '.join(issues)}"
             )
             return ok(valid=valid, issues=issues, path=self.calibration_path)
+
+        if command == "contact.inplane":
+            # 접촉 프로빙에서 조작자에게 ω_y 하나를 돌려준다 — 영상면(프로브 x–z)을
+            # 벗어나지 않는 유일한 회전이다. 힘 축은 그대로 로봇이 잡는다.
+            want = request.get("enabled")
+            if not isinstance(want, bool):
+                return fail(f"enabled 가 참/거짓이어야 한다: {want!r}")
+            if self._mode is None:
+                # 모드를 한 번도 못 받았다는 것은 us_diff_ik 가 없다는 뜻이다.
+                return fail("us_diff_ik 가 모드를 아직 알리지 않았다 — 노드가 떠 있는가")
+            # 접촉 프로빙이 아니어도 받는다 — 미리 걸어 두는 것이 이 모드를 쓰는
+            # 정상적인 방법이다. 접촉이 시작된 뒤에만 켤 수 있으면, 켜야 하는
+            # 순간에 조작자의 손은 스타일러스에 있다.
+            self.inplane_req.publish(Bool(data=want))
+            self.get_logger().info(
+                f"면내 회전 모드 요청 {'켬' if want else '끔'} → us_diff_ik"
+            )
+            return ok(enabled=want, appliesOn="contact")
 
         if command == "teleop.operator_frame":
             # 조작자가 로봇의 어느 쪽에 서 있는가. 로봇을 움직이는 명령이 아니라

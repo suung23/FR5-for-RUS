@@ -18,7 +18,16 @@ export type RobotState = 'idle' | 'teleop' | 'contact' | 'fault' | 'estop';
  * must never infer it — if the display guessed and the robot disagreed, the
  * operator would be reading a limit that is not in force.
  */
-export type ProbingMode = 'approach' | 'contact_probing';
+/**
+ * Velocity-limit stage, as `us_diff_ik` declares it.
+ *
+ * `contact_probing_inplane` is contact probing with one axis handed back: the
+ * robot still holds the force on `z`, and the operator gets `ω_y` — rotation
+ * about the elevational axis, the only rotation that maps the imaging plane
+ * (the probe's x–z plane) onto itself. Everything else stays at zero, so the
+ * beam keeps sweeping the same plane in space while the operator rocks in it.
+ */
+export type ProbingMode = 'approach' | 'contact_probing' | 'contact_probing_inplane';
 
 export type SafetyState =
   | 'normal'
@@ -46,6 +55,15 @@ export interface RobotTelemetry {
   safetyState?: SafetyState;
   /** Velocity-limit mode the control stack has entered. */
   probingMode?: ProbingMode;
+  /**
+   * Whether the in-plane rotation mode is selected, as `us_diff_ik` holds it.
+   *
+   * Separate from `probingMode` on purpose: the mode string is what the
+   * velocity limits *are*, and this is what they will be on contact. Selecting
+   * it during approach is the normal way to use it — contact starts without
+   * warning, and at that moment the operator's hand is on the stylus.
+   */
+  inplaneRotation?: boolean;
   /** How the control stack is mapping the operator's hand onto the robot. */
   teleopFrame?: TeleopFrameState;
   /** Sensor calibration state, forwarded by the bridge. */

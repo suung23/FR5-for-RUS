@@ -1,6 +1,18 @@
+/* Three tenths of the window, not a fixed pixel count.
+ *
+ * The readings here are the ones an operator acts on — contact force, stage,
+ * the six raw channels — and at 316 px they were the narrowest column on a
+ * screen whose other panels grow with the window. A proportion keeps the
+ * relationship: on a wider console the numbers get more room rather than the
+ * 3D view taking all of it.
+ *
+ * The floor is the old fixed width. Below it the four contact cells wrap and
+ * the gauge's threshold key runs onto three lines, which is worse than a
+ * narrow 3D view. */
 .column {
-  width: 316px;
-  flex: 0 0 auto;
+  flex: 0 0 30%;
+  min-width: 316px;
+  max-width: 560px;
   display: flex;
   flex-direction: column;
   gap: var(--panel-gap);
@@ -593,4 +605,20 @@
   font-size: 9.5px;
   line-height: 1.35;
   color: var(--ink);
+}
+
+/* A selected mode reads as pressed, not as a link. Test modes get the same
+   plain frame as everything else — a control that looks special invites use. */
+.modeSelect {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 2px 10px;
+  min-width: 74px;
+}
+
+.modeSelect[aria-pressed='true'] {
+  background: var(--ink);
+  color: var(--white);
+  border-color: var(--ink);
 }

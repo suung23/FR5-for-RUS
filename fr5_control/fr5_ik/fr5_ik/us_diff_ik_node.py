@@ -29,7 +29,7 @@ from std_msgs.msg import Bool, Float32MultiArray, Float64, String
 
 from fr5_ik.dls_solver import DlsSolver
 from fr5_ik.force_regulator import ForceRegulator
-from fr5_ik.probing_mode import ProbingModeSwitch
+from fr5_ik.probing_mode import CONTACT_PROBING, ProbingModeSwitch
 from fr5_ik.teleop_frame import TeleopFrameMapper
 
 JOINT_NAMES = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
@@ -107,6 +107,9 @@ class UsDiffIkNode(Node):
 
         self.allow_teleop_lateral = bool(
             self.get_parameter("contact_control.allow_teleop_lateral").value
+        )
+        self.allow_inplane_rotation = bool(
+            self.get_parameter("contact_control.allow_teleop_inplane_rotation").value
         )
         self.regulator = ForceRegulator(
             target_force_n=float(self.get_parameter("contact_control.target_force_n").value),
@@ -242,6 +245,27 @@ class UsDiffIkNode(Node):
         self.create_subscription(
             Float64, f"{ns}/teleop_frame_request", self._on_frame_request, latched_qos
         )
+        # 면내 회전 모드도 같은 규약이다 — 파라미터가 진실이고 토픽은 그것을 쓰는
+        # 창구다. 그래야 `ros2 param get` 과 화면이 갈라지지 않는다.
+        self.create_subscription(
+            Bool, f"{ns}/inplane_rotation_request", self._on_inplane_request, latched_qos
+        )
+        # 그리고 그 진실을 되돌려 알린다. 요청과 상태를 나누는 이유는 **미리 걸어
+        # 둘 수 있어야** 하기 때문이다: 접촉은 예고 없이 시작되고 그 순간 조작자의
+        # 손은 스타일러스에 있지 콘솔에 있지 않다. 접근 중에 켜 두면 전환과 함께
+        # 적용되고, 화면은 그동안 "걸어 뒀다" 를 보여 줘야 한다 — 그것을 모드
+        # 문자열로 말할 수는 없다. 모드는 지금 실제 속도 상한이 무엇인가이고,
+        # 접근 중에는 접근이기 때문이다.
+        self.inplane_pub = self.create_publisher(
+            Bool,
+            f"{ns}/inplane_rotation_state",
+            QoSProfile(
+                depth=1,
+                reliability=ReliabilityPolicy.RELIABLE,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            ),
+        )
+        self._publish_inplane_state()
         self._publish_teleop_frame()
 
         self.create_timer(1.0 / self.rate_hz, self._control_loop)
@@ -383,6 +407,22 @@ class UsDiffIkNode(Node):
         # 로봇이 힘만 잡고 나머지는 정지한다. policy 가 영상축을 맡기 전까지
         # 조작자가 미끄러뜨리며 쓰고 싶으면 켠다.
         self.declare_parameter("contact_control.allow_teleop_lateral", False)
+        # 면내 회전 모드 (2026-08-31).
+        #
+        # 접촉 프로빙에서 힘은 로봇이 잡되, 조작자에게 **ω_y 하나만** 돌려준다.
+        # 영상면은 프로브의 x–z 평면이고 +y 는 그 면의 법선(elevational)이므로,
+        # y 둘레 회전은 면을 **자기 자신으로** 옮긴다 — 즉 빔이 훑는 평면이 공간에서
+        # 바뀌지 않는다. 초음파에서 rocking 이라 부르는 조작이 이것이다.
+        #
+        # 나머지 축을 열지 않는 이유는 각각 면을 벗어나기 때문이다: ω_z 는 영상면을
+        # 통째로 돌리고(§8.3 에서 영상축), ω_x 는 면을 기울여 빼내며, v_y 는 면 밖으로
+        # 미끄러진다. v_x 는 면 안에 남지만 회전이 아니라 병진이라 여기 넣지 않았다 —
+        # 필요하면 별도로 연다.
+        #
+        # ⚠️ §8.2 의 rx/ry 자세 정렬이 들어오면 ω_y 를 admittance 가 쓰려 한다
+        # (§8.3 의 힘축 셋 중 하나다). 그때 둘 중 누가 쓰는지는 arbiter 가 정해야
+        # 하며, 지금은 정렬이 미구현이라 이 축이 비어 있어서 성립하는 모드다.
+        self.declare_parameter("contact_control.allow_teleop_inplane_rotation", False)
 
         self.declare_parameter("watchdog.twist_timeout_s", 0.1)
         self.declare_parameter("watchdog.twist_hold_s", 0.04)
@@ -677,9 +717,40 @@ class UsDiffIkNode(Node):
         )
         self._publish_mode()
 
+    def _publish_inplane_state(self) -> None:
+        self.inplane_pub.publish(Bool(data=bool(self.allow_inplane_rotation)))
+
+    def _on_inplane_request(self, msg: Bool) -> None:
+        """면내 회전 모드를 켜고 끈다. 파라미터를 갱신해 두 창구를 같게 만든다.
+
+        **접촉 프로빙이 아니어도 받는다.** 접근 중에 걸어 두면 전환하는 순간부터
+        적용된다 — 접촉이 시작된 뒤에야 켤 수 있게 하면, 정작 켜야 할 때 조작자는
+        손을 쓰고 있다.
+        """
+        want = bool(msg.data)
+        if want == self.allow_inplane_rotation:
+            return
+        self.allow_inplane_rotation = want
+        self.set_parameters([
+            Parameter("contact_control.allow_teleop_inplane_rotation",
+                      Parameter.Type.BOOL, want)
+        ])
+        self.get_logger().info(
+            "면내 회전 모드 " + ("켬 — ω_y 가 조작자에게 열린다 (영상면 유지)"
+                              if want else "끔 — 접촉 프로빙에서 여섯 축 모두 로봇이 잡는다")
+            + ("" if self.mode_switch.in_contact_probing else " · 접촉 전이라 예약 상태다")
+        )
+        self._publish_inplane_state()
+        self._publish_mode()
+
     def _publish_mode(self) -> None:
         msg = String()
-        msg.data = self.mode_switch.mode
+        # 접촉 프로빙 안의 하위 모드까지 알린다. 화면이 "힘은 로봇이 잡고 회전은
+        # 내가 한다" 를 알아야 조작자가 손을 움직여도 되는지를 안다.
+        mode = self.mode_switch.mode
+        if mode == CONTACT_PROBING and self.allow_inplane_rotation:
+            mode = "contact_probing_inplane"
+        msg.data = mode
         self.mode_pub.publish(msg)
 
     # -- 제어 ------------------------------------------------------------
@@ -810,6 +881,14 @@ class UsDiffIkNode(Node):
         if self.allow_teleop_lateral:
             regulated = np.array(twist, dtype=float)
             regulated[2] = 0.0
+        elif self.allow_inplane_rotation:
+            # 면내 회전만 돌려준다. twist 는 이미 접촉 상한으로 묶여 있으므로
+            # (`_clamp` 뒤에 불린다) 여기서 다시 제한하지 않는다.
+            #
+            # **면을 벗어나지 않는다** 는 것이 이 한 줄의 전부다: 영상면은 x–z 이고
+            # ω_y 는 그 면을 자기 자신으로 옮긴다. 다른 회전축을 함께 열면 그 성질이
+            # 사라지므로, 여기서 twist 를 통째로 복사하지 않는 것이 요점이다.
+            regulated[4] = float(twist[4])
         regulated[2] = out.v_z
         return regulated
 

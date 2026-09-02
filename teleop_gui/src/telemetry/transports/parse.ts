@@ -27,7 +27,11 @@ const SAFETY_STATES: SafetyState[] = [
   'protective_stop',
   'emergency_stop',
 ];
-const PROBING_MODES: ProbingMode[] = ['approach', 'contact_probing'];
+const PROBING_MODES: ProbingMode[] = [
+  'approach',
+  'contact_probing',
+  'contact_probing_inplane',
+];
 const WRENCH_SOURCES: WrenchSource[] = ['px6d_serial', 'controller', 'simulation', 'none'];
 
 function numberArray(value: unknown, length?: number): number[] | undefined {
@@ -78,6 +82,8 @@ export function parseTelemetry(raw: unknown, receivedAt: number): RobotTelemetry
     robotState: oneOf(src.robotState ?? src.robot_state, ROBOT_STATES),
     safetyState: oneOf(src.safetyState ?? src.safety_state, SAFETY_STATES),
     probingMode: oneOf(src.probingMode ?? src.probing_mode, PROBING_MODES),
+    inplaneRotation:
+      typeof src.inplaneRotation === 'boolean' ? src.inplaneRotation : undefined,
     // Passed through as the control stack declared it, for the same reason as
     // the calibration block below.
     teleopFrame: teleopFrame(src.teleopFrame ?? src.teleop_frame),

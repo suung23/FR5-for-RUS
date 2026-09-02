@@ -181,6 +181,13 @@ function controlForce(force: [number, number, number]): number {
   return config.normalForceSign * force[2] >= 0 ? magnitude : -magnitude;
 }
 
+/** Which subsystem a console command belongs to, for the event log. */
+function commandTag(command: string): string {
+  if (command.startsWith('teleop.')) return 'TELEOP';
+  if (command.startsWith('contact.')) return 'STAGE';
+  return 'CALIB';
+}
+
 const detector = new ContactDetector({
   enterN: config.contactEnterN,
   releaseN: config.contactReleaseN,
@@ -219,7 +226,7 @@ export const useTelemetryStore = create<TelemetryState>((set) => ({
     const sent = adapter.sendCommand(command);
     // The tag names the subsystem the command belongs to. A teleoperation
     // change filed under CALIB would be unfindable in the log afterwards.
-    const tag = String(command.command ?? '').startsWith('teleop.') ? 'TELEOP' : 'CALIB';
+    const tag = commandTag(String(command.command ?? ''));
     logEvent(tag, sent ? String(command.command) : `${command.command} — 전송 불가`,
              sent ? 'info' : 'warn');
     return sent;
@@ -446,9 +453,9 @@ const adapter = new RobotTelemetryAdapter({
    * the ack was dropped and the button simply appeared not to work.
    */
   onAck(ack) {
-    const label = ack.command.replace(/^calib\./, '');
+    const label = ack.command.replace(/^(calib|contact|teleop)\./, '');
     logEvent(
-      'CALIB',
+      commandTag(ack.command),
       ack.ok ? `${label} 완료` : `${label} 거절 — ${ack.reason ?? '사유 없음'}`,
       ack.ok ? 'info' : 'warn',
     );

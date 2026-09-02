@@ -1,0 +1,480 @@
+{
+  "val_run": "runs/exp_seed43_roi/best_val",
+  "test_run": "runs/exp_seed43_roi/best_test",
+  "recalibrated_target_area_ratio": 0.06833854358219933,
+  "recalibrated_area_tolerance": 0.026963037881574104,
+  "val_gt_area_ratio_percentiles": {
+    "5": 0.025836704670834865,
+    "25": 0.03604266274365576,
+    "50": 0.06833854358219933,
+    "75": 0.08996873850680397,
+    "95": 0.12936741449062156
+  },
+  "selected": "drop_confidence_border",
+  "candidates": {
+    "shipped": {
+      "config": {
+        "weights": {
+          "segmentation_confidence": 1.0,
+          "mask_completeness": 1.0,
+          "lumen_contrast": 0.5,
+          "border_penalty": 1.0,
+          "component_quality": 1.0,
+          "temporal_iou": 1.0,
+          "centroid_stability": 0.5,
+          "area_stability": 0.5
+        },
+        "target_area_ratio": 0.15,
+        "area_tolerance": 0.1,
+        "aggregation": "arithmetic"
+      },
+      "val": {
+        "auroc_good_overall": 0.8599317291990477,
+        "auroc_good_within_band": 0.629639822757896,
+        "auroc_by_band": {
+          "small": 0.693117536140792,
+          "medium": 0.566162109375,
+          "large": NaN
+        },
+        "spearman_dice": 0.6108346613447226,
+        "auroc_large_centroid_error": 0.7057639521494563,
+        "spearman_centroid_error": -0.37822010345592133,
+        "mean": 0.9378997612743685,
+        "sd": 0.03951399818831297,
+        "p05": 0.879137754450987,
+        "p95": 0.9974230885587085,
+        "dynamic_range": 0.11828533410772157
+      },
+      "test": {
+        "auroc_good_overall": 0.7588352766862075,
+        "auroc_good_within_band": 0.650219610879373,
+        "auroc_by_band": {
+          "small": 0.7350260416666666,
+          "medium": 0.5654131800920792,
+          "large": NaN
+        },
+        "spearman_dice": 0.40860966785940855,
+        "auroc_large_centroid_error": 0.6969601362179487,
+        "spearman_centroid_error": -0.2531321487572418,
+        "mean": 0.9222084815205418,
+        "sd": 0.051373154554177285,
+        "p05": 0.8315456719488354,
+        "p95": 0.9935090753143804,
+        "dynamic_range": 0.16196340336554493
+      },
+      "val_band_auroc_bootstrap": {
+        "mean": 0.7252577245335379,
+        "ci95": [
+          0.4335457441966318,
+          0.9487852797823705
+        ]
+      }
+    },
+    "drop_confidence": {
+      "config": {
+        "weights": {
+          "segmentation_confidence": 0.0,
+          "mask_completeness": 1.0,
+          "lumen_contrast": 0.5,
+          "border_penalty": 1.0,
+          "component_quality": 1.0,
+          "temporal_iou": 1.0,
+          "centroid_stability": 0.5,
+          "area_stability": 0.5
+        },
+        "target_area_ratio": 0.15,
+        "area_tolerance": 0.1,
+        "aggregation": "arithmetic"
+      },
+      "val": {
+        "auroc_good_overall": 0.8606154209376906,
+        "auroc_good_within_band": 0.6306139492224327,
+        "auroc_by_band": {
+          "small": 0.6926854179761156,
+          "medium": 0.56854248046875,
+          "large": NaN
+        },
+        "spearman_dice": 0.6129912469217137,
+        "auroc_large_centroid_error": 0.7065922271427669,
+        "spearman_centroid_error": -0.37986097536111485,
+        "mean": 0.9272937595791402,
+        "sd": 0.04684297363917776,
+        "p05": 0.8577297956374911,
+        "p95": 0.9977817324549529,
+        "dynamic_range": 0.14005193681746186
+      },
+      "test": {
+        "auroc_good_overall": 0.7594665979514269,
+        "auroc_good_within_band": 0.6500728368863313,
+        "auroc_by_band": {
+          "small": 0.7352701822916666,
+          "medium": 0.564875491480996,
+          "large": NaN
+        },
+        "spearman_dice": 0.41047270246620343,
+        "auroc_large_centroid_error": 0.6971028645833334,
+        "spearman_centroid_error": -0.25272427330970065,
+        "mean": 0.9086463785696053,
+        "sd": 0.060787921803945676,
+        "p05": 0.801386988505113,
+        "p95": 0.9928281406509761,
+        "dynamic_range": 0.1914411521458631
+      },
+      "val_band_auroc_bootstrap": {
+        "mean": 0.725561490889186,
+        "ci95": [
+          0.4339098771051434,
+          0.9489364113802093
+        ]
+      }
+    },
+    "drop_confidence_border": {
+      "config": {
+        "weights": {
+          "segmentation_confidence": 0.0,
+          "mask_completeness": 1.0,
+          "lumen_contrast": 0.5,
+          "border_penalty": 0.0,
+          "component_quality": 1.0,
+          "temporal_iou": 1.0,
+          "centroid_stability": 0.5,
+          "area_stability": 0.5
+        },
+        "target_area_ratio": 0.15,
+        "area_tolerance": 0.1,
+        "aggregation": "arithmetic"
+      },
+      "val": {
+        "auroc_good_overall": 0.9389907595044629,
+        "auroc_good_within_band": 0.8032491265566075,
+        "auroc_by_band": {
+          "small": 0.6917033312382149,
+          "medium": 0.914794921875,
+          "large": NaN
+        },
+        "spearman_dice": 0.7013162886998342,
+        "auroc_large_centroid_error": 0.6753778346997615,
+        "spearman_centroid_error": -0.24954778655763285,
+        "mean": 0.928522388107547,
+        "sd": 0.06104647858335671,
+        "p05": 0.8299073523485828,
+        "p95": 0.9982428298973571,
+        "dynamic_range": 0.16833547754877431
+      },
+      "test": {
+        "auroc_good_overall": 0.8658609804805772,
+        "auroc_good_within_band": 0.6663806667995136,
+        "auroc_by_band": {
+          "small": 0.7674153645833334,
+          "medium": 0.5653459690156938,
+          "large": NaN
+        },
+        "spearman_dice": 0.7379406230942478,
+        "auroc_large_centroid_error": 0.6987254607371794,
+        "spearman_centroid_error": -0.2619496419684846,
+        "mean": 0.9097784629975761,
+        "sd": 0.08210152758098392,
+        "p05": 0.7572507637284714,
+        "p95": 0.9962472713523218,
+        "dynamic_range": 0.23899650762385038
+      },
+      "val_band_auroc_bootstrap": {
+        "mean": 0.7842087768731335,
+        "ci95": [
+          0.4483903550229769,
+          0.9705332695901604
+        ]
+      }
+    },
+    "size_decoupled": {
+      "config": {
+        "weights": {
+          "segmentation_confidence": 0.0,
+          "mask_completeness": 0.0,
+          "lumen_contrast": 0.5,
+          "border_penalty": 0.0,
+          "component_quality": 1.0,
+          "temporal_iou": 1.0,
+          "centroid_stability": 0.5,
+          "area_stability": 0.5
+        },
+        "target_area_ratio": 0.15,
+        "area_tolerance": 0.1,
+        "aggregation": "arithmetic"
+      },
+      "val": {
+        "auroc_good_overall": 0.8923824935565743,
+        "auroc_good_within_band": 0.758474113804825,
+        "auroc_by_band": {
+          "small": 0.674693588937775,
+          "medium": 0.842254638671875,
+          "large": NaN
+        },
+        "spearman_dice": 0.618243408127846,
+        "auroc_large_centroid_error": 0.6624606531797642,
+        "spearman_centroid_error": -0.22714278348481307,
+        "mean": 0.928939366258131,
+        "sd": 0.060950968549687984,
+        "p05": 0.8281955212199705,
+        "p95": 0.997758203382031,
+        "dynamic_range": 0.1695626821620605
+      },
+      "test": {
+        "auroc_good_overall": 0.8780235779166399,
+        "auroc_good_within_band": 0.6941794346380159,
+        "auroc_by_band": {
+          "small": 0.8215006510416667,
+          "medium": 0.566858218234365,
+          "large": NaN
+        },
+        "spearman_dice": 0.738565592550884,
+        "auroc_large_centroid_error": 0.720585436698718,
+        "spearman_centroid_error": -0.31064867397246587,
+        "mean": 0.9036711787891417,
+        "sd": 0.08339667804689369,
+        "p05": 0.7613011031606304,
+        "p95": 0.9959846607567395,
+        "dynamic_range": 0.23468355759610915
+      },
+      "val_band_auroc_bootstrap": {
+        "mean": 0.75599958477695,
+        "ci95": [
+          0.4451643850965472,
+          0.9635657397078651
+        ]
+      }
+    },
+    "size_decoupled_geometric": {
+      "config": {
+        "weights": {
+          "segmentation_confidence": 0.0,
+          "mask_completeness": 0.0,
+          "lumen_contrast": 0.5,
+          "border_penalty": 0.0,
+          "component_quality": 1.0,
+          "temporal_iou": 1.0,
+          "centroid_stability": 0.5,
+          "area_stability": 0.5
+        },
+        "target_area_ratio": 0.15,
+        "area_tolerance": 0.1,
+        "aggregation": "geometric"
+      },
+      "val": {
+        "auroc_good_overall": 0.864826601347053,
+        "auroc_good_within_band": 0.7548407828960183,
+        "auroc_by_band": {
+          "small": 0.6717604232139116,
+          "medium": 0.837921142578125,
+          "large": NaN
+        },
+        "spearman_dice": 0.5691505911102924,
+        "auroc_large_centroid_error": 0.6577946539434008,
+        "spearman_centroid_error": -0.2167762135857627,
+        "mean": 0.8934455565002167,
+        "sd": 0.1150933935933165,
+        "p05": 0.6419024355061831,
+        "p95": 0.9977550101131414,
+        "dynamic_range": 0.3558525746069583
+      },
+      "test": {
+        "auroc_good_overall": 0.8919512980738259,
+        "auroc_good_within_band": 0.7236224773201998,
+        "auroc_by_band": {
+          "small": 0.8762532552083333,
+          "medium": 0.5709916994320664,
+          "large": NaN
+        },
+        "spearman_dice": 0.7547585009842565,
+        "auroc_large_centroid_error": 0.7168093950320513,
+        "spearman_centroid_error": -0.2957800629201502,
+        "mean": 0.8463758649235545,
+        "sd": 0.14666717626049358,
+        "p05": 0.600466654232922,
+        "p95": 0.9959774126787287,
+        "dynamic_range": 0.39551075844580674
+      },
+      "val_band_auroc_bootstrap": {
+        "mean": 0.7484240775102169,
+        "ci95": [
+          0.4106417341711459,
+          0.963863949335073
+        ]
+      }
+    },
+    "recalibrated_completeness": {
+      "config": {
+        "weights": {
+          "segmentation_confidence": 0.0,
+          "mask_completeness": 1.0,
+          "lumen_contrast": 0.5,
+          "border_penalty": 0.0,
+          "component_quality": 1.0,
+          "temporal_iou": 1.0,
+          "centroid_stability": 0.5,
+          "area_stability": 0.5
+        },
+        "target_area_ratio": 0.06833854358219933,
+        "area_tolerance": 0.026963037881574104,
+        "aggregation": "arithmetic"
+      },
+      "val": {
+        "auroc_good_overall": 0.8286073346843214,
+        "auroc_good_within_band": 0.7076518412233772,
+        "auroc_by_band": {
+          "small": 0.6716818562748795,
+          "medium": 0.743621826171875,
+          "large": NaN
+        },
+        "spearman_dice": 0.41112468138266595,
+        "auroc_large_centroid_error": 0.6100463292836549,
+        "spearman_centroid_error": -0.12210291905182591,
+        "mean": 0.8907336013840679,
+        "sd": 0.07232404980862753,
+        "p05": 0.7884753519751956,
+        "p95": 0.9955799802560514,
+        "dynamic_range": 0.20710462828085585
+      },
+      "test": {
+        "auroc_good_overall": 0.7635173613347935,
+        "auroc_good_within_band": 0.6739229236306268,
+        "auroc_by_band": {
+          "small": 0.763916015625,
+          "medium": 0.5839298316362537,
+          "large": NaN
+        },
+        "spearman_dice": 0.38289535348212267,
+        "auroc_large_centroid_error": 0.6892327724358974,
+        "spearman_centroid_error": -0.29118385385438517,
+        "mean": 0.8779703313434092,
+        "sd": 0.10385106575847548,
+        "p05": 0.6848658996184139,
+        "p95": 0.995415004838015,
+        "dynamic_range": 0.3105491052196011
+      },
+      "val_band_auroc_bootstrap": {
+        "mean": 0.7646884645633004,
+        "ci95": [
+          0.4291948096511626,
+          0.9589556492988257
+        ]
+      }
+    },
+    "recalibrated_geometric": {
+      "config": {
+        "weights": {
+          "segmentation_confidence": 0.0,
+          "mask_completeness": 1.0,
+          "lumen_contrast": 0.5,
+          "border_penalty": 0.0,
+          "component_quality": 1.0,
+          "temporal_iou": 1.0,
+          "centroid_stability": 0.5,
+          "area_stability": 0.5
+        },
+        "target_area_ratio": 0.06833854358219933,
+        "area_tolerance": 0.026963037881574104,
+        "aggregation": "geometric"
+      },
+      "val": {
+        "auroc_good_overall": 0.8063422655937461,
+        "auroc_good_within_band": 0.7302126242083972,
+        "auroc_by_band": {
+          "small": 0.7187565472449193,
+          "medium": 0.741668701171875,
+          "large": NaN
+        },
+        "spearman_dice": 0.36374618070977227,
+        "auroc_large_centroid_error": 0.6319046717114777,
+        "spearman_centroid_error": -0.16387299786522225,
+        "mean": 0.8458920225072426,
+        "sd": 0.11782796422381146,
+        "p05": 0.6432870231189078,
+        "p95": 0.9955604631826533,
+        "dynamic_range": 0.3522734400637455
+      },
+      "test": {
+        "auroc_good_overall": 0.7480048959608323,
+        "auroc_good_within_band": 0.7052599944642752,
+        "auroc_by_band": {
+          "small": 0.8386881510416667,
+          "medium": 0.5718318378868837,
+          "large": NaN
+        },
+        "spearman_dice": 0.30569824952076646,
+        "auroc_large_centroid_error": 0.6899739583333333,
+        "spearman_centroid_error": -0.3015662578544122,
+        "mean": 0.8040443809588174,
+        "sd": 0.17575362787005958,
+        "p05": 0.5091084969875116,
+        "p95": 0.9953992539840955,
+        "dynamic_range": 0.48629075699658386
+      },
+      "val_band_auroc_bootstrap": {
+        "mean": 0.7775166913627387,
+        "ci95": [
+          0.48204442065828207,
+          0.9660331219308534
+        ]
+      }
+    },
+    "underfill_only_geometric": {
+      "config": {
+        "weights": {
+          "segmentation_confidence": 0.0,
+          "mask_completeness": 1.0,
+          "lumen_contrast": 0.5,
+          "border_penalty": 0.0,
+          "component_quality": 1.0,
+          "temporal_iou": 1.0,
+          "centroid_stability": 0.5,
+          "area_stability": 0.5
+        },
+        "target_area_ratio": 0.06833854358219933,
+        "area_tolerance": 0.026963037881574104,
+        "aggregation": "geometric"
+      },
+      "val": {
+        "auroc_good_overall": 0.9400130180153593,
+        "auroc_good_within_band": 0.7783693624896472,
+        "auroc_by_band": {
+          "small": 0.7187565472449193,
+          "medium": 0.837982177734375,
+          "large": NaN
+        },
+        "spearman_dice": 0.7021749551973729,
+        "auroc_large_centroid_error": 0.6893006713386788,
+        "spearman_centroid_error": -0.27400411977034383,
+        "mean": 0.8856536519074377,
+        "sd": 0.11216669249131486,
+        "p05": 0.6766966287829689,
+        "p95": 0.9982534608020075,
+        "dynamic_range": 0.3215568320190386
+      },
+      "test": {
+        "auroc_good_overall": 0.8907298846872382,
+        "auroc_good_within_band": 0.7052599944642752,
+        "auroc_by_band": {
+          "small": 0.8386881510416667,
+          "medium": 0.5718318378868837,
+          "large": NaN
+        },
+        "spearman_dice": 0.7611833975435545,
+        "auroc_large_centroid_error": 0.7165589943910257,
+        "spearman_centroid_error": -0.29110397581161995,
+        "mean": 0.8520331596906983,
+        "sd": 0.1531216292494343,
+        "p05": 0.5358647890596602,
+        "p95": 0.9968699202961862,
+        "dynamic_range": 0.461005131236526
+      },
+      "val_band_auroc_bootstrap": {
+        "mean": 0.7850351622454319,
+        "ci95": [
+          0.48204442065828207,
+          0.9660331219308534
+        ]
+      }
+    }
+  }
+}

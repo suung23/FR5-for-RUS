@@ -1,0 +1,2 @@
+run,points,k_n_per_m,k_n_per_mm,intercept_n,r_squared,force_span_n,travel_span_mm,ok,reason
+S_stiff,4,-56465.19684519918,-56.46519684519918,0.10300994354744163,0.8325372664118902,0.20581003172936993,0.003184136389487482,True,

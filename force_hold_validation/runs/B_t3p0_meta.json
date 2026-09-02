@@ -1,0 +1,17 @@
+{
+ "label": "B_t3p0",
+ "run_type": "disturbance",
+ "recorded_at": "2026-09-02T13:23:34+0900",
+ "samples": 55331,
+ "step_ml": 150.0,
+ "normal_force_sign": -1.0,
+ "parameters_read": true,
+ "target_force_n": 3.0,
+ "deadband_n": 0.5,
+ "admittance_b_z": 1000.0,
+ "contact_probing_force_n": 2.0,
+ "contact_probing_release_n": 0.3,
+ "warn_contact_force_n": 4.5,
+ "max_contact_force_n": 5.0,
+ "contact_force_mode": "magnitude"
+}

@@ -33,9 +33,9 @@ export function SafetyPanel({ telemetry, contact, available }: Props) {
       <div className={`plate__body ${styles.body}`}>
         <div className={styles.col}>
           <h3 className={styles.subhead}>Configured limits</h3>
-          <Row label="Contact enter" value={`${config.contactEnterN.toFixed(1)} N`} note="safety.max_normal_force_n" />
+          <Row label="Contact enter" value={`${config.contactEnterN.toFixed(1)} N`} note="safety.max_contact_force_n" />
           <Row label="Contact release" value={`${config.contactReleaseN.toFixed(1)} N`} note="watchdog.retreat_until_force_n" />
-          <Row label="Warning" value={`${config.warnForceN.toFixed(1)} N`} note="safety.warn_normal_force_n" />
+          <Row label="Warning" value={`${config.warnForceN.toFixed(1)} N`} note="safety.warn_contact_force_n" />
           <Row label="Force sign" value={`Fn = ${config.normalForceSign > 0 ? '+' : '−'}Fz`} note="ft_sensor.normal_force_sign" />
           <Row label="Confirm windows" value="5 ms enter · 50 ms release" note="contact_state.py" />
 

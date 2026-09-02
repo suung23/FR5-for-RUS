@@ -30,6 +30,7 @@ from pathlib import Path
 from _common import parse_overrides  # noqa: E402  (path setup)
 
 from rus_perception.control.features import FeatureExtractionConfig
+from rus_perception.control.roi import RoiConfig
 from rus_perception.flow.backends import build_flow_backend
 from rus_perception.inference.predictor import Predictor, PredictorConfig
 from rus_perception.inference.realtime import PipelineResult, RealtimeConfig, RealtimePipeline
@@ -91,6 +92,7 @@ def main() -> int:
             amp=bool(monitor.get("amp", False)),
             channels_last=bool(monitor.get("channels_last", False)),
             restore_original_size=True,
+            roi=RoiConfig.from_dict(config.section("control").get("roi")),
         ),
         feature_config=FeatureExtractionConfig.from_dict(
             {"postprocess": config.section("postprocess"), **config.section("control")}

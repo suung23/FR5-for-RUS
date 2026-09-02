@@ -1,0 +1,69 @@
+# exp_seed43 with the imaged-sector ROI enabled and the control-quality score
+# repaired. Same data, same model, same checkpoint -- nothing is retrained.
+#
+# Each change below is justified by an argument that does not depend on a
+# marginal AUROC difference, because the val cohort is 11 patients and its
+# bootstrap CI on within-band AUROC spans roughly [0.44, 0.97] for every
+# candidate: that cohort cannot rank them. See
+# experiments/quality_fix/tune_quality_weights.json.
+#
+# 1. roi.mode=file
+#    The sector is measured from the train split by scripts/derive_roi_mask.py.
+#    With mode=full, border_contact_ratio was 0.0 on every frame, mask_area_ratio
+#    divided by the frame grabber's crop, and segmentation_confidence averaged
+#    over the dead region -- the three failures roi.py's own docstring predicts.
+#
+# 2. segmentation_confidence weight 1.0 -> 0.0
+#    Saturated (0.996 +/- 0.001) and ranked the *wrong way* on both cohorts
+#    (Spearman rho with Dice: -0.545 on val, -0.344 on test). A term whose sign
+#    is consistently inverted cannot be repaired by reweighting. It stays a
+#    validity floor, where it costs nothing.
+#
+# 3. border_penalty weight 1.0 -> 0.0
+#    Alive once the ROI exists, but redundant: control.validity already rejects
+#    a frame outright at max_border_contact_ratio. As a graded score term its
+#    sign disagrees between cohorts, and it penalises exactly the distended
+#    bladders that are the deployment target.
+#
+# 4. target_area_ratio 0.15 -> 0.0683, area_tolerance 0.10 -> 0.0270
+#    A correctness fix, not tuning. With the ROI, mask_area_ratio's denominator
+#    is the sector rather than H*W, so 0.15 refers to a quantity that no longer
+#    exists. The new values are the median and half-IQR of ground-truth bladder
+#    area over the ROI on the val cohort. The old tolerance was wider than the
+#    entire distribution, which pinned the sub-score at 1.0 everywhere.
+#
+#    Caveat: this calibrates the term to the volumes PFUS contains, i.e. "is
+#    this frame inside the trained domain". The HoLEP target -- a bladder held
+#    hydro-extended by irrigation -- is a different distribution and needs its
+#    own calibration data. DESIGN_NOTES.md section 494 tracks this.
+#
+# 5. penalise_overfill false
+#    A two-sided plateau punishes a bladder *larger* than the band, which is the
+#    hydro-extended state the whole procedure is built around. Recalibrating the
+#    target without this flag dropped P041 -- the best-segmented patient in the
+#    cohort, Dice 0.931 -- from Q rank 1 to rank 11. Only under-filling marks a
+#    frame outside the deployment domain, so only under-filling is penalised.
+#
+# 6. quality.aggregation arithmetic -> geometric
+#    With eight terms, an arithmetic mean caps the effect of one collapsed
+#    sub-score at its weight share, so Q sat in 0.921 +/- 0.056 and no threshold
+#    below 0.75 rejected anything. The geometric mean is dominated by its
+#    smallest term, which is the shape a gate needs. This one needs no
+#    statistics: the dynamic range (5th-95th percentile) is a property of the
+#    definition, and it goes from 0.151 to 0.407 on test.
+defaults: exp_seed43.yaml
+experiment:
+  name: exp_seed43_qfix
+  output_dir: runs/exp_seed43_qfix
+control:
+  roi:
+    mode: file
+    path: configs/roi/pfus_sector_256.npy
+  quality:
+    aggregation: geometric
+    target_area_ratio: 0.0683
+    area_tolerance: 0.0270
+    penalise_overfill: false
+    weights:
+      segmentation_confidence: 0.0
+      border_penalty: 0.0

@@ -64,7 +64,7 @@ class ContactDetector:
 
         Args:
             enter_n: 접촉 진입 문턱 [N], ``F_n`` 기준. probe.yaml 의
-                ``safety.max_normal_force_n`` 과 같은 값을 쓴다.
+                ``safety.max_contact_force_n`` 과 같은 값을 쓴다.
             release_n: 접촉 이탈 문턱 [N]. ``enter_n`` 보다 작아야 한다.
             normal_force_sign: ``F_n = sign x F_z``. probe.yaml 의
                 ``ft_sensor.normal_force_sign``. §4.4 미검증 항목이다.

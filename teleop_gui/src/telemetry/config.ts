@@ -113,7 +113,7 @@ export function loadConfig(): AppConfig {
     rosJointTopic: str('VITE_ROS_JOINT_TOPIC', '/fr5_right/joint_states'),
     rosWrenchTopic: str('VITE_ROS_WRENCH_TOPIC', '/fr5_right/wrench'),
 
-    // probe.yaml: safety.max_normal_force_n = 15.0, warn_normal_force_n = 14.0,
+    // probe.yaml: safety.max_contact_force_n = 15.0, warn_normal_force_n = 14.0,
     // teleop.contact_probing_force_n = 1.0, contact_probing_release_n = 0.3,
     // contact_control.target_force_n = 3.0, deadband_n = 0.5,
     // watchdog.retreat_until_force_n = 0.2, ft_sensor.normal_force_sign = -1.0.
@@ -134,8 +134,8 @@ export function loadConfig(): AppConfig {
     // threshold: the switch is what decides whether the console says CONTACT.
     contactEnterN: num('VITE_CONTACT_ENTER_N', 2.0),
     contactReleaseN: num('VITE_CONTACT_RELEASE_N', 0.3),
-    warnForceN: num('VITE_WARN_FORCE_N', 14.0),
-    maxForceN: num('VITE_MAX_FORCE_N', 15.0),
+    warnForceN: num('VITE_WARN_FORCE_N', 4.5),
+    maxForceN: num('VITE_MAX_FORCE_N', 5.0),
     contactProbingN: num('VITE_CONTACT_PROBING_N', 2.0),
     contactProbingReleaseN: num('VITE_CONTACT_PROBING_RELEASE_N', 0.3),
     contactProbingReleaseS: num('VITE_CONTACT_PROBING_RELEASE_S', 0.5),

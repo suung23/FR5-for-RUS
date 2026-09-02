@@ -111,17 +111,7 @@ class UsDiffIkNode(Node):
         self.allow_inplane_rotation = bool(
             self.get_parameter("contact_control.allow_teleop_inplane_rotation").value
         )
-        self.regulator = ForceRegulator(
-            target_force_n=float(self.get_parameter("contact_control.target_force_n").value),
-            deadband_n=float(self.get_parameter("contact_control.deadband_n").value),
-            admittance_b_z=float(self.get_parameter("contact_control.admittance_b_z").value),
-            max_speed_m_s=self.contact_linear,
-            warn_force_n=float(self.get_parameter("safety.warn_normal_force_n").value),
-            max_force_n=float(self.get_parameter("safety.max_normal_force_n").value),
-            retreat_speed_m_s=float(
-                self.get_parameter("contact_control.retreat_speed_m_s").value
-            ),
-        )
+        self.regulator = self._build_regulator()
         self.regulator_reason = ""
         self.require_calibration = bool(
             self.get_parameter("contact_control.require_valid_calibration").value
@@ -136,17 +126,10 @@ class UsDiffIkNode(Node):
         self.contact_probing_enabled = bool(
             self.get_parameter("teleop.contact_probing_enabled").value
         )
-        # 이탈 문턱이 0 이하면 "되돌아가지 않는다" 는 뜻이다. ROS2 파라미터는 None 을
-        # 표현하지 못하므로 그 자리를 0 이 대신한다.
-        release_n = float(self.get_parameter("teleop.contact_probing_release_n").value)
-        self.mode_switch = ProbingModeSwitch(
-            enter_force_n=float(self.get_parameter("teleop.contact_probing_force_n").value),
-            confirm_s=float(self.get_parameter("teleop.contact_probing_confirm_s").value),
-            release_force_n=release_n if release_n > 0.0 else None,
-            release_confirm_s=float(
-                self.get_parameter("teleop.contact_probing_release_confirm_s").value
-            ),
-        )
+        # 이탈 문턱이 0 이하면 "되돌아가지 않는다" 는 뜻이다 — ROS2 파라미터는 None 을
+        # 표현하지 못하므로 그 자리를 0 이 대신한다. 그 해석은 _build_switch 안에 있고,
+        # 기동과 런타임 변경이 **같은 함수**를 쓰므로 둘이 갈릴 수 없다.
+        self.mode_switch = self._build_switch()
         self.normal_sign = float(self.get_parameter("ft_sensor.normal_force_sign").value)
         # 판정과 제어가 무엇을 "접촉력" 으로 부를지. §4.4 · probing_mode 참조.
         self.contact_force_mode = str(
@@ -268,6 +251,10 @@ class UsDiffIkNode(Node):
         self._publish_inplane_state()
         self._publish_teleop_frame()
 
+        # 힘 파라미터가 런타임에 바뀌면 조절기를 다시 만든다. 모드 스위치가
+        # 만들어진 뒤에 걸어야 한다 — 콜백이 이탈 문턱을 참조한다.
+        self.add_on_set_parameters_callback(self._on_set_parameters)
+
         self.create_timer(1.0 / self.rate_hz, self._control_loop)
         self.get_logger().info(
             f"미분 IK {self.rate_hz:.0f} Hz · DLS λ={self.solver.damping} · "
@@ -325,7 +312,7 @@ class UsDiffIkNode(Node):
                 "힘이 얼마가 되든 접근 상한 "
                 f"{self.approach_linear * 1000:.0f} mm/s 를 유지한다 — 접촉해도 속도가 "
                 "줄지 않는다. 남는 안전층은 힘 한계 "
-                f"{float(self.get_parameter('safety.max_normal_force_n').value):.1f} N 뿐이다. "
+                f"{float(self.get_parameter('safety.max_contact_force_n').value):.1f} N 뿐이다. "
                 "검증 절차 전용이며, "
                 "팬텀 작업에는 켜고 써라."
             )
@@ -354,8 +341,8 @@ class UsDiffIkNode(Node):
         self.declare_parameter("ik.tracking_error_linear_m_s", 0.002)
         self.declare_parameter("ik.tracking_error_angular_rad_s", 0.05)
 
-        self.declare_parameter("safety.warn_normal_force_n", 9.0)
-        self.declare_parameter("safety.max_normal_force_n", 10.0)
+        self.declare_parameter("safety.warn_contact_force_n", 4.5)
+        self.declare_parameter("safety.max_contact_force_n", 5.0)
         self.declare_parameter("safety.max_linear_vel_m_s", 0.010)
         self.declare_parameter("safety.max_angular_vel_rad_s", 0.2)
 
@@ -372,7 +359,7 @@ class UsDiffIkNode(Node):
         # 단방향이라 한 번 걸리면 그 세션에서 다시 못 나온다.
         #
         # ⚠️ 이것은 안전 거동을 끄는 스위치다. 접촉 시 속도를 15 배 줄이는 층이
-        # 사라지고, 남는 것은 힘 한계(safety.max_normal_force_n)뿐이다. 그래서
+        # 사라지고, 남는 것은 힘 한계(safety.max_contact_force_n)뿐이다. 그래서
         # 기본값은 켜짐이고, 끄면 기동 로그에 경고가 찍힌다.
         self.declare_parameter("teleop.contact_probing_enabled", True)
         # 2026-08-31: 8.0 → 1.0 → 2.0. 함께 판정 기준이 F_n 에서 접촉력 크기 ‖F‖ 로
@@ -716,6 +703,121 @@ class UsDiffIkNode(Node):
             f"힘 유지 해제 — z 축이 조작자에게 돌아갔다."
         )
         self._publish_mode()
+
+    #: 바뀌면 조절기를 다시 만들어야 하는 파라미터.
+    REGULATOR_PARAMS = (
+        "contact_control.target_force_n",
+        "contact_control.deadband_n",
+        "contact_control.admittance_b_z",
+        "contact_control.retreat_speed_m_s",
+        "safety.warn_contact_force_n",
+        "safety.max_contact_force_n",
+    )
+
+    #: 바뀌면 모드 스위치를 다시 만들어야 하는 파라미터.
+    SWITCH_PARAMS = (
+        "teleop.contact_probing_force_n",
+        "teleop.contact_probing_release_n",
+        "teleop.contact_probing_confirm_s",
+        "teleop.contact_probing_release_confirm_s",
+    )
+
+    def _build_regulator(self, overrides=None) -> ForceRegulator:
+        """현재 파라미터로 조절기를 만든다. ``overrides`` 는 아직 반영 전인 값이다."""
+        def get(name):
+            if overrides and name in overrides:
+                return float(overrides[name])
+            return float(self.get_parameter(name).value)
+        return ForceRegulator(
+            target_force_n=get("contact_control.target_force_n"),
+            deadband_n=get("contact_control.deadband_n"),
+            admittance_b_z=get("contact_control.admittance_b_z"),
+            max_speed_m_s=self.contact_linear,
+            warn_force_n=get("safety.warn_contact_force_n"),
+            max_force_n=get("safety.max_contact_force_n"),
+            retreat_speed_m_s=get("contact_control.retreat_speed_m_s"),
+        )
+
+    def _build_switch(self, overrides=None) -> ProbingModeSwitch:
+        """현재 파라미터로 모드 스위치를 만든다."""
+        def get(name):
+            if overrides and name in overrides:
+                return float(overrides[name])
+            return float(self.get_parameter(name).value)
+        release = get("teleop.contact_probing_release_n")
+        return ProbingModeSwitch(
+            enter_force_n=get("teleop.contact_probing_force_n"),
+            confirm_s=get("teleop.contact_probing_confirm_s"),
+            release_force_n=release if release > 0.0 else None,
+            release_confirm_s=get("teleop.contact_probing_release_confirm_s"),
+        )
+
+    def _on_set_parameters(self, params):
+        """힘 관련 파라미터를 **실제로** 반영한다.
+
+        예전에는 조절기를 기동 때 한 번만 만들었고, 그 뒤의 ``ros2 param set`` 은
+        파라미터만 바꾸고 조절기는 옛 값을 계속 썼다 — **조용히**. 목표를 1 N 으로
+        바꿨다고 믿으면서 3 N 으로 누르는 일이 가능했다는 뜻이고, 힘 대역을 훑는
+        실험이라면 결과 전체가 틀어진다.
+
+        새 값으로 조절기를 **먼저 만들어 본다.** 생성자가 ``target < warn <= max``
+        같은 불변식을 검사하므로, 못 만들면 사유와 함께 거절한다 — 거절된 set 은
+        아무것도 바꾸지 않고 그 사실이 로그에 남는다.
+        """
+        from rcl_interfaces.msg import SetParametersResult
+
+        touched = {p.name: p.value for p in params if p.name in self.REGULATOR_PARAMS}
+        switched = {p.name: p.value for p in params if p.name in self.SWITCH_PARAMS}
+        if not touched and not switched:
+            return SetParametersResult(successful=True)
+
+        # 스위치를 먼저 본다. 문턱은 접촉 판정 자체를 바꾸므로 조절기보다 앞선다.
+        if switched:
+            try:
+                switch = self._build_switch(switched)
+            except ValueError as exc:
+                self.get_logger().error(f"전환 문턱 거절: {exc}")
+                return SetParametersResult(successful=False, reason=str(exc))
+            # **상태는 넘겨받는다.** 문턱을 바꿨다고 지금 접촉 중이라는 사실이나
+            # 걸쇠가 사라지면, 파라미터 하나 만졌다고 로봇이 접근 속도로 돌아간다.
+            switch.mode = self.mode_switch.mode
+            switch.has_contacted = self.mode_switch.has_contacted
+            self.mode_switch = switch
+            self.get_logger().info(
+                f"전환 문턱 갱신 — 진입 {switch.enter_force_n:.2f} N · 이탈 "
+                + (f"{switch.release_force_n:.2f} N" if switch.reversible else "없음")
+                + f" (모드 {switch.mode} 유지)"
+            )
+            self._publish_mode()
+
+        if not touched:
+            return SetParametersResult(successful=True)
+        try:
+            regulator = self._build_regulator(touched)
+        except ValueError as exc:
+            self.get_logger().error(f"힘 파라미터 거절: {exc}")
+            return SetParametersResult(successful=False, reason=str(exc))
+
+        self.regulator = regulator
+        self.get_logger().info(
+            f"힘 유지 갱신 — 목표 {regulator.target_force_n:.2f} ± "
+            f"{regulator.deadband_n:.2f} N · 경고 {regulator.warn_force_n:.2f} · "
+            f"한계 {regulator.max_force_n:.2f} N ("
+            + ", ".join(f"{k.split('.')[-1]}={v}" for k, v in touched.items()) + ")"
+        )
+        # 밴드 아래끝이 이탈 문턱을 뚫으면 모드가 접촉과 접근을 오간다. 기동 때와
+        # 같은 검사를 여기서도 한다 — 런타임 변경이라고 덜 위험한 것이 아니다.
+        if self.mode_switch.reversible and (
+            regulator.target_force_n - regulator.deadband_n
+            <= self.mode_switch.release_force_n
+        ):
+            self.get_logger().warn(
+                f"⚠️ 유지 밴드 아래끝 "
+                f"{regulator.target_force_n - regulator.deadband_n:.2f} N 이 "
+                f"이탈 문턱 {self.mode_switch.release_force_n:.2f} N 이하다 — "
+                "힘을 잡고 있는 중에 접근으로 되돌아갈 수 있다."
+            )
+        return SetParametersResult(successful=True)
 
     def _publish_inplane_state(self) -> None:
         self.inplane_pub.publish(Bool(data=bool(self.allow_inplane_rotation)))

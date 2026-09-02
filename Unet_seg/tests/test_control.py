@@ -491,3 +491,116 @@ def test_latencies_are_recorded_and_summed(disc_probability) -> None:
     assert state.control_feature_latency_ms > 0
     assert state.end_to_end_latency_ms >= 6.5
     assert math.isfinite(state.end_to_end_latency_ms)
+
+
+# ---------------------------------------------------------------------------
+# Quality aggregation and the one-sided completeness term
+# ---------------------------------------------------------------------------
+
+
+def test_geometric_aggregation_is_dominated_by_the_worst_sub_score() -> None:
+    """One collapsed term must be able to move Q, which an eight-term mean cannot.
+
+    This is the property the arithmetic mean lacks: with the shipped weights a
+    single sub-score falling to 0 shifts the arithmetic mean by at most its
+    weight share, so Q stayed near 0.9 on frames whose lumen contrast had
+    vanished entirely.
+    """
+    inputs = dict(
+        segmentation_confidence=1.0,
+        mask_area_ratio=0.07,
+        largest_component_ratio=1.0,
+        border_contact_ratio=0.0,
+        lumen_surrounding_contrast=0.0,  # the collapsed term
+        temporal_warped_iou=1.0,
+        normalized_centroid_jump=0.0,
+        relative_area_change=0.0,
+    )
+    arithmetic = compute_control_quality(
+        config=QualityConfig(target_area_ratio=0.07, aggregation="arithmetic"), **inputs
+    )
+    geometric = compute_control_quality(
+        config=QualityConfig(target_area_ratio=0.07, aggregation="geometric"), **inputs
+    )
+    assert arithmetic.components["lumen_contrast"] == 0.0
+    assert geometric.score < arithmetic.score
+    assert arithmetic.score > 0.9   # the failure is invisible
+    assert geometric.score < 0.85   # the failure moves the score
+    assert geometric.aggregation == "geometric"
+
+
+def test_geometric_floor_stops_one_zero_from_erasing_the_score() -> None:
+    """A single zero sub-score lowers Q sharply but must not annihilate it."""
+    result = compute_control_quality(
+        segmentation_confidence=1.0,
+        mask_area_ratio=0.07,
+        largest_component_ratio=1.0,
+        border_contact_ratio=0.0,
+        lumen_surrounding_contrast=0.0,
+        config=QualityConfig(target_area_ratio=0.07, aggregation="geometric",
+                             geometric_floor=0.05),
+    )
+    assert 0.0 < result.score < 1.0
+
+
+def test_overfill_is_not_penalised_when_the_flag_is_off() -> None:
+    """A hydro-extended bladder is the deployment target, not a fault.
+
+    With ``penalise_overfill=True`` a mask far above the target band scores near
+    zero on completeness, which on the PFUS test cohort pushed the best-
+    segmented patient to the bottom of the quality ranking.
+    """
+    shared = dict(
+        segmentation_confidence=1.0,
+        largest_component_ratio=1.0,
+        border_contact_ratio=0.0,
+    )
+    config = dict(target_area_ratio=0.068, area_tolerance=0.027)
+    two_sided = compute_control_quality(
+        mask_area_ratio=0.22, config=QualityConfig(**config, penalise_overfill=True), **shared
+    )
+    one_sided = compute_control_quality(
+        mask_area_ratio=0.22, config=QualityConfig(**config, penalise_overfill=False), **shared
+    )
+    assert two_sided.components["mask_completeness"] < 0.1
+    assert one_sided.components["mask_completeness"] == pytest.approx(1.0)
+
+    # Under-filling is still penalised either way: a collapsed lumen is out of
+    # domain whichever side of the band the flag protects.
+    collapsed = compute_control_quality(
+        mask_area_ratio=0.014, config=QualityConfig(**config, penalise_overfill=False), **shared
+    )
+    assert collapsed.components["mask_completeness"] < 0.5
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"aggregation": "harmonic"},
+    {"geometric_floor": 0.0},
+    {"geometric_floor": 1.0},
+])
+def test_quality_config_rejects_bad_aggregation_settings(kwargs) -> None:
+    with pytest.raises(ValueError):
+        QualityConfig(**kwargs)
+
+
+def test_relative_area_change_is_zero_for_an_unchanged_mask_under_an_roi() -> None:
+    """Current and reference areas must share one denominator.
+
+    Passing the ROI to the current frame's geometry but not the reference's
+    makes ``relative_area_change`` report ``(frame area / ROI area)`` worth of
+    change between two identical masks -- 0.40 for the PFUS sector. It silently
+    flattens the ``area_stability`` sub-score and fires the
+    ``excessive_area_change`` validity criterion on frames that did not move.
+    """
+    roi = np.zeros((64, 64), bool)
+    roi[8:56, 8:56] = True  # a sector covering 56% of the frame
+    probability = np.where(square_mask() > 0, 0.95, 0.05).astype(np.float32)
+    config = FeatureExtractionConfig()
+
+    first = extract_control_state(probability, config=config, roi_mask=roi)
+    second = extract_control_state(
+        probability, config=config, roi_mask=roi, previous_state=first
+    )
+
+    assert second.relative_area_change == pytest.approx(0.0, abs=1e-9)
+    assert second.quality_components["area_stability"] == pytest.approx(1.0)

@@ -290,8 +290,8 @@ than either being independently adjustable.
 | contact enter | 2.0 N | `teleop.contact_probing_force_n` |
 | contact release | 0.3 N | `teleop.contact_probing_release_n` |
 | hold band | 3.0 ± 0.5 N | `contact_control.target_force_n`, `deadband_n` |
-| warning | 14.0 N | `safety.warn_normal_force_n` |
-| limit | 15.0 N | `safety.max_normal_force_n` |
+| warning | 14.0 N | `safety.warn_contact_force_n` |
+| limit | 15.0 N | `safety.max_contact_force_n` |
 | `F_n = sign × F_z` | −1.0 | `ft_sensor.normal_force_sign` |
 
 **All of these are compared against the contact-force magnitude** (2026-08-31).

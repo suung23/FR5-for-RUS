@@ -1,0 +1,16 @@
+run,run_type,target_n,peak_force_n,warn_force_n,max_force_n,margin_to_limit_n,reached_warn,exceeded_limit,samples_over_limit,seconds_over_warn
+A_t0p5,hold,0.5,0.6374,4.5,5.0,4.3626000000000005,False,False,0,0.0
+A_t1p0,hold,1.0,1.3051,4.5,5.0,3.6949,False,False,0,0.0
+A_t1p5,hold,1.5,1.4864,4.5,5.0,3.5136000000000003,False,False,0,0.0
+A_t2p0,hold,2.0,2.0272,4.5,5.0,2.9728,False,False,0,0.0
+A_t3p0,hold,3.0,2.7347,4.5,5.0,2.2653,False,False,0,0.0
+A_t4p0,hold,4.0,3.7434,4.5,5.0,1.2566000000000002,False,False,0,0.0
+B_t0p5,disturbance,0.5,0.7426,4.5,5.0,4.2574,False,False,0,0.0
+B_t1p0,disturbance,1.0,1.3299,4.5,5.0,3.6700999999999997,False,False,0,0.0
+B_t1p5,disturbance,1.5,1.4883,4.5,5.0,3.5117000000000003,False,False,0,0.0
+B_t2p0,disturbance,2.0,2.1065,4.5,5.0,2.8935,False,False,0,0.0
+B_t3p0_pose,disturbance,3.0,3.9203,4.5,5.0,1.0796999999999999,False,False,0,0.0
+B_t3p0,disturbance,3.0,3.1582,4.5,5.0,1.8418,False,False,0,0.0
+B_t4p0,disturbance,4.0,4.2647,4.5,5.0,0.7352999999999996,False,False,0,0.0
+C_limit,safety,3.0,4.4114,4.5,5.0,0.5885999999999996,False,False,0,0.0
+S_stiff,stiffness,3.0,0.3891,4.5,5.0,4.6109,False,False,0,0.0

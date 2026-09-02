@@ -495,7 +495,13 @@ def extract_control_state(
                 alignment = "unwarped"
             warped_iou, warped_dice = _iou_dice(mask, reference)
 
-            reference_geometry = binary_mask_geometry(reference)
+            # The ROI must be passed here too. Without it the reference's
+            # mask_area_ratio is taken over H*W while the current frame's is
+            # taken over the sector, so relative_area_change carries a constant
+            # offset of (frame area / ROI area) even between two identical
+            # masks -- 0.40 for this geometry. That corrupts both the
+            # area_stability sub-score and the max_relative_area_change gate.
+            reference_geometry = binary_mask_geometry(reference, roi_mask)
             if (
                 geometry["centroid_x_normalized"] is not None
                 and reference_geometry["centroid_x_normalized"] is not None

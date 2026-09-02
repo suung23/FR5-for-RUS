@@ -1,0 +1,19 @@
+# exp_seed43 with the imaged-sector ROI enabled.
+#
+# Identical to exp_seed43.yaml in data, model and weights -- the checkpoint is
+# unchanged and nothing is retrained. The only difference is that the control
+# features are now measured over the insonified sector instead of the whole
+# rectangle, which is what roi.py was written for and what `mode: full` had
+# been suppressing (see scripts/derive_roi_mask.py for the measurement).
+#
+# `target_area_ratio` is NOT inherited: with an ROI the denominator of
+# mask_area_ratio changes from H*W to the sector area, so the old 0.15 refers to
+# a quantity that no longer exists. It is recalibrated in exp_seed43_qfix.yaml.
+defaults: exp_seed43.yaml
+experiment:
+  name: exp_seed43_roi
+  output_dir: runs/exp_seed43_roi
+control:
+  roi:
+    mode: file
+    path: configs/roi/pfus_sector_256.npy

@@ -25,6 +25,7 @@ from rus_perception.control.features import (
     FeatureExtractionConfig,
     warp_mask_with_flow,
 )
+from rus_perception.control.roi import RoiConfig
 from rus_perception.data.io import load_grayscale, load_mask, resize_image, resize_mask
 from rus_perception.flow.precomputed import load_flow_pair
 from rus_perception.inference.predictor import Predictor, PredictorConfig
@@ -86,6 +87,13 @@ def main() -> int:
         normalization_stats=config.get("data.normalization_stats"),
         device=args.device or str(config.get("train.device", "auto")).replace("auto", "cpu"),
         restore_original_size=False,  # metrics are computed at the model's resolution
+        # Without this the imaged-sector ROI configured under control.roi is
+        # silently dropped and every control feature is measured over the whole
+        # rectangle, which is the failure rus_perception/control/roi.py warns
+        # about: segmentation_confidence saturates on the dead region,
+        # border_contact_ratio can never fire, and mask_area_ratio depends on
+        # the frame grabber's crop.
+        roi=RoiConfig.from_dict(config.section("control").get("roi")),
     )
     if args.device is None and str(config.get("train.device", "auto")) == "auto":
         import torch

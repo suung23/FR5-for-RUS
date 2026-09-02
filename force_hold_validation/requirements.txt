@@ -1,0 +1,3 @@
+# 실제로 쓰는 것만 적는다. force_validation/ 과 같은 이유로 pandas·seaborn 은 없다.
+numpy>=1.24
+matplotlib>=3.6

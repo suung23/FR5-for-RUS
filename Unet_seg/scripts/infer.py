@@ -21,6 +21,7 @@ import numpy as np
 from _common import parse_overrides, prepare_manifest  # noqa: E402  (path setup)
 
 from rus_perception.control.features import FeatureExtractionConfig
+from rus_perception.control.roi import RoiConfig
 from rus_perception.data.io import load_grayscale
 from rus_perception.inference.predictor import Predictor, PredictorConfig
 from rus_perception.inference.sources import IMAGE_EXTENSIONS
@@ -118,6 +119,7 @@ def main() -> int:
             normalization_stats=config.get("data.normalization_stats"),
             device=device,
             restore_original_size=True,
+            roi=RoiConfig.from_dict(config.section("control").get("roi")),
         ),
         feature_config=FeatureExtractionConfig.from_dict(
             {"postprocess": config.section("postprocess"), **config.section("control")}

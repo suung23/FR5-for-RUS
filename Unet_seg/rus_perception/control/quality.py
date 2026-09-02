@@ -6,10 +6,25 @@ in ``[0, 1]``:
 
 .. math::
 
-    Q = \\frac{\\sum_i w_i s_i}{\\sum_i w_i}
+    Q_{\\mathrm{arith}} = \\frac{\\sum_i w_i s_i}{\\sum_i w_i}
+    \\qquad
+    Q_{\\mathrm{geom}} = \\exp\\!\\left(\\frac{\\sum_i w_i \\ln s_i}{\\sum_i w_i}\\right)
 
 Every sub-score and every weight is logged, so a value can always be traced back
 to its components.
+
+Choosing the aggregation
+------------------------
+The arithmetic mean lets a majority of near-1 sub-scores hide one that has
+collapsed: with eight terms, a single sub-score falling from 1.0 to 0.0 moves
+``Q`` by at most its weight share. That is the wrong shape for a gate, where one
+broken measurement should be disqualifying regardless of how ordinary the rest
+of the frame looks.
+
+The geometric mean has the opposite behaviour -- it is dominated by its smallest
+term and reaches 0 whenever any term does -- which also means it needs a floor
+(``geometric_floor``) so that one legitimately-zero sub-score does not erase all
+information in the others.
 
 Warning:
     This score is a **heuristic**, not a clinically validated measure of
@@ -25,11 +40,15 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 __all__ = [
+    "AGGREGATIONS",
     "QualityConfig",
     "QualityResult",
     "compute_control_quality",
     "QUALITY_COMPONENT_NAMES",
 ]
+
+#: How the sub-scores are combined into one number.
+AGGREGATIONS: tuple[str, ...] = ("arithmetic", "geometric")
 
 #: Every sub-score name the quality heuristic can emit, in a fixed order.
 #: Consumers (e.g. the CSV writer) rely on this so their column set stays stable
@@ -60,6 +79,17 @@ class QualityConfig:
         centroid_jump_scale: Normalized centroid jump that scores ``exp(-1)``.
         area_change_scale: Relative area change that scores ``exp(-1)``.
         border_penalty_scale: Border-contact ratio that scores ``exp(-1)``.
+        penalise_overfill: Whether a mask *larger* than the target band lowers
+            ``mask_completeness``. The deployment target is HoLEP, where
+            irrigation holds the bladder hydro-extended, so an unusually large
+            lumen is the intended operating point rather than a fault; setting
+            this to ``False`` penalises only under-filling. ``True`` keeps the
+            original two-sided behaviour.
+        aggregation: ``"arithmetic"`` (default, unchanged behaviour) or
+            ``"geometric"``. See the module docstring.
+        geometric_floor: Sub-scores are clamped up to this value before the
+            geometric mean, so a single zero term cannot annihilate the score.
+            Ignored by the arithmetic mean.
     """
 
     weights: dict[str, float] = field(
@@ -80,8 +110,19 @@ class QualityConfig:
     centroid_jump_scale: float = 0.05
     area_change_scale: float = 0.25
     border_penalty_scale: float = 0.15
+    penalise_overfill: bool = True
+    aggregation: str = "arithmetic"
+    geometric_floor: float = 0.05
 
     def __post_init__(self) -> None:
+        if self.aggregation not in AGGREGATIONS:
+            raise ValueError(
+                f"aggregation must be one of {list(AGGREGATIONS)}, got {self.aggregation!r}."
+            )
+        if not 0.0 < self.geometric_floor < 1.0:
+            raise ValueError(
+                f"geometric_floor must be in (0, 1), got {self.geometric_floor}."
+            )
         if any(value < 0 for value in self.weights.values()):
             raise ValueError(f"Quality weights must be non-negative, got {self.weights}.")
         if sum(self.weights.values()) <= 0:
@@ -127,10 +168,12 @@ class QualityResult:
     score: float
     components: dict[str, float]
     weights: dict[str, float]
+    aggregation: str = "arithmetic"
 
     def explain(self) -> str:
         """Render the weighted-mean computation as readable text."""
-        lines = [f"control_quality_score = {self.score:.4f} (weighted mean of:)"]
+        lines = [f"control_quality_score = {self.score:.4f} "
+                 f"(weighted {self.aggregation} mean of:)"]
         for name in sorted(self.components):
             weight = self.weights.get(name, 0.0)
             lines.append(f"  {name:<26} score={self.components[name]:.4f} weight={weight:.3f}")
@@ -142,8 +185,17 @@ def _decay(value: float, scale: float) -> float:
     return float(min(1.0, max(0.0, math.exp(-max(0.0, value) / scale))))
 
 
-def _plateau(value: float, target: float, tolerance: float) -> float:
-    """1 inside ``target +/- tolerance``, decaying smoothly outside it."""
+def _plateau(value: float, target: float, tolerance: float,
+             penalise_above: bool = True) -> float:
+    """1 inside ``target +/- tolerance``, decaying smoothly outside it.
+
+    With ``penalise_above=False`` the upper side is flat: anything at or above
+    the band scores 1.0 and only under-filling is penalised. See
+    ``QualityConfig.penalise_overfill`` for why that is the right shape for a
+    hydro-extended bladder.
+    """
+    if not penalise_above and value >= target:
+        return 1.0
     distance = abs(value - target)
     if distance <= tolerance:
         return 1.0
@@ -186,7 +238,8 @@ def compute_control_quality(
     components: dict[str, float] = {
         "segmentation_confidence": float(min(1.0, max(0.0, segmentation_confidence))),
         "mask_completeness": _plateau(
-            float(mask_area_ratio), config.target_area_ratio, config.area_tolerance
+            float(mask_area_ratio), config.target_area_ratio, config.area_tolerance,
+            penalise_above=config.penalise_overfill,
         ),
         "component_quality": float(min(1.0, max(0.0, largest_component_ratio))),
         "border_penalty": _decay(float(border_contact_ratio), config.border_penalty_scale),
@@ -213,10 +266,20 @@ def compute_control_quality(
         if config.weights.get(name, 0.0) > 0
     }
     if not weights:
-        return QualityResult(score=0.0, components=components, weights={})
+        return QualityResult(score=0.0, components=components, weights={},
+                             aggregation=config.aggregation)
 
     total_weight = sum(weights.values())
-    score = sum(components[name] * weight for name, weight in weights.items()) / total_weight
+    if config.aggregation == "geometric":
+        floor = config.geometric_floor
+        score = math.exp(
+            sum(math.log(max(components[name], floor)) * weight
+                for name, weight in weights.items())
+            / total_weight
+        )
+    else:
+        score = sum(components[name] * weight for name, weight in weights.items()) / total_weight
     return QualityResult(
-        score=float(min(1.0, max(0.0, score))), components=components, weights=weights
+        score=float(min(1.0, max(0.0, score))), components=components, weights=weights,
+        aggregation=config.aggregation,
     )

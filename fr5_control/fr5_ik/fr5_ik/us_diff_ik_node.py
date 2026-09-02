@@ -90,6 +90,8 @@ class UsDiffIkNode(Node):
         self.joint_timeout = float(self.get_parameter("watchdog.joint_state_timeout_s").value)
         self.retreat_speed = float(self.get_parameter("watchdog.retreat_speed_m_s").value)
         self.retreat_force = float(self.get_parameter("watchdog.retreat_until_force_n").value)
+        #: twist 두절 중 힘 조절을 잇는다는 안내를 이미 냈는가.
+        self._force_hold_announced = False
         self.max_retreat = float(self.get_parameter("watchdog.max_retreat_s").value)
 
         # 접근 상한. freespace:=true 면 launch 가 덮어쓴 값이 여기로 들어온다.
@@ -210,6 +212,17 @@ class UsDiffIkNode(Node):
             ),
         )
         self.retreat_pub = self.create_publisher(Bool, "/diag/retreating", 10)
+
+        # 힘 축이 무엇을 지령받는가. `regulator_reason` 은 지금까지 노드 안에서만
+        # 살아 있었다 — 밖에서 보면 "안 움직인다" 와 "움직이라고 했는데 안 갔다" 가
+        # 구별되지 않는다. 그 둘을 가르는 것이 이 토픽의 전부다.
+        #   [접촉력, 목표, 지령 v_z, 달성 오차 e_z, 접촉프로빙 여부]
+        self.force_diag_pub = self.create_publisher(
+            Float32MultiArray, "/diag/force_regulation", 10)
+        self.force_reason_pub = self.create_publisher(
+            String, "/diag/force_regulation_reason", 10)
+        self._last_reason = None
+        self._last_v_z = 0.0
 
         # 조작자 위치(미러) 상태와 요청. 모드와 같은 이유로 latched 다 — 콘솔이
         # 늦게 붙어도 지금 어느 매핑으로 도는지 즉시 알아야 한다. 화면이 축을
@@ -978,6 +991,7 @@ class UsDiffIkNode(Node):
 
         out = self.regulator.update(self._control_force())
         self.regulator_reason = out.reason
+        self._last_v_z = float(out.v_z)
 
         regulated = np.zeros(6)
         if self.allow_teleop_lateral:
@@ -1052,6 +1066,26 @@ class UsDiffIkNode(Node):
             or (now - self.last_twist_time).nanoseconds / 1e9 > self.twist_timeout
         )
 
+        # 접촉 프로빙에서는 twist 두절이 후퇴 사유가 아니다.
+        #
+        # 이 모드에서 조작자에게 열린 축은 **하나도 없다** — 여섯 축이 모두 0 이고
+        # z 는 조절기가 덮어쓴다. 그런데 예전에는 twist 가 0.1 s 끊기면 워치독
+        # 분기로 빠져 `_apply_force_regulation` 이 아예 호출되지 않았다. 즉 잡을 축이
+        # 없는 조작자가 데드맨을 쥐고 있어야만 로봇이 자기 힘을 유지했고, 놓으면
+        # 목표에 도달하는 움직임 자체가 멈췄다.
+        #
+        # 힘 축의 보호는 데드맨이 아니라 조절기 안에 있다 — 한계 초과 시 강제 후퇴,
+        # 교정 무효 시 차단, wrench 두절 시 정지. 그 셋은 아래에서 그대로 산다.
+        if twist_stale and self.mode_switch.in_contact_probing:
+            if not self._force_hold_announced:
+                self.get_logger().info(
+                    "twist 두절 — 접촉 프로빙이라 힘 조절을 계속한다 (조작자 축 없음)"
+                )
+                self._force_hold_announced = True
+            twist = self._apply_force_regulation(np.zeros(6))
+            self.retreat_pub.publish(Bool(data=False))
+            twist_stale = False
+
         if twist_stale:
             twist = self._retreat_twist(now)
             if twist is None:
@@ -1063,6 +1097,7 @@ class UsDiffIkNode(Node):
             if self.retreat_started is not None:
                 self.get_logger().info("twist 복귀 — 후퇴 해제")
             self.retreat_started = None
+            self._force_hold_announced = False
             twist = self._clamp(self.twist_cmd) * self._hold_fade(now)
             twist = self._remap_twist(twist)
             twist = self._apply_force_regulation(twist)
@@ -1087,6 +1122,19 @@ class UsDiffIkNode(Node):
 
         self._publish_velocity(joint_velocity)
         self.error_pub.publish(Float32MultiArray(data=error.as_list()))
+
+        probing = self.mode_switch.in_contact_probing
+        self.force_diag_pub.publish(Float32MultiArray(data=[
+            float(self._control_force()),
+            float(self.regulator.target_force_n),
+            float(self._last_v_z if probing else 0.0),
+            float(error.per_axis[2]),
+            1.0 if probing else 0.0,
+        ]))
+        # 사유는 바뀔 때만 낸다 — 100 Hz 로 같은 문자열을 흘리면 로그가 아니라 잡음이다.
+        if self.regulator_reason != self._last_reason:
+            self._last_reason = self.regulator_reason
+            self.force_reason_pub.publish(String(data=self.regulator_reason))
 
     def _publish_velocity(self, joint_velocity: np.ndarray) -> None:
         msg = JointState()

@@ -36,6 +36,7 @@ __all__ = [
     "boundary_entropy",
     "border_contact_ratio",
     "lumen_contrast",
+    "lumen_centroid_offset",
     "warp_mask_with_flow",
 ]
 
@@ -75,6 +76,7 @@ class FeatureExtractionConfig:
     stability: TemporalStabilityConfig = None  # type: ignore[assignment]
     boundary_band_px: int = 2
     surrounding_ring_px: int = 6
+    lumen_search_px: int = 12
     keep_probability_map: bool = True
     keep_binary_mask: bool = True
 
@@ -87,6 +89,8 @@ class FeatureExtractionConfig:
             raise ValueError(f"boundary_band_px must be >= 1, got {self.boundary_band_px}.")
         if self.surrounding_ring_px < 1:
             raise ValueError(f"surrounding_ring_px must be >= 1, got {self.surrounding_ring_px}.")
+        if self.lumen_search_px < 1:
+            raise ValueError(f"lumen_search_px must be >= 1, got {self.lumen_search_px}.")
 
     @classmethod
     def from_dict(cls, data: Optional[dict[str, Any]]) -> "FeatureExtractionConfig":
@@ -106,6 +110,7 @@ class FeatureExtractionConfig:
             stability=TemporalStabilityConfig(**(data.get("stability") or {})),
             boundary_band_px=int(data.get("boundary_band_px", 2)),
             surrounding_ring_px=int(data.get("surrounding_ring_px", 6)),
+            lumen_search_px=int(data.get("lumen_search_px", 12)),
             keep_probability_map=bool(data.get("keep_probability_map", True)),
             keep_binary_mask=bool(data.get("keep_binary_mask", True)),
         )
@@ -342,6 +347,81 @@ def lumen_contrast(
     return lumen_mean, ring_mean, contrast
 
 
+def lumen_centroid_offset(
+    image: np.ndarray,
+    mask: np.ndarray,
+    search_px: int = 12,
+    roi_mask: Optional[np.ndarray] = None,
+) -> Optional[float]:
+    """Distance from the mask centroid to the dark region's centroid, in mask radii.
+
+    Every other centroid feature in this module compares the prediction with its
+    own past, so a mask that sits in the same wrong place on every frame looks
+    perfectly stable. This one compares the prediction with the *image*: the
+    urine-filled lumen is anechoic, so if the mask is centred on the lumen its
+    centroid should coincide with the centroid of the darkness underneath it. A
+    mask displaced off the lumen separates the two, whether or not it has ever
+    moved.
+
+    The search region is the mask dilated by ``search_px``, so the measurement
+    sees the darkness the mask may have drifted away from as well as the
+    darkness it covers. Pixels are weighted by how much darker than the
+    surrounding ring they are, which makes the weight zero outside the lumen
+    instead of merely small, and the distance is divided by the mask's
+    equivalent radius so the result does not grow with bladder size.
+
+    Args:
+        image: ``H x W`` grayscale image in ``[0, 1]``.
+        mask: ``H x W`` binary lumen mask.
+        search_px: How far beyond the mask to look for the lumen's darkness.
+        roi_mask: Optional imaged-sector mask. Without it the dead region
+            outside the beam -- which is black, and therefore maximally "dark" --
+            would drag the weighted centroid toward the frame edge.
+
+    Returns:
+        The offset in mask radii, or ``None`` when the mask is empty or no pixel
+        in the search region is darker than the ring, so that a missing
+        measurement is never reported as a perfect one.
+    """
+    import cv2
+
+    mask = (np.asarray(mask) > 0).astype(np.uint8)
+    image = np.asarray(image, dtype=np.float64)
+    area = int(mask.sum())
+    if area == 0 or image.shape != mask.shape:
+        return None
+
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE, (2 * search_px + 1, 2 * search_px + 1)
+    )
+    search = cv2.dilate(mask, kernel)
+    ring = search - mask
+    if roi_mask is not None and roi_mask.shape == mask.shape:
+        inside = (np.asarray(roi_mask) > 0).astype(np.uint8)
+        search = search * inside
+        ring = ring * inside
+    if search.sum() == 0 or ring.sum() == 0:
+        return None
+
+    # Reference brightness is the surrounding tissue, not a fixed constant: gain
+    # and depth move the absolute levels from patient to patient.
+    reference = float(image[ring > 0].mean())
+    weight = np.clip(reference - image, 0.0, None) * (search > 0)
+    total = float(weight.sum())
+    if total < _EPS:
+        return None
+
+    ys, xs = np.nonzero(search > 0)
+    weights = weight[ys, xs]
+    dark_x = float((xs * weights).sum() / total)
+    dark_y = float((ys * weights).sum() / total)
+
+    mask_ys, mask_xs = np.nonzero(mask)
+    offset = math.hypot(float(mask_xs.mean()) - dark_x, float(mask_ys.mean()) - dark_y)
+    equivalent_radius = math.sqrt(area / math.pi)
+    return float(offset / max(equivalent_radius, 1.0))
+
+
 def warp_mask_with_flow(mask: np.ndarray, flow_backward: np.ndarray) -> np.ndarray:
     """Warp a previous-frame mask into the current frame with a backward flow.
 
@@ -451,7 +531,7 @@ def extract_control_state(
     entropy = boundary_entropy(probability_map, mask, config.boundary_band_px, roi_mask)
     border = border_contact_ratio(mask, roi_mask)
 
-    lumen_mean = ring_mean = contrast = None
+    lumen_mean = ring_mean = contrast = centroid_offset = None
     if image is not None:
         image_2d = np.asarray(image, dtype=np.float32)
         if image_2d.ndim == 3:
@@ -459,6 +539,9 @@ def extract_control_state(
         if image_2d.shape == mask.shape:
             lumen_mean, ring_mean, contrast = lumen_contrast(
                 image_2d, mask, config.surrounding_ring_px, roi_mask
+            )
+            centroid_offset = lumen_centroid_offset(
+                image_2d, mask, config.lumen_search_px, roi_mask
             )
         else:
             logger.warning(
@@ -551,6 +634,8 @@ def extract_control_state(
         largest_component_ratio=post.largest_component_ratio,
         border_contact_ratio=border,
         lumen_surrounding_contrast=contrast,
+        mean_boundary_entropy=entropy,
+        lumen_centroid_offset=centroid_offset,
         temporal_warped_iou=warped_iou,
         normalized_centroid_jump=centroid_jump,
         relative_area_change=area_change,
@@ -618,6 +703,7 @@ def extract_control_state(
         lumen_mean_intensity=lumen_mean,
         surrounding_ring_mean_intensity=ring_mean,
         lumen_surrounding_contrast=contrast,
+        lumen_centroid_offset=centroid_offset,
         temporal_warped_iou=warped_iou,
         temporal_warped_dice=warped_dice,
         normalized_centroid_jump=centroid_jump,

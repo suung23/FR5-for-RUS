@@ -81,6 +81,7 @@ class ForceRegulator:
         warn_force_n: float,
         max_force_n: float,
         retreat_speed_m_s: float,
+        stop_tolerance_n: float | None = None,
     ) -> None:
         """조절기를 만든다.
 
@@ -112,6 +113,21 @@ class ForceRegulator:
 
         self.target_force_n = float(target_force_n)
         self.deadband_n = float(deadband_n)
+        #: 움직이는 중에 멈추는 오차 [N]. 데드밴드와 **다른 값이어야 한다.**
+        #:
+        #: 둘이 같으면 조절기는 밴드에 닿는 순간 선다 — 아래에서 올라오면
+        #: ``목표 − 밴드`` 에, 위에서 내려오면 ``목표 + 밴드`` 에. 목표는 도달할
+        #: 지점이 아니라 밴드를 정의하는 값이 되고, 2026-09-02 실측에서 목표 0.5 N
+        #: 이 0.45 N 에서 멈춘 것이 그 결과다.
+        #:
+        #: 그래서 나눈다: **데드밴드는 언제 움직이기 시작할까, 이것은 언제 멈출까.**
+        #: 시작 문턱을 잡음보다 크게 두어 떨림을 막고, 정지 문턱을 그보다 훨씬 작게
+        #: 두어 목표까지 간다.
+        self.stop_tolerance_n = float(
+            deadband_n * 0.2 if stop_tolerance_n is None else stop_tolerance_n
+        )
+        #: 지금 움직이는 중인가. 시작·정지 문턱이 다르므로 상태가 필요하다.
+        self._moving = False
         self.admittance_b_z = float(admittance_b_z)
         self.max_speed_m_s = float(max_speed_m_s)
         self.warn_force_n = float(warn_force_n)
@@ -139,15 +155,22 @@ class ForceRegulator:
 
         error = self.target_force_n - force
 
-        # 2) 밴드 안 — 움직이지 않는다.
-        if abs(error) <= self.deadband_n:
+        # 2) 멈출까 / 움직일까. 문턱이 두 개이고, 지금 상태에 따라 다른 쪽을 본다.
+        #    서 있으면 데드밴드를 넘어야 출발하고, 움직이는 중이면 정지 허용오차
+        #    안에 들어와야 선다. 하나로 두면 밴드 끝에 주차한다.
+        threshold = self.stop_tolerance_n if self._moving else self.deadband_n
+        if abs(error) <= threshold:
+            was_moving = self._moving
+            self._moving = False
             return RegulatorOutput(
                 v_z=0.0,
                 reason=(
-                    f"밴드 안 {force:.2f} N "
-                    f"(목표 {self.target_force_n:.1f} ± {self.deadband_n:.1f})"
+                    f"{'도달' if was_moving else '유지'} {force:.3f} N "
+                    f"(목표 {self.target_force_n:.2f}, 오차 {error:+.3f}, "
+                    f"정지 문턱 {threshold:.3f})"
                 ),
             )
+        self._moving = True
 
         # 3) admittance. target < warn 불변식 덕분에, 여기서 나온 v_z 가 양수이면
         #    force < target < warn 이 이미 성립한다 — 경고 이상에서 전진하는 경우가

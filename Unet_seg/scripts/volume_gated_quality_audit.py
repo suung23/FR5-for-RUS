@@ -1,6 +1,19 @@
 #!/usr/bin/env python3
 """Audit segmentation and control quality on distended-bladder frames only.
 
+Two filters, deliberately named apart
+-------------------------------------
+``volume floor`` selects the *cohort*: it reads the ground-truth bladder area,
+so it cannot run at inference time. It answers "is this frame inside the
+deployment domain we are studying".
+
+``Q decision`` is the *runtime* judgement: ``Q >= threshold`` together with the
+validity gate, computed from the prediction and the image alone. It answers
+"would the controller have used this measurement".
+
+Earlier revisions called the second one "the gate", which read as if it were
+the volume filter. The label column is ``q_decision`` for that reason.
+
 What it produces
 ----------------
 1. The cohort that survives a bladder-volume floor, at several floors, so the
@@ -59,9 +72,11 @@ GOOD_DICE = 0.80
 #: too far off to steer on. 0.02 is ~5 px at 256 x 256.
 GOOD_CENTROID_ERROR = 0.02
 
-#: Q at or above which the gate would admit a frame. Chosen from the operating
-#: point table, not fitted; pass --gate to move it.
-DEFAULT_GATE = 0.85
+#: Q at or above which the Q decision admits a frame. An analysis parameter,
+#: not something the shipped config enforces -- control.validity leaves
+#: min_control_quality_score null, so the running pipeline applies no Q
+#: threshold at all. Pass --q-threshold to move it.
+DEFAULT_Q_THRESHOLD = 0.50
 
 #: Volume floors swept for the cohort-composition table, as ground-truth
 #: bladder area over the ROI.
@@ -154,8 +169,8 @@ def load_split(run_dir: Path, manifest: str, root: str, size: tuple[int, int],
     return frames
 
 
-def label(frame: dict, gate: float, weights: dict[str, float]) -> dict:
-    """Per-frame labels: how the frame did, and how the gate judged it.
+def label(frame: dict, q_threshold: float, weights: dict[str, float]) -> dict:
+    """Per-frame labels: how the frame did, and how the Q decision judged it.
 
     ``false_accept`` is the label that matters. Those are the frames the
     controller would have acted on and should not have, and the sub-score
@@ -169,7 +184,7 @@ def label(frame: dict, gate: float, weights: dict[str, float]) -> dict:
     seg_ok = frame["dice"] >= GOOD_DICE
     centroid_ok = (frame["centroid_error"] <= GOOD_CENTROID_ERROR
                    if not np.isnan(frame["centroid_error"]) else None)
-    admitted = frame["quality"] >= gate and frame["valid"]
+    admitted = frame["quality"] >= q_threshold and frame["valid"]
     available = {n: v for n, v in frame["components"].items()
                  if not np.isnan(v) and weights.get(n, 0.0) > 0.0}
     limiting = min(available, key=available.get) if available else None
@@ -177,7 +192,7 @@ def label(frame: dict, gate: float, weights: dict[str, float]) -> dict:
         "seg_ok": seg_ok,
         "centroid_ok": centroid_ok,
         "admitted": admitted,
-        "gate_outcome": ("true_accept" if admitted and seg_ok else
+        "q_decision": ("true_accept" if admitted and seg_ok else
                          "false_accept" if admitted else
                          "false_reject" if seg_ok else "true_reject"),
         # With a geometric mean the smallest sub-score dominates, so "which term
@@ -200,14 +215,14 @@ def cohort_sweep(frames: Sequence[dict]) -> list[dict]:
     return out
 
 
-def component_evidence(frames: Sequence[dict], gate: float,
+def component_evidence(frames: Sequence[dict], q_threshold: float,
                        weights: dict[str, float]) -> dict:
     """Per sub-score: does it vary, does it rank, and does it catch failures."""
     seg_ok = np.asarray([f["dice"] >= GOOD_DICE for f in frames])
     dice = np.asarray([f["dice"] for f in frames])
     error = np.asarray([f["centroid_error"] for f in frames])
-    labels = [label(f, gate, weights) for f in frames]
-    false_accept = np.asarray([lab["gate_outcome"] == "false_accept" for lab in labels])
+    labels = [label(f, q_threshold, weights) for f in frames]
+    false_accept = np.asarray([lab["q_decision"] == "false_accept" for lab in labels])
 
     evidence = {}
     for name in QUALITY_COMPONENT_NAMES:
@@ -224,7 +239,7 @@ def component_evidence(frames: Sequence[dict], gate: float,
             "auroc_seg_ok": _auroc(values, seg_ok),
             "spearman_dice": _spearman(values, dice),
             "auroc_centroid_ok": _auroc(values, error <= GOOD_CENTROID_ERROR),
-            # On the frames the gate wrongly admitted, was this term already low
+            # On the frames Q wrongly admitted, was this term already low
             # (so more weight would have helped) or high like everything else
             # (so no reweighting could have caught them)?
             "mean_on_false_accepts": (float(np.nanmean(values[false_accept]))
@@ -236,7 +251,8 @@ def component_evidence(frames: Sequence[dict], gate: float,
 
 
 def verdict(name: str, cohorts: dict[str, dict], weight: float,
-            unfiltered: Optional[dict[str, dict]] = None) -> dict:
+            unfiltered: Optional[dict[str, dict]] = None,
+            disabled_by_design: Sequence[str] = ()) -> dict:
     """Reconcile one sub-score's evidence across cohorts into an action.
 
     A judgement is issued only where the cohorts agree. Disagreement is reported
@@ -253,6 +269,14 @@ def verdict(name: str, cohorts: dict[str, dict], weight: float,
     entries = [c[name] for c in cohorts.values() if c[name].get("available")]
     if not entries:
         return {"verdict": "ABSENT", "action": "Sub-score never produced; check the feature."}
+    if name in set(disabled_by_design):
+        # Weight 0 usually means a term is being wasted. Here it means the
+        # experiment cannot measure what the term is for, so recommending that
+        # it be given weight would be advice against the study's own design.
+        return {"verdict": "OUT OF SCOPE",
+                "action": ("Disabled for this analysis on purpose, not because it failed. "
+                           "Its evidence below is reported but must not be read as a "
+                           "reason to re-enable or drop it.")}
 
     saturated = [e["at_ceiling"] >= SATURATED_FRACTION for e in entries]
     if all(saturated) and unfiltered:
@@ -295,7 +319,7 @@ def verdict(name: str, cohorts: dict[str, dict], weight: float,
                        "here buys nothing.")}
 
 
-def failure_attribution(frames: Sequence[dict], gate: float,
+def failure_attribution(frames: Sequence[dict], q_threshold: float,
                         weights: dict[str, float]) -> dict:
     """Can the wrongly-admitted frames be caught by any reweighting at all?
 
@@ -303,9 +327,9 @@ def failure_attribution(frames: Sequence[dict], gate: float,
     the current terms separates it, and the gap is a missing measurement rather
     than a tuning error. That distinction decides what work comes next.
     """
-    labels = [label(f, gate, weights) for f in frames]
+    labels = [label(f, q_threshold, weights) for f in frames]
     bad = [(f, lab) for f, lab in zip(frames, labels)
-           if lab["gate_outcome"] == "false_accept"]
+           if lab["q_decision"] == "false_accept"]
     if not bad:
         return {"n_false_accepts": 0}
 
@@ -329,14 +353,14 @@ def failure_attribution(frames: Sequence[dict], gate: float,
     }
 
 
-def write_frame_labels(path: Path, cohorts: dict[str, list[dict]], gate: float,
+def write_frame_labels(path: Path, cohorts: dict[str, list[dict]], q_threshold: float,
                        weights: dict[str, float]) -> int:
     """One row per surviving frame: metrics, every sub-score, and its labels."""
     columns = (["split", "frame_id", "patient_id", "frame_index", "gt_area_px",
                 "gt_area_ratio", "dice", "iou", "hd95", "centroid_error_px",
                 "quality", "valid", "rejection_reasons"]
                + list(QUALITY_COMPONENT_NAMES)
-               + ["seg_ok", "centroid_ok", "admitted", "gate_outcome",
+               + ["seg_ok", "centroid_ok", "admitted", "q_decision",
                   "limiting_component", "limiting_value"])
     written = 0
     with path.open("w", newline="") as handle:
@@ -344,7 +368,7 @@ def write_frame_labels(path: Path, cohorts: dict[str, list[dict]], gate: float,
         writer.writeheader()
         for split, frames in cohorts.items():
             for frame in frames:
-                lab = label(frame, gate, weights)
+                lab = label(frame, q_threshold, weights)
                 row = {
                     "split": split, "frame_id": frame["frame_id"],
                     "patient_id": frame["patient_id"], "frame_index": frame["frame_index"],
@@ -360,7 +384,7 @@ def write_frame_labels(path: Path, cohorts: dict[str, list[dict]], gate: float,
                        for name in QUALITY_COMPONENT_NAMES},
                     "seg_ok": lab["seg_ok"],
                     "centroid_ok": "" if lab["centroid_ok"] is None else lab["centroid_ok"],
-                    "admitted": lab["admitted"], "gate_outcome": lab["gate_outcome"],
+                    "admitted": lab["admitted"], "q_decision": lab["q_decision"],
                     "limiting_component": lab["limiting_component"] or "",
                     "limiting_value": ("" if np.isnan(lab["limiting_value"])
                                        else round(lab["limiting_value"], 4)),
@@ -377,15 +401,21 @@ def _fmt(stat: Optional[dict], digits: int = 3) -> str:
             f"({stat['median']:.{digits}f} [{stat['iqr'][0]:.{digits}f}–{stat['iqr'][1]:.{digits}f}])")
 
 
-def render(report: dict, floor: float, gate: float, weights: dict[str, float]) -> str:
+def render(report: dict, floor: float, q_threshold: float, weights: dict[str, float]) -> str:
     lines = [
         "# Volume-gated segmentation and control-quality audit",
         "",
-        f"- Volume floor: ground-truth bladder area ≥ **{floor:.4f}** of the ROI",
-        f"- Gate: `valid_for_control` **and** Q ≥ **{gate:.2f}**",
-        f"- A frame counts as segmented when Dice ≥ {GOOD_DICE:.2f}, and as steerable "
-        f"when centroid error ≤ {GOOD_CENTROID_ERROR:.3f} "
+        f"- **Volume floor** (cohort selection, uses ground truth): bladder area "
+        f"≥ **{floor:.4f}** of the ROI",
+        f"- **Q decision** (runtime, no ground truth): `valid_for_control` **and** "
+        f"Q ≥ **{q_threshold:.2f}**",
+        f"- A frame is *segmented* when Dice ≥ {GOOD_DICE:.2f}, and *steerable* when the "
+        f"centroid error is ≤ {GOOD_CENTROID_ERROR:.3f} "
         f"({GOOD_CENTROID_ERROR * 256:.1f} px at 256×256)",
+        "",
+        "The Q threshold is an analysis parameter. `control.validity` leaves "
+        "`min_control_quality_score` unset, so the shipped pipeline applies no Q "
+        "threshold of its own.",
         "",
         "## 1. What the volume floor costs",
         "",
@@ -432,18 +462,18 @@ def render(report: dict, floor: float, gate: float, weights: dict[str, float]) -
         )
 
     lines += ["", "## 4. Metrics that need work", "",
-              "Verdicts are issued only where val and test agree; where they do not, "
-              "that disagreement is the finding.", "",
+              "A verdict is issued only where val and test agree; where they do not, "
+              "the disagreement is itself the finding.", "",
               "| term | weight | verdict | what to do |",
               "| --- | --- | --- | --- |"]
     for name, entry in report["verdicts"].items():
         lines.append(f"| `{name}` | {weights.get(name, 0.0):.1f} | **{entry['verdict']}** "
                      f"| {entry['action']} |")
 
-    lines += ["", "## 5. What the gate lets through", ""]
+    lines += ["", "## 5. What the Q decision admits", ""]
     for split, entry in report["failures"].items():
         if not entry.get("n_false_accepts"):
-            lines += [f"**{split}**: the gate admitted no poorly-segmented frame.", ""]
+            lines += [f"**{split}**: Q admitted no poorly-segmented frame.", ""]
             continue
         lines += [
             f"**{split}** — {entry['n_false_accepts']} frames admitted with Dice < "
@@ -457,7 +487,7 @@ def render(report: dict, floor: float, gate: float, weights: dict[str, float]) -
             f"- Where the rest were held back: "
             + (", ".join(f"`{k}` ×{v}" for k, v in entry["blamed_component"].items())
                or "nowhere"),
-            f"- Concentrated in: "
+            "- Concentrated in: "
             + ", ".join(f"{k} ×{v}" for k, v in list(entry["by_patient"].items())[:5]),
             "",
         ]
@@ -472,7 +502,11 @@ def main() -> int:
     parser.add_argument("--config", default="configs/exp_seed43_qfix.yaml")
     parser.add_argument("--min-gt-area-ratio", type=float, default=0.0574,
                         help="Volume floor: ground-truth bladder area over the ROI.")
-    parser.add_argument("--gate", type=float, default=DEFAULT_GATE)
+    parser.add_argument("--disabled-by-design", nargs="*", default=[],
+                        help="Sub-scores switched off deliberately for this analysis; "
+                             "reported as OUT OF SCOPE rather than as failures.")
+    parser.add_argument("--q-threshold", type=float, default=DEFAULT_Q_THRESHOLD,
+                        help="Q at or above which the Q decision admits a frame.")
     parser.add_argument("--output-dir", type=Path, default=Path("experiments/volume_gated_audit"))
     parser.add_argument("--workers", type=int, default=8)
     args = parser.parse_args()
@@ -499,15 +533,16 @@ def main() -> int:
                 "lower --min-gt-area-ratio (the sweep in the report shows the trade-off)."
             )
 
-    evidence = {split: component_evidence(frames, args.gate, weights)
+    evidence = {split: component_evidence(frames, args.q_threshold, weights)
                 for split, frames in kept.items()}
     # The same evidence before the volume floor, so a term pinned only *because*
     # of the filter is not mistaken for a term that carries no information.
-    unfiltered_evidence = {split: component_evidence(frames, args.gate, weights)
+    unfiltered_evidence = {split: component_evidence(frames, args.q_threshold, weights)
                            for split, frames in everything.items()}
     report = {
         "min_gt_area_ratio": args.min_gt_area_ratio,
-        "gate": args.gate,
+        "q_threshold": args.q_threshold,
+        "disabled_by_design": list(args.disabled_by_design),
         "sweep": {split: cohort_sweep(frames) for split, frames in everything.items()},
         "segmentation": {
             split: {
@@ -531,17 +566,17 @@ def main() -> int:
         "evidence": evidence,
         "evidence_unfiltered": unfiltered_evidence,
         "verdicts": {name: verdict(name, evidence, weights.get(name, 0.0),
-                                   unfiltered_evidence)
+                                   unfiltered_evidence, args.disabled_by_design)
                      for name in QUALITY_COMPONENT_NAMES},
-        "failures": {split: failure_attribution(frames, args.gate, weights)
+        "failures": {split: failure_attribution(frames, args.q_threshold, weights)
                      for split, frames in kept.items()},
     }
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "audit.json").write_text(json.dumps(report, indent=2))
     rows = write_frame_labels(args.output_dir / "frame_labels.csv", kept,
-                              args.gate, weights)
-    text = render(report, args.min_gt_area_ratio, args.gate, weights)
+                              args.q_threshold, weights)
+    text = render(report, args.min_gt_area_ratio, args.q_threshold, weights)
     (args.output_dir / "audit.md").write_text(text)
     print(text)
     logger.info("Labelled %d frames -> %s", rows, args.output_dir / "frame_labels.csv")

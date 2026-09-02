@@ -1,0 +1,1994 @@
+{
+  "offsets": [
+    -9,
+    -6,
+    -3,
+    0,
+    3,
+    6,
+    9
+  ],
+  "config": "configs/exp_seed43_retro.yaml",
+  "rows": [
+    {
+      "split": "test",
+      "patient_id": "P000",
+      "frame_id": "P000/seq0/000000",
+      "lever_arm_px": 51.706574668263166,
+      "cos_gradient_vs_reference": 0.48518886407187595,
+      "angle_deg": 60.97515299155133,
+      "quality_at_pose": 0.1984617202434737,
+      "quality_range": 0.1368540130982672,
+      "argmax_offset": [
+        -9,
+        -6
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.7895535230636597,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.47047434656340753
+    },
+    {
+      "split": "test",
+      "patient_id": "P000",
+      "frame_id": "P000/seq0/000029",
+      "lever_arm_px": 51.61255106793974,
+      "cos_gradient_vs_reference": 0.6391994319454137,
+      "angle_deg": 50.2678509719491,
+      "quality_at_pose": 0.155107669608998,
+      "quality_range": 0.05200383744513509,
+      "argmax_offset": [
+        6,
+        -3
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.3391968309879303,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.5311284046692607
+    },
+    {
+      "split": "test",
+      "patient_id": "P000",
+      "frame_id": "P000/seq0/000058",
+      "lever_arm_px": 45.90714426949208,
+      "cos_gradient_vs_reference": 0.7385818045513084,
+      "angle_deg": 42.389253199109845,
+      "quality_at_pose": 0.15279419015191884,
+      "quality_range": 0.015253525988952826,
+      "argmax_offset": [
+        0,
+        3
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.4463575780391693,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.47368421052631576
+    },
+    {
+      "split": "test",
+      "patient_id": "P000",
+      "frame_id": "P000/seq0/000087",
+      "lever_arm_px": 54.09574990218602,
+      "cos_gradient_vs_reference": 0.9284200805090285,
+      "angle_deg": 21.81014130995862,
+      "quality_at_pose": 0.29081892009972143,
+      "quality_range": 0.060906317038213725,
+      "argmax_offset": [
+        -9,
+        6
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.4824551045894623,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.6929392446633826
+    },
+    {
+      "split": "test",
+      "patient_id": "P000",
+      "frame_id": "P000/seq0/000116",
+      "lever_arm_px": 49.26774022128362,
+      "cos_gradient_vs_reference": 0.9752350199696185,
+      "angle_deg": 12.777826683273469,
+      "quality_at_pose": 0.302914483579589,
+      "quality_range": 0.04838385646465748,
+      "argmax_offset": [
+        3,
+        3
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.5330639481544495,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.6829268292682927
+    },
+    {
+      "split": "test",
+      "patient_id": "P001",
+      "frame_id": "P001/seq0/000000",
+      "lever_arm_px": 78.68732597993522,
+      "cos_gradient_vs_reference": -0.7443909816052957,
+      "angle_deg": 138.10681550093858,
+      "quality_at_pose": 0.47413397383750827,
+      "quality_range": 0.3297544552157791,
+      "argmax_offset": [
+        -9,
+        9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.305509090423584,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.654836863194047
+    },
+    {
+      "split": "test",
+      "patient_id": "P001",
+      "frame_id": "P001/seq0/000028",
+      "lever_arm_px": 78.68006667062447,
+      "cos_gradient_vs_reference": -0.7727493979723444,
+      "angle_deg": 140.60142846353102,
+      "quality_at_pose": 0.5120790860368939,
+      "quality_range": 0.373157662369269,
+      "argmax_offset": [
+        -6,
+        0
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.2237544059753418,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8384219554030875
+    },
+    {
+      "split": "test",
+      "patient_id": "P001",
+      "frame_id": "P001/seq0/000056",
+      "lever_arm_px": 86.4938458983345,
+      "cos_gradient_vs_reference": -0.845295403670092,
+      "angle_deg": 147.70359976069705,
+      "quality_at_pose": 0.6616015458709509,
+      "quality_range": 0.35089617968550824,
+      "argmax_offset": [
+        -6,
+        6
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.2465927004814148,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8274622573687994
+    },
+    {
+      "split": "test",
+      "patient_id": "P001",
+      "frame_id": "P001/seq0/000084",
+      "lever_arm_px": 86.21464810891185,
+      "cos_gradient_vs_reference": -0.9155580627925035,
+      "angle_deg": 156.2851040693507,
+      "quality_at_pose": 0.5260089144184183,
+      "quality_range": 0.3547902054104374,
+      "argmax_offset": [
+        -6,
+        9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.24715620279312134,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.7579672695951766
+    },
+    {
+      "split": "test",
+      "patient_id": "P001",
+      "frame_id": "P001/seq0/000112",
+      "lever_arm_px": 85.20196833644586,
+      "cos_gradient_vs_reference": -0.8396673185253496,
+      "angle_deg": 147.10500593689065,
+      "quality_at_pose": 0.3776948510779072,
+      "quality_range": 0.3207602137961772,
+      "argmax_offset": [
+        -3,
+        -6
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.33125847578048706,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.7824817518248175
+    },
+    {
+      "split": "test",
+      "patient_id": "P012",
+      "frame_id": "P012/seq0/000000",
+      "lever_arm_px": 44.10236378219714,
+      "cos_gradient_vs_reference": -0.9109971321013017,
+      "angle_deg": 155.64351352856525,
+      "quality_at_pose": 0.3838874080924756,
+      "quality_range": 0.07018993512155641,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.15727834403514862,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8647214854111406
+    },
+    {
+      "split": "test",
+      "patient_id": "P012",
+      "frame_id": "P012/seq0/000029",
+      "lever_arm_px": 35.474920363892096,
+      "cos_gradient_vs_reference": -0.3236132544352244,
+      "angle_deg": 108.881580582554,
+      "quality_at_pose": 0.40381135313304173,
+      "quality_range": 0.030266047975279542,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.3536072075366974,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8587328767123288
+    },
+    {
+      "split": "test",
+      "patient_id": "P012",
+      "frame_id": "P012/seq0/000058",
+      "lever_arm_px": 39.29231007950309,
+      "cos_gradient_vs_reference": -0.9639843113762688,
+      "angle_deg": 164.5760490330893,
+      "quality_at_pose": 0.36696749823112923,
+      "quality_range": 0.06228650091215532,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.19419530034065247,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8512241054613936
+    },
+    {
+      "split": "test",
+      "patient_id": "P012",
+      "frame_id": "P012/seq0/000087",
+      "lever_arm_px": 39.29446933239122,
+      "cos_gradient_vs_reference": -0.9671810788154833,
+      "angle_deg": 165.28044268666372,
+      "quality_at_pose": 0.36865236572675925,
+      "quality_range": 0.0739260250429234,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.17293581366539001,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8761576566874866
+    },
+    {
+      "split": "test",
+      "patient_id": "P012",
+      "frame_id": "P012/seq0/000116",
+      "lever_arm_px": 40.51989203188741,
+      "cos_gradient_vs_reference": 0.5343246767447031,
+      "angle_deg": 57.70187576121913,
+      "quality_at_pose": 0.3797381374293083,
+      "quality_range": 0.08898126069159629,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.14597299695014954,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.9057829759584145
+    },
+    {
+      "split": "val",
+      "patient_id": "P022",
+      "frame_id": "P022/seq0/000000",
+      "lever_arm_px": 59.34350189264267,
+      "cos_gradient_vs_reference": -0.9605222253141623,
+      "angle_deg": 163.8470010348058,
+      "quality_at_pose": 0.4690690160232592,
+      "quality_range": 0.12943083589647603,
+      "argmax_offset": [
+        -9,
+        0
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.28497135639190674,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.7348603702541575
+    },
+    {
+      "split": "val",
+      "patient_id": "P022",
+      "frame_id": "P022/seq0/000043",
+      "lever_arm_px": 57.58878850241572,
+      "cos_gradient_vs_reference": 0.9212844445880236,
+      "angle_deg": 22.885412800717965,
+      "quality_at_pose": 0.40017525567886014,
+      "quality_range": 0.13307600552363102,
+      "argmax_offset": [
+        -6,
+        0
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.44132673740386963,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.7389558232931727
+    },
+    {
+      "split": "val",
+      "patient_id": "P022",
+      "frame_id": "P022/seq0/000086",
+      "lever_arm_px": 54.14987264889714,
+      "cos_gradient_vs_reference": -0.9974703923593333,
+      "angle_deg": 175.92379699823664,
+      "quality_at_pose": 0.5209437219478428,
+      "quality_range": 0.1085992443551661,
+      "argmax_offset": [
+        -6,
+        9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.42787179350852966,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.7732793522267206
+    },
+    {
+      "split": "val",
+      "patient_id": "P022",
+      "frame_id": "P022/seq0/000129",
+      "lever_arm_px": 40.40456326740937,
+      "cos_gradient_vs_reference": -0.8792925062383425,
+      "angle_deg": 151.55713630057576,
+      "quality_at_pose": 0.4396570803517791,
+      "quality_range": 0.10574539356567003,
+      "argmax_offset": [
+        3,
+        3
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.9288979768753052,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.628854206318995
+    },
+    {
+      "split": "val",
+      "patient_id": "P022",
+      "frame_id": "P022/seq0/000172",
+      "lever_arm_px": 43.28174540254606,
+      "cos_gradient_vs_reference": -0.7998104890825216,
+      "angle_deg": 143.11200920331436,
+      "quality_at_pose": 0.526667155537758,
+      "quality_range": 0.07157872686384437,
+      "argmax_offset": [
+        0,
+        0
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.33452853560447693,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.7628205128205128
+    },
+    {
+      "split": "val",
+      "patient_id": "P025",
+      "frame_id": "P025/seq0/000000",
+      "lever_arm_px": 62.52292765090415,
+      "cos_gradient_vs_reference": -0.999752010340197,
+      "angle_deg": 178.72396263353187,
+      "quality_at_pose": 0.31516054921702114,
+      "quality_range": 0.04605023813291664,
+      "argmax_offset": [
+        -3,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.5502908229827881,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8585657370517928
+    },
+    {
+      "split": "val",
+      "patient_id": "P025",
+      "frame_id": "P025/seq0/000042",
+      "lever_arm_px": 71.76188693979064,
+      "cos_gradient_vs_reference": -0.8813650568044824,
+      "angle_deg": 151.80747035247555,
+      "quality_at_pose": 0.38195370888408015,
+      "quality_range": 0.04613456616857625,
+      "argmax_offset": [
+        -9,
+        -3
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.6021336913108826,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.700194678780013
+    },
+    {
+      "split": "val",
+      "patient_id": "P025",
+      "frame_id": "P025/seq0/000084",
+      "lever_arm_px": 84.15206529937124,
+      "cos_gradient_vs_reference": 0.996495416955034,
+      "angle_deg": 4.798248372478858,
+      "quality_at_pose": 0.6118943022760436,
+      "quality_range": 0.03878592907646872,
+      "argmax_offset": [
+        3,
+        3
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.6177544593811035,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.7389162561576355
+    },
+    {
+      "split": "val",
+      "patient_id": "P025",
+      "frame_id": "P025/seq0/000126",
+      "lever_arm_px": 75.75002676257637,
+      "cos_gradient_vs_reference": 0.9769796272744048,
+      "angle_deg": 12.317724304776778,
+      "quality_at_pose": 0.5975365515798127,
+      "quality_range": 0.05329692224046201,
+      "argmax_offset": [
+        6,
+        3
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.3948192894458771,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.633888663145063
+    },
+    {
+      "split": "val",
+      "patient_id": "P025",
+      "frame_id": "P025/seq0/000168",
+      "lever_arm_px": 68.11754592154945,
+      "cos_gradient_vs_reference": 0.9613376066309784,
+      "angle_deg": 15.984213123065087,
+      "quality_at_pose": 0.5132998686093335,
+      "quality_range": 0.01608557681166478,
+      "argmax_offset": [
+        0,
+        3
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.4294285476207733,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.7776951672862453
+    },
+    {
+      "split": "val",
+      "patient_id": "P029",
+      "frame_id": "P029/seq0/000000",
+      "lever_arm_px": 53.63721724995014,
+      "cos_gradient_vs_reference": -0.9995281771049901,
+      "angle_deg": 178.23987215664405,
+      "quality_at_pose": 0.6056440557698968,
+      "quality_range": 0.20733087970879788,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.12338356673717499,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8929263565891473
+    },
+    {
+      "split": "val",
+      "patient_id": "P029",
+      "frame_id": "P029/seq0/000021",
+      "lever_arm_px": 54.88579199386432,
+      "cos_gradient_vs_reference": -0.9983416868004773,
+      "angle_deg": 176.69987079390467,
+      "quality_at_pose": 0.6244900104519029,
+      "quality_range": 0.21224249691284952,
+      "argmax_offset": [
+        -9,
+        -3
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.12511049211025238,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8651572327044025
+    },
+    {
+      "split": "val",
+      "patient_id": "P029",
+      "frame_id": "P029/seq0/000042",
+      "lever_arm_px": 53.03116634348565,
+      "cos_gradient_vs_reference": -0.985135513865349,
+      "angle_deg": 170.1087309281165,
+      "quality_at_pose": 0.6291039917019776,
+      "quality_range": 0.22642712156652617,
+      "argmax_offset": [
+        -9,
+        -6
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.11563723534345627,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8612169637369391
+    },
+    {
+      "split": "val",
+      "patient_id": "P029",
+      "frame_id": "P029/seq0/000063",
+      "lever_arm_px": 49.738695194821474,
+      "cos_gradient_vs_reference": -0.9850340333517492,
+      "angle_deg": 170.0749398957615,
+      "quality_at_pose": 0.6079395087221161,
+      "quality_range": 0.22219429268620755,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.10269735008478165,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8412410962211759
+    },
+    {
+      "split": "val",
+      "patient_id": "P029",
+      "frame_id": "P029/seq0/000084",
+      "lever_arm_px": 47.47968554613915,
+      "cos_gradient_vs_reference": -0.9442382736551219,
+      "angle_deg": 160.7759550356112,
+      "quality_at_pose": 0.5775089968180167,
+      "quality_range": 0.20380349651947038,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.10861601680517197,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8836639179852909
+    },
+    {
+      "split": "val",
+      "patient_id": "P032",
+      "frame_id": "P032/seq0/000000",
+      "lever_arm_px": 43.92636102005673,
+      "cos_gradient_vs_reference": -0.9792087883926995,
+      "angle_deg": 168.29603880283236,
+      "quality_at_pose": 0.5743644956866134,
+      "quality_range": 0.040412487672945585,
+      "argmax_offset": [
+        9,
+        9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.5301146507263184,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.7278431372549019
+    },
+    {
+      "split": "val",
+      "patient_id": "P032",
+      "frame_id": "P032/seq0/000045",
+      "lever_arm_px": 57.170708397564695,
+      "cos_gradient_vs_reference": -0.9931107073870203,
+      "angle_deg": 173.27062712641722,
+      "quality_at_pose": 0.4035989337679166,
+      "quality_range": 0.027370555924976114,
+      "argmax_offset": [
+        -3,
+        9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.36679354310035706,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.825531914893617
+    },
+    {
+      "split": "val",
+      "patient_id": "P032",
+      "frame_id": "P032/seq0/000090",
+      "lever_arm_px": 55.37593169495797,
+      "cos_gradient_vs_reference": -0.34416414211858504,
+      "angle_deg": 110.13078025157937,
+      "quality_at_pose": 0.44704089461598573,
+      "quality_range": 0.039424556968649105,
+      "argmax_offset": [
+        3,
+        -3
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.3254401981830597,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.875351047742493
+    },
+    {
+      "split": "val",
+      "patient_id": "P032",
+      "frame_id": "P032/seq0/000135",
+      "lever_arm_px": 53.20856601844347,
+      "cos_gradient_vs_reference": -0.3717776379007094,
+      "angle_deg": 111.825290659339,
+      "quality_at_pose": 0.48715306724180074,
+      "quality_range": 0.0371109547300193,
+      "argmax_offset": [
+        -3,
+        -3
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.3734678328037262,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8323977546110666
+    },
+    {
+      "split": "val",
+      "patient_id": "P032",
+      "frame_id": "P032/seq0/000180",
+      "lever_arm_px": 52.760476232082816,
+      "cos_gradient_vs_reference": 0.4222933754264304,
+      "angle_deg": 65.02053723884885,
+      "quality_at_pose": 0.4768688073909755,
+      "quality_range": 0.025602701128383865,
+      "argmax_offset": [
+        -6,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.5131983757019043,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8486486486486486
+    },
+    {
+      "split": "test",
+      "patient_id": "P040",
+      "frame_id": "P040/seq0/000000",
+      "lever_arm_px": 61.52083985208018,
+      "cos_gradient_vs_reference": 0.9887235921154328,
+      "angle_deg": 8.612554272625891,
+      "quality_at_pose": 0.6721356887735859,
+      "quality_range": 0.18119371658847727,
+      "argmax_offset": [
+        0,
+        6
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.26775845885276794,
+      "visible_at_pose": 0.9952972791400739,
+      "dice_at_pose": 0.87033616549686
+    },
+    {
+      "split": "test",
+      "patient_id": "P040",
+      "frame_id": "P040/seq0/000024",
+      "lever_arm_px": 60.259836548427565,
+      "cos_gradient_vs_reference": 0.9616861480698273,
+      "angle_deg": 15.911532387161648,
+      "quality_at_pose": 0.661236353566328,
+      "quality_range": 0.20221357249224847,
+      "argmax_offset": [
+        3,
+        0
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.2500518262386322,
+      "visible_at_pose": 0.9923444976076555,
+      "dice_at_pose": 0.8646303994216519
+    },
+    {
+      "split": "test",
+      "patient_id": "P040",
+      "frame_id": "P040/seq0/000048",
+      "lever_arm_px": 58.30185226986479,
+      "cos_gradient_vs_reference": 0.896211062248044,
+      "angle_deg": 26.335586889082787,
+      "quality_at_pose": 0.6397378949435499,
+      "quality_range": 0.16180409341885393,
+      "argmax_offset": [
+        9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.21502777934074402,
+      "visible_at_pose": 0.994661921708185,
+      "dice_at_pose": 0.9407306351371836
+    },
+    {
+      "split": "test",
+      "patient_id": "P040",
+      "frame_id": "P040/seq0/000072",
+      "lever_arm_px": 57.945490402435,
+      "cos_gradient_vs_reference": 0.9568493007034902,
+      "angle_deg": 16.89295902452577,
+      "quality_at_pose": 0.5736168900386744,
+      "quality_range": 0.08466955959204647,
+      "argmax_offset": [
+        9,
+        -6
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.21113722026348114,
+      "visible_at_pose": 0.9973576042278333,
+      "dice_at_pose": 0.9107266435986159
+    },
+    {
+      "split": "test",
+      "patient_id": "P040",
+      "frame_id": "P040/seq0/000096",
+      "lever_arm_px": 62.48708145274697,
+      "cos_gradient_vs_reference": 0.9462504152441384,
+      "angle_deg": 18.87078241571061,
+      "quality_at_pose": 0.6400510475312393,
+      "quality_range": 0.15321070850620166,
+      "argmax_offset": [
+        0,
+        9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.2325088381767273,
+      "visible_at_pose": 0.9805585012371862,
+      "dice_at_pose": 0.9416122772975833
+    },
+    {
+      "split": "test",
+      "patient_id": "P041",
+      "frame_id": "P041/seq0/000000",
+      "lever_arm_px": 54.3854366666773,
+      "cos_gradient_vs_reference": 0.9878204134746607,
+      "angle_deg": 8.95149728490441,
+      "quality_at_pose": 0.6539016106822512,
+      "quality_range": 0.07452874478203009,
+      "argmax_offset": [
+        3,
+        6
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.15082305669784546,
+      "visible_at_pose": 0.9887764305040585,
+      "dice_at_pose": 0.9588253103239479
+    },
+    {
+      "split": "test",
+      "patient_id": "P041",
+      "frame_id": "P041/seq0/000025",
+      "lever_arm_px": 54.880577431021784,
+      "cos_gradient_vs_reference": 0.9961794796239377,
+      "angle_deg": 5.009994586130258,
+      "quality_at_pose": 0.6568483820474895,
+      "quality_range": 0.07186758818948225,
+      "argmax_offset": [
+        3,
+        3
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.16497734189033508,
+      "visible_at_pose": 0.9934100418410042,
+      "dice_at_pose": 0.9465113882304442
+    },
+    {
+      "split": "test",
+      "patient_id": "P041",
+      "frame_id": "P041/seq0/000050",
+      "lever_arm_px": 56.23609969490282,
+      "cos_gradient_vs_reference": 0.9259636787930091,
+      "angle_deg": 22.18587896358534,
+      "quality_at_pose": 0.6494999082818607,
+      "quality_range": 0.06734689380102676,
+      "argmax_offset": [
+        3,
+        6
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.15408450365066528,
+      "visible_at_pose": 0.9902024820378837,
+      "dice_at_pose": 0.9197157146617531
+    },
+    {
+      "split": "test",
+      "patient_id": "P041",
+      "frame_id": "P041/seq0/000075",
+      "lever_arm_px": 54.28447309086187,
+      "cos_gradient_vs_reference": 0.9795120289802141,
+      "angle_deg": 11.61800050872301,
+      "quality_at_pose": 0.6299172356709335,
+      "quality_range": 0.10323931891718963,
+      "argmax_offset": [
+        3,
+        9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.12723353505134583,
+      "visible_at_pose": 0.9870098915504707,
+      "dice_at_pose": 0.9149361465852305
+    },
+    {
+      "split": "test",
+      "patient_id": "P041",
+      "frame_id": "P041/seq0/000100",
+      "lever_arm_px": 52.44766974861454,
+      "cos_gradient_vs_reference": 0.9725766487676875,
+      "angle_deg": 13.449167588887429,
+      "quality_at_pose": 0.6158808138874338,
+      "quality_range": 0.0940450446390807,
+      "argmax_offset": [
+        6,
+        9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.16726738214492798,
+      "visible_at_pose": 0.9890007020828457,
+      "dice_at_pose": 0.9388167874599697
+    },
+    {
+      "split": "val",
+      "patient_id": "P042",
+      "frame_id": "P042/seq0/000000",
+      "lever_arm_px": 74.5913111701391,
+      "cos_gradient_vs_reference": -0.873117923331423,
+      "angle_deg": 150.82300904733748,
+      "quality_at_pose": 0.3638778156211794,
+      "quality_range": 0.24551358756781821,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.1518435925245285,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8297872340425532
+    },
+    {
+      "split": "val",
+      "patient_id": "P042",
+      "frame_id": "P042/seq0/000018",
+      "lever_arm_px": 74.09922793017905,
+      "cos_gradient_vs_reference": -0.8322416443606895,
+      "angle_deg": 146.32970240916472,
+      "quality_at_pose": 0.36710892430626396,
+      "quality_range": 0.2516631883013997,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.1417364478111267,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.7701448199034534
+    },
+    {
+      "split": "val",
+      "patient_id": "P042",
+      "frame_id": "P042/seq0/000036",
+      "lever_arm_px": 73.09845840721061,
+      "cos_gradient_vs_reference": -0.9608394088714105,
+      "angle_deg": 163.91245387213354,
+      "quality_at_pose": 0.3735958636040265,
+      "quality_range": 0.27675327340978617,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.13884712755680084,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8812095032397408
+    },
+    {
+      "split": "val",
+      "patient_id": "P042",
+      "frame_id": "P042/seq0/000054",
+      "lever_arm_px": 72.85592594471596,
+      "cos_gradient_vs_reference": -0.7113693914717316,
+      "angle_deg": 135.34644228263332,
+      "quality_at_pose": 0.46006612747121267,
+      "quality_range": 0.31756987953246296,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.12092024087905884,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.884255930984903
+    },
+    {
+      "split": "val",
+      "patient_id": "P042",
+      "frame_id": "P042/seq0/000072",
+      "lever_arm_px": 72.62470796295301,
+      "cos_gradient_vs_reference": -0.8631231496277278,
+      "angle_deg": 149.6690795451696,
+      "quality_at_pose": 0.4000077699435099,
+      "quality_range": 0.3011424603274433,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.14137741923332214,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8946796959826275
+    },
+    {
+      "split": "val",
+      "patient_id": "P063",
+      "frame_id": "P063/seq0/000000",
+      "lever_arm_px": 70.54492438283177,
+      "cos_gradient_vs_reference": -0.9527013450896109,
+      "angle_deg": 162.30751398200198,
+      "quality_at_pose": 0.7655939843246808,
+      "quality_range": 0.19752175504802472,
+      "argmax_offset": [
+        3,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.26750579476356506,
+      "visible_at_pose": 0.9996371552975326,
+      "dice_at_pose": 0.8746031746031746
+    },
+    {
+      "split": "val",
+      "patient_id": "P063",
+      "frame_id": "P063/seq0/000017",
+      "lever_arm_px": 69.35038672680044,
+      "cos_gradient_vs_reference": -0.981747345370309,
+      "angle_deg": 169.036140645923,
+      "quality_at_pose": 0.7547278399610857,
+      "quality_range": 0.1998930578939665,
+      "argmax_offset": [
+        -3,
+        6
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.285031795501709,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.9017467248908297
+    },
+    {
+      "split": "val",
+      "patient_id": "P063",
+      "frame_id": "P063/seq0/000034",
+      "lever_arm_px": 69.19233311761978,
+      "cos_gradient_vs_reference": 0.9173170955694941,
+      "angle_deg": 23.463041515023228,
+      "quality_at_pose": 0.743230861443402,
+      "quality_range": 0.19902531324251316,
+      "argmax_offset": [
+        0,
+        0
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.28121301531791687,
+      "visible_at_pose": 0.999677731227844,
+      "dice_at_pose": 0.9088141269599634
+    },
+    {
+      "split": "val",
+      "patient_id": "P063",
+      "frame_id": "P063/seq0/000051",
+      "lever_arm_px": 68.39906537491572,
+      "cos_gradient_vs_reference": -0.9614602400795199,
+      "angle_deg": 164.04132265137184,
+      "quality_at_pose": 0.6873814838335259,
+      "quality_range": 0.20408568160663276,
+      "argmax_offset": [
+        0,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.21317751705646515,
+      "visible_at_pose": 0.9996965098634294,
+      "dice_at_pose": 0.8331007535584706
+    },
+    {
+      "split": "val",
+      "patient_id": "P063",
+      "frame_id": "P063/seq0/000068",
+      "lever_arm_px": 68.62198487465378,
+      "cos_gradient_vs_reference": -0.937248761049555,
+      "angle_deg": 159.59453884618333,
+      "quality_at_pose": 0.6531376389441167,
+      "quality_range": 0.18146633116274713,
+      "argmax_offset": [
+        0,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.24118389189243317,
+      "visible_at_pose": 0.9996967859308672,
+      "dice_at_pose": 0.8220387243735763
+    },
+    {
+      "split": "val",
+      "patient_id": "P071",
+      "frame_id": "P071/seq0/000000",
+      "lever_arm_px": 62.44329727178212,
+      "cos_gradient_vs_reference": -0.998978885232069,
+      "angle_deg": 177.41052411357026,
+      "quality_at_pose": 0.5074156871428357,
+      "quality_range": 0.23052764679944066,
+      "argmax_offset": [
+        -9,
+        6
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.19363288581371307,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.9398616285258116
+    },
+    {
+      "split": "val",
+      "patient_id": "P071",
+      "frame_id": "P071/seq0/000029",
+      "lever_arm_px": 61.47142171136937,
+      "cos_gradient_vs_reference": -0.9760058583593676,
+      "angle_deg": 167.4234227810547,
+      "quality_at_pose": 0.4782496066759771,
+      "quality_range": 0.23527930700814675,
+      "argmax_offset": [
+        -3,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.22868302464485168,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.9542993831046204
+    },
+    {
+      "split": "val",
+      "patient_id": "P071",
+      "frame_id": "P071/seq0/000058",
+      "lever_arm_px": 60.52618027123679,
+      "cos_gradient_vs_reference": -0.9999938652120098,
+      "angle_deg": 179.79930450148612,
+      "quality_at_pose": 0.4664960584206947,
+      "quality_range": 0.2245621086837254,
+      "argmax_offset": [
+        -6,
+        -3
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.17757108807563782,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.9134649071587061
+    },
+    {
+      "split": "val",
+      "patient_id": "P071",
+      "frame_id": "P071/seq0/000087",
+      "lever_arm_px": 60.14010683720415,
+      "cos_gradient_vs_reference": -0.9963143120686074,
+      "angle_deg": 175.07926032100008,
+      "quality_at_pose": 0.431582021912971,
+      "quality_range": 0.17557565337633896,
+      "argmax_offset": [
+        -3,
+        -6
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.17564596235752106,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8840901132251663
+    },
+    {
+      "split": "val",
+      "patient_id": "P071",
+      "frame_id": "P071/seq0/000116",
+      "lever_arm_px": 59.80431050740563,
+      "cos_gradient_vs_reference": -0.9980968577197044,
+      "angle_deg": 176.46457067309512,
+      "quality_at_pose": 0.4518943337633512,
+      "quality_range": 0.19516088231417494,
+      "argmax_offset": [
+        -3,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.17154699563980103,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.9085859754686415
+    },
+    {
+      "split": "val",
+      "patient_id": "P076",
+      "frame_id": "P076/seq0/000000",
+      "lever_arm_px": 64.45049096122614,
+      "cos_gradient_vs_reference": 0.911168421635694,
+      "angle_deg": 24.332678586480856,
+      "quality_at_pose": 0.576204820258877,
+      "quality_range": 0.26887107117524695,
+      "argmax_offset": [
+        3,
+        9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.13758009672164917,
+      "visible_at_pose": 0.999383096853794,
+      "dice_at_pose": 0.8643804928485266
+    },
+    {
+      "split": "val",
+      "patient_id": "P076",
+      "frame_id": "P076/seq0/000025",
+      "lever_arm_px": 63.115946089669336,
+      "cos_gradient_vs_reference": 0.8843429689755588,
+      "angle_deg": 27.829225023314052,
+      "quality_at_pose": 0.6040450426291484,
+      "quality_range": 0.2651142298491804,
+      "argmax_offset": [
+        3,
+        9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.1492995023727417,
+      "visible_at_pose": 0.9997076878105817,
+      "dice_at_pose": 0.846242774566474
+    },
+    {
+      "split": "val",
+      "patient_id": "P076",
+      "frame_id": "P076/seq0/000050",
+      "lever_arm_px": 62.06859541884269,
+      "cos_gradient_vs_reference": 0.9282371187067505,
+      "angle_deg": 21.83833939929335,
+      "quality_at_pose": 0.6294337151319854,
+      "quality_range": 0.2374428473186237,
+      "argmax_offset": [
+        9,
+        -3
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.1622014343738556,
+      "visible_at_pose": 0.9997228381374723,
+      "dice_at_pose": 0.8683776076842263
+    },
+    {
+      "split": "val",
+      "patient_id": "P076",
+      "frame_id": "P076/seq0/000075",
+      "lever_arm_px": 61.21630739602665,
+      "cos_gradient_vs_reference": 0.8395927769923843,
+      "angle_deg": 32.902857170513975,
+      "quality_at_pose": 0.5803006982653736,
+      "quality_range": 0.20193805919426727,
+      "argmax_offset": [
+        9,
+        -3
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.15875095129013062,
+      "visible_at_pose": 0.9994600431965442,
+      "dice_at_pose": 0.9484290070263821
+    },
+    {
+      "split": "val",
+      "patient_id": "P076",
+      "frame_id": "P076/seq0/000100",
+      "lever_arm_px": 61.14009138634893,
+      "cos_gradient_vs_reference": 0.9652013146374152,
+      "angle_deg": 15.159559012805735,
+      "quality_at_pose": 0.5433058910933499,
+      "quality_range": 0.18378741533523463,
+      "argmax_offset": [
+        9,
+        3
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.13969790935516357,
+      "visible_at_pose": 0.9997389033942559,
+      "dice_at_pose": 0.9244705281959683
+    },
+    {
+      "split": "test",
+      "patient_id": "P085",
+      "frame_id": "P085/seq0/000000",
+      "lever_arm_px": 77.84475870201614,
+      "cos_gradient_vs_reference": -0.9491899459955069,
+      "angle_deg": 161.65706998498817,
+      "quality_at_pose": 0.7231033146041314,
+      "quality_range": 0.31512165519452223,
+      "argmax_offset": [
+        -3,
+        3
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.2064467966556549,
+      "visible_at_pose": 0.994980694980695,
+      "dice_at_pose": 0.9135102288839376
+    },
+    {
+      "split": "test",
+      "patient_id": "P085",
+      "frame_id": "P085/seq0/000016",
+      "lever_arm_px": 76.62188773952036,
+      "cos_gradient_vs_reference": -0.9625369881450544,
+      "angle_deg": 164.26726540998416,
+      "quality_at_pose": 0.73181218154236,
+      "quality_range": 0.3172664884754522,
+      "argmax_offset": [
+        -3,
+        3
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.2221013605594635,
+      "visible_at_pose": 0.9898916967509025,
+      "dice_at_pose": 0.882410487184504
+    },
+    {
+      "split": "test",
+      "patient_id": "P085",
+      "frame_id": "P085/seq0/000032",
+      "lever_arm_px": 75.30929441087879,
+      "cos_gradient_vs_reference": -0.9637950454823987,
+      "angle_deg": 164.53532777949272,
+      "quality_at_pose": 0.7181233502887036,
+      "quality_range": 0.28260833851936074,
+      "argmax_offset": [
+        -3,
+        0
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.22785800695419312,
+      "visible_at_pose": 0.9908045977011494,
+      "dice_at_pose": 0.8660058737151248
+    },
+    {
+      "split": "test",
+      "patient_id": "P085",
+      "frame_id": "P085/seq0/000048",
+      "lever_arm_px": 76.29583029022473,
+      "cos_gradient_vs_reference": -0.9483682604080185,
+      "angle_deg": 161.50805606491699,
+      "quality_at_pose": 0.7237623277499095,
+      "quality_range": 0.2557615182061753,
+      "argmax_offset": [
+        -6,
+        9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.24154132604599,
+      "visible_at_pose": 0.990151017728168,
+      "dice_at_pose": 0.8415749206941594
+    },
+    {
+      "split": "test",
+      "patient_id": "P085",
+      "frame_id": "P085/seq0/000064",
+      "lever_arm_px": 75.83826392881244,
+      "cos_gradient_vs_reference": -0.9346043507769931,
+      "angle_deg": 159.16431881142887,
+      "quality_at_pose": 0.6972799083818012,
+      "quality_range": 0.26762246995772015,
+      "argmax_offset": [
+        0,
+        -6
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.21971836686134338,
+      "visible_at_pose": 0.9904549793191219,
+      "dice_at_pose": 0.8667124699416008
+    },
+    {
+      "split": "test",
+      "patient_id": "P089",
+      "frame_id": "P089/seq0/000000",
+      "lever_arm_px": 63.724888665282684,
+      "cos_gradient_vs_reference": -0.9695033148279336,
+      "angle_deg": 165.81354503929506,
+      "quality_at_pose": 0.5404370668984206,
+      "quality_range": 0.279046998947525,
+      "argmax_offset": [
+        -9,
+        -3
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.1426365226507187,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.854388843314192
+    },
+    {
+      "split": "test",
+      "patient_id": "P089",
+      "frame_id": "P089/seq0/000019",
+      "lever_arm_px": 64.54036755916093,
+      "cos_gradient_vs_reference": -0.9286810656510879,
+      "angle_deg": 158.23014186586798,
+      "quality_at_pose": 0.5425902290424792,
+      "quality_range": 0.2731285297661555,
+      "argmax_offset": [
+        -9,
+        -3
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.1427866816520691,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.9109903886335144
+    },
+    {
+      "split": "test",
+      "patient_id": "P089",
+      "frame_id": "P089/seq0/000038",
+      "lever_arm_px": 64.85120586000085,
+      "cos_gradient_vs_reference": -0.9378378668229285,
+      "angle_deg": 159.69156792664984,
+      "quality_at_pose": 0.5968988043130515,
+      "quality_range": 0.31294605540312703,
+      "argmax_offset": [
+        -6,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.14141236245632172,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.914858780188293
+    },
+    {
+      "split": "test",
+      "patient_id": "P089",
+      "frame_id": "P089/seq0/000057",
+      "lever_arm_px": 69.49383408173188,
+      "cos_gradient_vs_reference": -0.9673823693590046,
+      "angle_deg": 165.32590149314308,
+      "quality_at_pose": 0.7339525311128406,
+      "quality_range": 0.1885699504728231,
+      "argmax_offset": [
+        -6,
+        9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.261952668428421,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.885592154890621
+    },
+    {
+      "split": "test",
+      "patient_id": "P089",
+      "frame_id": "P089/seq0/000076",
+      "lever_arm_px": 69.10530911899221,
+      "cos_gradient_vs_reference": -0.9676501324440449,
+      "angle_deg": 165.38658658449265,
+      "quality_at_pose": 0.7351581558504566,
+      "quality_range": 0.19535068928660448,
+      "argmax_offset": [
+        -3,
+        3
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.26246434450149536,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8924785461887935
+    },
+    {
+      "split": "val",
+      "patient_id": "P090",
+      "frame_id": "P090/seq0/000000",
+      "lever_arm_px": 62.07037346332906,
+      "cos_gradient_vs_reference": -0.9851812463642037,
+      "angle_deg": 170.12399637280015,
+      "quality_at_pose": 0.6779447706530072,
+      "quality_range": 0.18482900445549855,
+      "argmax_offset": [
+        -3,
+        -6
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.18304343521595,
+      "visible_at_pose": 0.9973100201748487,
+      "dice_at_pose": 0.935939441870975
+    },
+    {
+      "split": "val",
+      "patient_id": "P090",
+      "frame_id": "P090/seq0/000025",
+      "lever_arm_px": 61.46431548568499,
+      "cos_gradient_vs_reference": -0.9656643745485305,
+      "angle_deg": 164.94223009282254,
+      "quality_at_pose": 0.6826718818783778,
+      "quality_range": 0.17791141819150924,
+      "argmax_offset": [
+        -3,
+        -6
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.19238927960395813,
+      "visible_at_pose": 0.997833413577275,
+      "dice_at_pose": 0.9280280866003511
+    },
+    {
+      "split": "val",
+      "patient_id": "P090",
+      "frame_id": "P090/seq0/000050",
+      "lever_arm_px": 60.83679119612563,
+      "cos_gradient_vs_reference": -0.9472316679637637,
+      "angle_deg": 161.30382295803093,
+      "quality_at_pose": 0.6774372044451755,
+      "quality_range": 0.13304692098973958,
+      "argmax_offset": [
+        0,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.2215370535850525,
+      "visible_at_pose": 0.9976519697364988,
+      "dice_at_pose": 0.9290087273674612
+    },
+    {
+      "split": "val",
+      "patient_id": "P090",
+      "frame_id": "P090/seq0/000075",
+      "lever_arm_px": 61.359421725844356,
+      "cos_gradient_vs_reference": 0.9276057765579101,
+      "angle_deg": 21.935377153760484,
+      "quality_at_pose": 0.69144009853165,
+      "quality_range": 0.11254090906479952,
+      "argmax_offset": [
+        3,
+        -3
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.29521644115448,
+      "visible_at_pose": 0.9973951549882782,
+      "dice_at_pose": 0.9106650924832743
+    },
+    {
+      "split": "val",
+      "patient_id": "P090",
+      "frame_id": "P090/seq0/000100",
+      "lever_arm_px": 61.79148767758565,
+      "cos_gradient_vs_reference": -0.9972793010588952,
+      "angle_deg": 175.77257035518213,
+      "quality_at_pose": 0.6927666433263635,
+      "quality_range": 0.10920211370561161,
+      "argmax_offset": [
+        0,
+        -3
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.28335821628570557,
+      "visible_at_pose": 0.9977295660948536,
+      "dice_at_pose": 0.8891197091664502
+    },
+    {
+      "split": "test",
+      "patient_id": "P095",
+      "frame_id": "P095/seq0/000000",
+      "lever_arm_px": 68.99992887371397,
+      "cos_gradient_vs_reference": -0.999999643310927,
+      "angle_deg": 179.9516070000258,
+      "quality_at_pose": 0.26052493522638853,
+      "quality_range": 0.19892867818803617,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.1405390053987503,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.799059929494712
+    },
+    {
+      "split": "test",
+      "patient_id": "P095",
+      "frame_id": "P095/seq0/000020",
+      "lever_arm_px": 67.74449364521182,
+      "cos_gradient_vs_reference": -0.8396020351366148,
+      "angle_deg": 147.09811934576345,
+      "quality_at_pose": 0.26904253492101754,
+      "quality_range": 0.15048973932037152,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.1549053192138672,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.755120213713268
+    },
+    {
+      "split": "test",
+      "patient_id": "P095",
+      "frame_id": "P095/seq0/000040",
+      "lever_arm_px": 66.36692585492476,
+      "cos_gradient_vs_reference": 0.3802124711015495,
+      "angle_deg": 67.65315577484695,
+      "quality_at_pose": 0.2743247896684747,
+      "quality_range": 0.13921114234320156,
+      "argmax_offset": [
+        -9,
+        -6
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.22226428985595703,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.7879681509879092
+    },
+    {
+      "split": "test",
+      "patient_id": "P095",
+      "frame_id": "P095/seq0/000060",
+      "lever_arm_px": 59.240964915556994,
+      "cos_gradient_vs_reference": -0.4426936688512739,
+      "angle_deg": 116.27587451950286,
+      "quality_at_pose": 0.38609083646972503,
+      "quality_range": 0.22836489485398803,
+      "argmax_offset": [
+        -9,
+        -3
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.22450624406337738,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8695059625212948
+    },
+    {
+      "split": "test",
+      "patient_id": "P095",
+      "frame_id": "P095/seq0/000080",
+      "lever_arm_px": 66.59364313839514,
+      "cos_gradient_vs_reference": -0.7729089570804738,
+      "angle_deg": 140.61583416856774,
+      "quality_at_pose": 0.31882703920844496,
+      "quality_range": 0.24814325431299616,
+      "argmax_offset": [
+        -9,
+        -6
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.18031519651412964,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.7469373468673434
+    },
+    {
+      "split": "test",
+      "patient_id": "P097",
+      "frame_id": "P097/seq0/000000",
+      "lever_arm_px": 36.821140904518245,
+      "cos_gradient_vs_reference": -0.9922034292561418,
+      "angle_deg": 172.84067605703305,
+      "quality_at_pose": 0.5541187802880362,
+      "quality_range": 0.20948838443793893,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.13482244312763214,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.7796285659582616
+    },
+    {
+      "split": "test",
+      "patient_id": "P097",
+      "frame_id": "P097/seq0/000014",
+      "lever_arm_px": 31.432533703777864,
+      "cos_gradient_vs_reference": -0.9985119985779903,
+      "angle_deg": 176.87396979074921,
+      "quality_at_pose": 0.5448913848482215,
+      "quality_range": 0.21162715069027593,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.1273030936717987,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.7863123407353476
+    },
+    {
+      "split": "test",
+      "patient_id": "P097",
+      "frame_id": "P097/seq0/000028",
+      "lever_arm_px": 19.700612588545358,
+      "cos_gradient_vs_reference": 0.5242113393277379,
+      "angle_deg": 58.38483383423374,
+      "quality_at_pose": 0.6541430199173605,
+      "quality_range": 0.06861416002992637,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.23778140544891357,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.7658635900916186
+    },
+    {
+      "split": "test",
+      "patient_id": "P097",
+      "frame_id": "P097/seq0/000042",
+      "lever_arm_px": 29.16120335911883,
+      "cos_gradient_vs_reference": 0.9963907953783181,
+      "angle_deg": 4.869384742768552,
+      "quality_at_pose": 0.6819586310952934,
+      "quality_range": 0.034944642248887825,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.37752583622932434,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8819031435853866
+    },
+    {
+      "split": "test",
+      "patient_id": "P097",
+      "frame_id": "P097/seq0/000056",
+      "lever_arm_px": 29.480320532799304,
+      "cos_gradient_vs_reference": 0.4841255903295287,
+      "angle_deg": 61.04480065954205,
+      "quality_at_pose": 0.664710757779223,
+      "quality_range": 0.06536317796297886,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.19729335606098175,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8704022988505747
+    },
+    {
+      "split": "val",
+      "patient_id": "P101",
+      "frame_id": "P101/seq0/000000",
+      "lever_arm_px": 53.28540002433488,
+      "cos_gradient_vs_reference": 0.9434393583026445,
+      "angle_deg": 19.362585812662676,
+      "quality_at_pose": 0.31332567098454767,
+      "quality_range": 0.04022200903468287,
+      "argmax_offset": [
+        -9,
+        6
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.4520992934703827,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.7512508934953538
+    },
+    {
+      "split": "val",
+      "patient_id": "P101",
+      "frame_id": "P101/seq0/000029",
+      "lever_arm_px": 52.40282124349163,
+      "cos_gradient_vs_reference": 0.09538454048658823,
+      "angle_deg": 84.52654713220251,
+      "quality_at_pose": 0.2786980283554148,
+      "quality_range": 0.020266709250043646,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.435622900724411,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.605643994211288
+    },
+    {
+      "split": "val",
+      "patient_id": "P101",
+      "frame_id": "P101/seq0/000058",
+      "lever_arm_px": 51.36256061486522,
+      "cos_gradient_vs_reference": 0.9957618683677384,
+      "angle_deg": 5.276893793310207,
+      "quality_at_pose": 0.3051513600012882,
+      "quality_range": 0.04218848791918184,
+      "argmax_offset": [
+        -9,
+        3
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.412148118019104,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.6987522281639929
+    },
+    {
+      "split": "val",
+      "patient_id": "P101",
+      "frame_id": "P101/seq0/000087",
+      "lever_arm_px": 52.228583496011765,
+      "cos_gradient_vs_reference": 0.8010783371331135,
+      "angle_deg": 36.76680030446008,
+      "quality_at_pose": 0.29958366404518644,
+      "quality_range": 0.05265378019650785,
+      "argmax_offset": [
+        -9,
+        -3
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.38395053148269653,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.6873065015479877
+    },
+    {
+      "split": "val",
+      "patient_id": "P101",
+      "frame_id": "P101/seq0/000116",
+      "lever_arm_px": 51.7916037827615,
+      "cos_gradient_vs_reference": 0.9179194173139271,
+      "angle_deg": 23.376214411635488,
+      "quality_at_pose": 0.3604439664172305,
+      "quality_range": 0.04784928426604168,
+      "argmax_offset": [
+        -9,
+        -6
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.6249397993087769,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.7398531117124082
+    },
+    {
+      "split": "val",
+      "patient_id": "P106",
+      "frame_id": "P106/seq0/000000",
+      "lever_arm_px": 60.31726449118627,
+      "cos_gradient_vs_reference": -0.06401419969591372,
+      "angle_deg": 93.67025305935961,
+      "quality_at_pose": 0.737242485307958,
+      "quality_range": 0.13293145213420943,
+      "argmax_offset": [
+        0,
+        0
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.2901272475719452,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.881245820196809
+    },
+    {
+      "split": "val",
+      "patient_id": "P106",
+      "frame_id": "P106/seq0/000036",
+      "lever_arm_px": 58.97664077336606,
+      "cos_gradient_vs_reference": -0.9710000902901114,
+      "angle_deg": 166.1678044547221,
+      "quality_at_pose": 0.7258856652805503,
+      "quality_range": 0.13039970660766487,
+      "argmax_offset": [
+        0,
+        -3
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.2742227017879486,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8912025981469099
+    },
+    {
+      "split": "val",
+      "patient_id": "P106",
+      "frame_id": "P106/seq0/000072",
+      "lever_arm_px": 57.93507421150187,
+      "cos_gradient_vs_reference": 0.9983676191927158,
+      "angle_deg": 3.27421705015887,
+      "quality_at_pose": 0.742322947734108,
+      "quality_range": 0.14429410189676362,
+      "argmax_offset": [
+        3,
+        -6
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.27970296144485474,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.845580605603245
+    },
+    {
+      "split": "val",
+      "patient_id": "P106",
+      "frame_id": "P106/seq0/000108",
+      "lever_arm_px": 57.024415719760896,
+      "cos_gradient_vs_reference": 0.8104954717905487,
+      "angle_deg": 35.85563136849644,
+      "quality_at_pose": 0.7403776105163989,
+      "quality_range": 0.12185298749632445,
+      "argmax_offset": [
+        0,
+        3
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.25790730118751526,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.9020373514431239
+    },
+    {
+      "split": "val",
+      "patient_id": "P106",
+      "frame_id": "P106/seq0/000144",
+      "lever_arm_px": 50.16134261618787,
+      "cos_gradient_vs_reference": 0.887313162178517,
+      "angle_deg": 27.462462076176443,
+      "quality_at_pose": 0.7182414003538533,
+      "quality_range": 0.09957674218459167,
+      "argmax_offset": [
+        0,
+        3
+      ],
+      "argmax_on_edge": false,
+      "smoothness": 0.25917184352874756,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.9401899673493618
+    },
+    {
+      "split": "test",
+      "patient_id": "P108",
+      "frame_id": "P108/seq0/000000",
+      "lever_arm_px": 43.927074418384656,
+      "cos_gradient_vs_reference": -0.9293596366957125,
+      "angle_deg": 158.33521310161262,
+      "quality_at_pose": 0.1767962659554173,
+      "quality_range": 0.08900538856506707,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.1407500058412552,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.7125367286973555
+    },
+    {
+      "split": "test",
+      "patient_id": "P108",
+      "frame_id": "P108/seq0/000021",
+      "lever_arm_px": 41.80909034073882,
+      "cos_gradient_vs_reference": -0.9087450749951754,
+      "angle_deg": 155.33250220471544,
+      "quality_at_pose": 0.17799909289371127,
+      "quality_range": 0.08829023586904602,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.12714943289756775,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.6355376072690561
+    },
+    {
+      "split": "test",
+      "patient_id": "P108",
+      "frame_id": "P108/seq0/000042",
+      "lever_arm_px": 40.17163582000697,
+      "cos_gradient_vs_reference": -0.6357587978202006,
+      "angle_deg": 129.47628582857357,
+      "quality_at_pose": 0.1728552094011585,
+      "quality_range": 0.02542822944410769,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.13433171808719635,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.7422622397298818
+    },
+    {
+      "split": "test",
+      "patient_id": "P108",
+      "frame_id": "P108/seq0/000063",
+      "lever_arm_px": 41.24609149834508,
+      "cos_gradient_vs_reference": 0.9587426099912624,
+      "angle_deg": 16.515551646846742,
+      "quality_at_pose": 0.19093877126985345,
+      "quality_range": 0.04470182840488049,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.18123522400856018,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8003157063930545
+    },
+    {
+      "split": "test",
+      "patient_id": "P108",
+      "frame_id": "P108/seq0/000084",
+      "lever_arm_px": 41.82213224740573,
+      "cos_gradient_vs_reference": 0.21385478451745119,
+      "angle_deg": 77.65165129195287,
+      "quality_at_pose": 0.1769153164629192,
+      "quality_range": 0.043303981840617956,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.12971678376197815,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.7780392156862745
+    },
+    {
+      "split": "test",
+      "patient_id": "P109",
+      "frame_id": "P109/seq0/000000",
+      "lever_arm_px": 46.399648530429694,
+      "cos_gradient_vs_reference": -0.4606269169819044,
+      "angle_deg": 117.42756871067235,
+      "quality_at_pose": 0.2578074777167706,
+      "quality_range": 0.08863973306382589,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.2126995325088501,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8680272108843538
+    },
+    {
+      "split": "test",
+      "patient_id": "P109",
+      "frame_id": "P109/seq0/000028",
+      "lever_arm_px": 44.15567746885757,
+      "cos_gradient_vs_reference": 0.0705348945296346,
+      "angle_deg": 85.95528964070918,
+      "quality_at_pose": 0.2623171109839539,
+      "quality_range": 0.09376800709852387,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.45955389738082886,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8129704690214244
+    },
+    {
+      "split": "test",
+      "patient_id": "P109",
+      "frame_id": "P109/seq0/000056",
+      "lever_arm_px": 43.07591771134766,
+      "cos_gradient_vs_reference": -0.9101769364311258,
+      "angle_deg": 155.52981429153238,
+      "quality_at_pose": 0.2796823330450788,
+      "quality_range": 0.09428868067094731,
+      "argmax_offset": [
+        -9,
+        -6
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.33733370900154114,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8375863104172921
+    },
+    {
+      "split": "test",
+      "patient_id": "P109",
+      "frame_id": "P109/seq0/000084",
+      "lever_arm_px": 42.469255389115624,
+      "cos_gradient_vs_reference": -0.3962134717403943,
+      "angle_deg": 113.34167669929786,
+      "quality_at_pose": 0.3078831682622042,
+      "quality_range": 0.05232612750846716,
+      "argmax_offset": [
+        -9,
+        -6
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.3461748957633972,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8554807103490508
+    },
+    {
+      "split": "test",
+      "patient_id": "P109",
+      "frame_id": "P109/seq0/000112",
+      "lever_arm_px": 43.16417651741152,
+      "cos_gradient_vs_reference": 0.24411774975837114,
+      "angle_deg": 75.87029851329592,
+      "quality_at_pose": 0.2895464461826728,
+      "quality_range": 0.034232503739999254,
+      "argmax_offset": [
+        -9,
+        -9
+      ],
+      "argmax_on_edge": true,
+      "smoothness": 0.3717997968196869,
+      "visible_at_pose": 1.0,
+      "dice_at_pose": 0.8900255754475703
+    }
+  ]
+}

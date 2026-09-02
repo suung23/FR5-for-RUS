@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+"""The two drawn figures of the lateral-instruction manuscript.
+
+Figure 1 is a schematic: which probe axes leave the imaging plane invariant, and
+how the lateral instruction is read off one frame. Figure 2 is a qualitative
+strip showing the same frame at three lateral displacements, including one
+inside the band where the instruction is no longer trustworthy.
+
+The quantitative figures (agreement, validity curve) are produced by
+scripts/lateral_instruction.py; this file draws only what has to be drawn.
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import math
+from pathlib import Path
+
+import numpy as np
+
+from _common import REPO_ROOT  # noqa: F401  (sys.path bootstrap)
+
+from rus_perception.control.features import FeatureExtractionConfig, extract_control_state
+from rus_perception.control.roi import RoiConfig, build_roi_mask
+from rus_perception.data.io import load_grayscale, load_mask, resize_image, resize_mask
+from rus_perception.data.manifest import load_manifest
+from rus_perception.inference.predictor import Predictor, PredictorConfig
+
+logger = logging.getLogger(__name__)
+
+INK = "#101a20"
+INK_SOFT = "#4a5c66"
+MUTED = "#9aa8b0"
+ACCENT = "#0b6f7a"
+CRIT = "#a32316"
+GT_COLOR = "#16B9D4"
+PRED_COLOR = "#E17C32"
+
+
+def _style():
+    import matplotlib.pyplot as plt
+
+    plt.rcParams.update({
+        "figure.facecolor": "white", "axes.facecolor": "white",
+        "savefig.facecolor": "white", "font.family": "sans-serif",
+        "font.sans-serif": ["DejaVu Sans"], "text.color": INK,
+        "pdf.fonttype": 42, "ps.fonttype": 42, "svg.fonttype": "none",
+    })
+
+
+def figure_axes_and_instruction(roi: np.ndarray):
+    """(a) which axes preserve the plane, (b) how the instruction is read."""
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import FancyArrow, Rectangle
+
+    _style()
+    figure, (left, right) = plt.subplots(1, 2, figsize=(7.4, 2.9),
+                                         gridspec_kw={"width_ratios": [1.05, 1]})
+
+    # ---- (a) axis decomposition --------------------------------------
+    left.set_xlim(0, 10); left.set_ylim(0, 8); left.axis("off")
+    left.add_patch(Rectangle((3.5, 5.6), 3.0, 1.0, facecolor="#dfe8ec",
+                             edgecolor=INK_SOFT, lw=0.9))
+    left.text(5.0, 6.1, "probe", ha="center", va="center", fontsize=8.5, color=INK)
+    # imaging plane, drawn as the sector the probe fills
+    left.fill([5.0, 2.6, 7.4], [5.6, 0.9, 0.9], color="#f0f4f6", edgecolor=INK_SOFT, lw=0.8)
+    left.text(5.0, 2.1, "imaging plane", ha="center", fontsize=8, color=INK_SOFT)
+
+    left.add_patch(FancyArrow(5.0, 4.6, 2.0, 0, width=0.055, head_width=0.30,
+                              head_length=0.42, color=ACCENT, length_includes_head=True))
+    left.add_patch(FancyArrow(5.0, 4.6, -2.0, 0, width=0.055, head_width=0.30,
+                              head_length=0.42, color=ACCENT, length_includes_head=True))
+    left.text(7.2, 4.95, "$v_x$", fontsize=10, color=ACCENT, ha="center", fontweight="bold")
+    left.text(7.25, 4.28, "in plane", fontsize=7.4, color=ACCENT, ha="center")
+
+    left.add_patch(FancyArrow(5.0, 6.9, 1.15, 0.62, width=0.045, head_width=0.26,
+                              head_length=0.36, color=MUTED, length_includes_head=True))
+    left.text(6.6, 7.55, "$v_y$", fontsize=10, color=MUTED, ha="center")
+    left.text(2.5, 7.55, "$\\omega_z$", fontsize=10, color=MUTED, ha="center")
+    left.annotate("", xy=(3.05, 7.2), xytext=(2.0, 6.75),
+                  arrowprops=dict(arrowstyle="->", color=MUTED, lw=1.3,
+                                  connectionstyle="arc3,rad=0.5"))
+    left.text(4.55, 7.9, "leave the plane", fontsize=7.4, color=MUTED, ha="center")
+    left.text(0.15, 0.25, "(a)", fontsize=10, fontweight="bold", color=INK)
+
+    # ---- (b) the instruction on one frame ----------------------------
+    right.imshow(roi, cmap="Greys", vmin=0, vmax=3, origin="upper")
+    right.set_xlim(0, 256); right.set_ylim(256, 0); right.axis("off")
+    ys, xs = np.nonzero(roi)
+    axis_x = xs.mean()
+    right.axvline(axis_x, color=INK, lw=1.1, ls=(0, (5, 3)), zorder=4)
+    right.text(axis_x + 4, 16, "beam axis $A$", fontsize=7.6, color=INK, va="top")
+
+    lumen = (86.0, 108.0)
+    theta = np.linspace(0, 2 * np.pi, 200)
+    right.fill(lumen[0] + 30 * np.cos(theta), lumen[1] + 21 * np.sin(theta),
+               facecolor="#12313a", edgecolor=GT_COLOR, lw=1.4, zorder=5)
+    right.plot(*lumen, marker="o", ms=5, mfc=GT_COLOR, mec="white", mew=1.0, zorder=7)
+    right.text(lumen[0], lumen[1] - 26, "lumen", fontsize=7.6, color=GT_COLOR,
+               ha="center", va="bottom", zorder=7)
+    right.annotate("", xy=(axis_x, 152), xytext=(lumen[0], 152), zorder=8,
+                   arrowprops=dict(arrowstyle="-|>", color=CRIT, lw=1.7))
+    right.text((axis_x + lumen[0]) / 2, 146, "$e = A - c$", fontsize=9.5, color=CRIT,
+               ha="center", va="bottom", zorder=8)
+    right.text(4, 246, "(b)", fontsize=10, fontweight="bold", color=INK)
+
+    figure.tight_layout(w_pad=1.4)
+    return figure
+
+
+def figure_examples(predictor, feature_config, roi, image, truth, axis, targets):
+    """One frame at three lateral displacements, with the instruction drawn."""
+    import cv2
+    import matplotlib.pyplot as plt
+
+    _style()
+    gy, gx = np.nonzero(truth)
+    natural = axis - float(gx.mean())
+    figure, axes = plt.subplots(1, len(targets), figsize=(7.4, 2.85))
+
+    for ax, target in zip(axes, targets):
+        dx = int(round(natural - target))
+        matrix = np.float32([[1, 0, dx], [0, 1, 0]])
+        frame = cv2.warpAffine(image, matrix, (256, 256), flags=cv2.INTER_LINEAR,
+                               borderMode=cv2.BORDER_REPLICATE)
+        moved = cv2.warpAffine(truth, matrix, (256, 256), flags=cv2.INTER_NEAREST,
+                               borderMode=cv2.BORDER_REPLICATE)
+        probability, _ = predictor.predict_probability(frame)
+        state = extract_control_state(probability, image=frame,
+                                      config=feature_config, roi_mask=roi)
+        prediction = np.asarray(state.binary_mask, np.uint8)
+        py, px = np.nonzero(prediction)
+        my, mx = np.nonzero(moved)
+        instruction = axis - float(px.mean())
+        true = axis - float(mx.mean())
+
+        ax.imshow(frame, cmap="gray", vmin=0, vmax=1, interpolation="antialiased")
+        for mask, colour, width, dashes in ((moved, GT_COLOR, 1.4, None),
+                                            (prediction, PRED_COLOR, 1.7, (3.2, 2.0))):
+            contours, _ = cv2.findContours((mask > 0).astype(np.uint8),
+                                           cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
+            for contour in contours:
+                points = contour.reshape(-1, 2)
+                if len(points) < 3:
+                    continue
+                closed = np.vstack([points, points[:1]])
+                line, = ax.plot(closed[:, 0], closed[:, 1], color=colour, lw=width, zorder=4)
+                if dashes:
+                    line.set_dashes(list(dashes))
+        ax.axvline(axis, color="white", lw=1.0, ls=(0, (5, 3)), zorder=5)
+        wrong = np.sign(instruction) != np.sign(true)
+        ax.annotate("", xy=(axis, 208), xytext=(float(px.mean()), 208), zorder=6,
+                    arrowprops=dict(arrowstyle="-|>", lw=2.0,
+                                    color=CRIT if wrong else "#5ce0a0"))
+        ax.set_title(f"$e$ = {true:+.1f} px", fontsize=9, color=INK, pad=5)
+        ax.text(0.5, -0.055,
+                f"instruction {instruction:+.1f} px" + ("   wrong way" if wrong else ""),
+                transform=ax.transAxes, ha="center", va="top", fontsize=7.8,
+                color=CRIT if wrong else INK_SOFT,
+                fontweight="bold" if wrong else "normal")
+        ax.set_xticks([]); ax.set_yticks([])
+        for spine in ax.spines.values():
+            spine.set_edgecolor("#c8d2d8"); spine.set_linewidth(0.6)
+
+    figure.tight_layout(w_pad=0.9)
+    return figure
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", default="configs/exp_seed43_retro.yaml")
+    parser.add_argument("--checkpoint", default="checkpoints/exp_seed43/best.pt")
+    parser.add_argument("--patient", default="P041")
+    parser.add_argument("--targets", type=float, nargs=3, default=[40, 13, 2])
+    parser.add_argument("--output-dir", type=Path,
+                        default=Path("experiments/lateral_instruction"))
+    parser.add_argument("--dpi", type=int, default=300)
+    args = parser.parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+    from rus_perception.utils.config import load_config
+    config = load_config(args.config)
+    size = tuple(int(v) for v in config.section("data")["image_size"])
+    roi_config = RoiConfig.from_dict(config.section("control").get("roi"))
+    roi = np.asarray(build_roi_mask(size, roi_config)) > 0
+    ys, xs = np.nonzero(roi)
+    axis = float(xs.mean())
+    feature_config = FeatureExtractionConfig.from_dict(
+        {"postprocess": config.section("postprocess"), **config.section("control")})
+    predictor = Predictor.from_checkpoint(
+        args.checkpoint, model_config=config.section("model"),
+        predictor_config=PredictorConfig(
+            input_size=size,
+            intensity_normalization=str(config.get("data.intensity_normalization")),
+            device=str(config.get("train.device", "auto")).replace("auto", "cuda"),
+            restore_original_size=False, roi=roi_config),
+        feature_config=feature_config)
+
+    data = config.section("data")
+    manifest = load_manifest(str(data["manifest"]), root=str(data["root"]))
+    records = sorted([r for r in manifest
+                      if r.patient_id == args.patient and r.mask_path],
+                     key=lambda r: r.frame_id)
+    if not records:
+        raise SystemExit(f"No labelled frame for {args.patient}.")
+    record = records[len(records) // 2]
+    image = np.asarray(resize_image(load_grayscale(str(manifest.resolve(record.image_path))),
+                                    size), np.float32)
+    truth = (np.asarray(resize_mask(load_mask(str(manifest.resolve(record.mask_path))),
+                                    size)) > 0.5).astype(np.uint8)
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    pairs = ((figure_axes_and_instruction(roi), "fig_axes"),
+             (figure_examples(predictor, feature_config, roi, image, truth,
+                              axis, args.targets), "fig_examples"))
+    for figure, stem in pairs:
+        for suffix in ("png", "pdf"):
+            figure.savefig(args.output_dir / f"{stem}.{suffix}", dpi=args.dpi,
+                           facecolor="white", bbox_inches="tight")
+        plt.close(figure)
+    logger.info("Wrote fig_axes and fig_examples to %s (frame %s)",
+                args.output_dir, record.frame_id)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

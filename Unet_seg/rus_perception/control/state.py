@@ -134,6 +134,12 @@ class ControlState:
     largest_component_ratio: float = 0.0
     border_contact_ratio: float = 0.0
     mean_boundary_entropy: float = 0.0
+    #: Distance from the mask centroid to the centroid of the darkness under and
+    #: around it, in mask radii. ``None`` when there is no lumen to measure
+    #: against. Unlike ``normalized_centroid_jump`` this compares the prediction
+    #: with the image, so a mask that is displaced in the same way on every
+    #: frame does not score as correct.
+    lumen_centroid_offset: Optional[float] = None
     segmentation_confidence: float = 0.0
     lumen_mean_intensity: Optional[float] = None
     surrounding_ring_mean_intensity: Optional[float] = None

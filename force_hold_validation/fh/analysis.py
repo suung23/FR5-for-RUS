@@ -16,6 +16,9 @@ import numpy as np
 #: 접촉 프로빙으로 인정하는 모드 문자열. 면내 회전 모드도 힘 루프는 같다.
 PROBING_MODES = ("contact_probing", "contact_probing_inplane")
 
+#: 이 이하의 데드밴드는 밴드가 아니라 수렴 허용오차로 본다 [N].
+CONVERGENCE_BAND_N = 0.10
+
 #: 교란 직전 기준을 잡는 구간 [s]. 조작자가 키를 누르는 것과 손이 주사기를
 #: 움직이는 것 사이의 지연을 덮을 만큼은 길고, 이전 사건의 잔여가 섞이지 않을
 #: 만큼은 짧아야 한다.
@@ -225,6 +228,10 @@ def settling_point(run: Run) -> float:
     밴드 **위**끝에 정착하므로 이 식이 맞지 않는다. 2026-09-02 실행은 전부 아래에서
     올라온 경우였고, 첫 1 초부터 정착값에 있었던 것이 그 증거다.
     """
+    # 밴드가 잡음 바닥 수준이면 조절기는 밴드 끝이 아니라 **목표로 수렴한다**
+    # (2026-09-02 probe.yaml: deadband 0.5 → 0.05). 그때는 정착점이 곧 목표다.
+    if run.band <= CONVERGENCE_BAND_N:
+        return run.target
     enter = float(run.meta.get("contact_probing_force_n", float("nan")))
     bottom = run.target - run.band
     if not math.isfinite(enter):

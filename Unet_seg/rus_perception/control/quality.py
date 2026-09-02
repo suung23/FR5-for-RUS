@@ -55,6 +55,8 @@ AGGREGATIONS: tuple[str, ...] = ("arithmetic", "geometric")
 #: even on frames where the temporal components are unavailable.
 QUALITY_COMPONENT_NAMES: tuple[str, ...] = (
     "segmentation_confidence",
+    "boundary_sharpness",
+    "lumen_centering",
     "mask_completeness",
     "lumen_contrast",
     "border_penalty",
@@ -76,6 +78,11 @@ class QualityConfig:
         area_tolerance: Half-width of the plateau around ``target_area_ratio``
             in which completeness stays near 1.
         contrast_reference: Lumen/surrounding contrast that scores 1.0.
+        boundary_entropy_scale: Mean boundary entropy that scores ``exp(-1)``.
+            Lower entropy means a crisper lumen edge, which is the image-side
+            evidence that the boundary was found rather than guessed.
+        centroid_offset_scale: Mask-to-darkness centroid offset, in mask radii,
+            that scores ``exp(-1)``.
         centroid_jump_scale: Normalized centroid jump that scores ``exp(-1)``.
         area_change_scale: Relative area change that scores ``exp(-1)``.
         border_penalty_scale: Border-contact ratio that scores ``exp(-1)``.
@@ -95,6 +102,11 @@ class QualityConfig:
     weights: dict[str, float] = field(
         default_factory=lambda: {
             "segmentation_confidence": 1.0,
+            # The two image-side terms default to 0 so that adding them does not
+            # silently redefine Q for every configuration written before they
+            # existed. A profile that wants them says so.
+            "boundary_sharpness": 0.0,
+            "lumen_centering": 0.0,
             "mask_completeness": 1.0,
             "lumen_contrast": 0.5,
             "border_penalty": 1.0,
@@ -107,6 +119,8 @@ class QualityConfig:
     target_area_ratio: float = 0.15
     area_tolerance: float = 0.10
     contrast_reference: float = 0.35
+    boundary_entropy_scale: float = 0.30
+    centroid_offset_scale: float = 0.25
     centroid_jump_scale: float = 0.05
     area_change_scale: float = 0.25
     border_penalty_scale: float = 0.15
@@ -131,6 +145,8 @@ class QualityConfig:
             "target_area_ratio",
             "area_tolerance",
             "contrast_reference",
+            "boundary_entropy_scale",
+            "centroid_offset_scale",
             "centroid_jump_scale",
             "area_change_scale",
             "border_penalty_scale",
@@ -212,6 +228,9 @@ def compute_control_quality(
     normalized_centroid_jump: Optional[float] = None,
     relative_area_change: Optional[float] = None,
     config: Optional[QualityConfig] = None,
+    *,
+    mean_boundary_entropy: Optional[float] = None,
+    lumen_centroid_offset: Optional[float] = None,
 ) -> QualityResult:
     """Compute the control-quality score from already-extracted features.
 
@@ -230,6 +249,15 @@ def compute_control_quality(
         normalized_centroid_jump: Centroid displacement in normalized units.
         relative_area_change: Relative area change against the previous frame.
         config: Weights and scales.
+        mean_boundary_entropy: Mean normalized entropy on the mask boundary.
+        lumen_centroid_offset: Mask-to-darkness centroid offset, in mask radii.
+
+    Note:
+        The two image-side inputs are keyword-only and appended after ``config``
+        rather than grouped with the other image features. Inserting them in
+        subject order would have silently re-bound every existing positional
+        call -- ``compute_control_quality(0.9, 0.15, 1.0, 0.0, 0.4, 0.9, ...)``
+        would have started reading its temporal arguments as boundary entropy.
 
     Returns:
         A :class:`QualityResult` in ``[0, 1]``.
@@ -245,6 +273,14 @@ def compute_control_quality(
         "border_penalty": _decay(float(border_contact_ratio), config.border_penalty_scale),
     }
 
+    if mean_boundary_entropy is not None:
+        components["boundary_sharpness"] = _decay(
+            float(mean_boundary_entropy), config.boundary_entropy_scale
+        )
+    if lumen_centroid_offset is not None:
+        components["lumen_centering"] = _decay(
+            float(lumen_centroid_offset), config.centroid_offset_scale
+        )
     if lumen_surrounding_contrast is not None:
         components["lumen_contrast"] = float(
             min(1.0, max(0.0, lumen_surrounding_contrast / config.contrast_reference))

@@ -1,0 +1,54 @@
+# Retrospective, image-first control quality.
+#
+# Two changes of intent relative to exp_seed43_qfix.yaml. Same checkpoint, same
+# data, nothing retrained.
+#
+# 1. Temporal terms are switched off.
+#    PFUS1 is archived static-exam footage. Nobody's hand and no robot moved in
+#    response to what the image showed, so frame-to-frame agreement here
+#    measures the smoothness of a recording, not the stability of a control
+#    loop. Scoring it would credit Q for a property the deployment setting has
+#    not yet been asked to produce. temporal_iou, centroid_stability and
+#    area_stability therefore carry weight 0 *for this analysis only* -- they
+#    return when the loop drives the probe.
+#
+# 2. Q is weighted toward what the image says, not what the mask says.
+#    Q exists to judge whether a frame is a usable observation. Whether the
+#    network segmented it competently is taken as an assumption of the study,
+#    not something Q re-derives from the mask's own shape: mask-geometry terms
+#    (component_quality, and mask_completeness beyond a domain check) can only
+#    restate the prediction back to itself. The terms that consult the
+#    ultrasound carry 4.5 of the 5.0 active weight.
+#
+# New terms, both image-side:
+#   boundary_sharpness  exp(-mean_boundary_entropy / 0.30). Low entropy on the
+#       mask boundary means the lumen edge was found in the image rather than
+#       guessed. The feature was already computed and had never been scored.
+#   lumen_centering     exp(-lumen_centroid_offset / 0.25), where the offset is
+#       the distance from the mask centroid to the centroid of the darkness
+#       under and around it, in mask radii. Every other centroid term in Q
+#       compares the prediction with its own past and so cannot see a mask that
+#       is displaced the same way on every frame; this one compares it with the
+#       image.
+#
+# segmentation_confidence is retained at weight 1.0 by request. Note that it
+# measured Spearman rho -0.545 (val) and -0.344 (test) against Dice, i.e. it
+# ranked inverted on both cohorts, and sits at 0.996 +/- 0.001. Its behaviour
+# under this profile is reported in experiments/quality_retro/.
+defaults: exp_seed43_qfix.yaml
+experiment:
+  name: exp_seed43_retro
+  output_dir: runs/exp_seed43_retro
+control:
+  quality:
+    weights:
+      segmentation_confidence: 1.0
+      boundary_sharpness: 1.5
+      lumen_centering: 1.5
+      lumen_contrast: 1.5
+      mask_completeness: 0.5
+      border_penalty: 0.0
+      component_quality: 0.0
+      temporal_iou: 0.0
+      centroid_stability: 0.0
+      area_stability: 0.0

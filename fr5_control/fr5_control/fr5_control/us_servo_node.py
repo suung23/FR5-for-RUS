@@ -22,6 +22,7 @@ from __future__ import annotations
 import math
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from geometry_msgs.msg import Pose, TransformStamped, WrenchStamped
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
@@ -441,14 +442,27 @@ def main(args=None) -> None:
     try:
         node = UsServoNode()
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
+        # launch 아래의 Ctrl-C 는 후자로 온다 (us_diff_ik_node.main 의 주석 참조).
+        # 종료 절차 자체는 아래 finally 가 하므로 예전에도 홈잉은 돌았다 — 다만
+        # 그 뒤에 트레이스백이 붙어, 정상 종료가 매번 사고처럼 보였다.
         pass
     finally:
-        if node is not None:
-            node.shutdown()
-            node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        # 정리 중에 신호가 한 번 더 오면 (Ctrl-C 연타, 또는 launch 의 신호와
+        # 터미널의 신호가 겹칠 때) KeyboardInterrupt 가 **이 블록 안에서** 뜬다.
+        # except 절은 이미 지나갔으므로 그때는 아무도 안 잡고, 정상 종료가 다시
+        # 트레이스백으로 끝난다. 정리 도중의 중단은 그 자체로 소식이 아니다.
+        #
+        # 홈잉이 중간에 끊길 수는 있다. 그래도 ``shutdown`` 자신의 finally 가
+        # 백엔드를 닫으므로 링크는 남지 않고, 접촉 중이면 애초에 홈잉을 안 한다.
+        try:
+            if node is not None:
+                node.shutdown()
+                node.destroy_node()
+            if rclpy.ok():
+                rclpy.shutdown()
+        except KeyboardInterrupt:
+            pass
 
 
 if __name__ == "__main__":

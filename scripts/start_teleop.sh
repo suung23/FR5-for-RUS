@@ -19,12 +19,17 @@
 # The force bridge is not started here. It is a separate concern (it needs
 # dialout for the PX6D) and belongs in its own terminal so its log is readable:
 #
-#   sg dialout -c "ros2 run fr5_control telemetry_bridge --ros-args \
+#   sg dialout -c "LD_LIBRARY_PATH=$LD_LIBRARY_PATH \
+#     ros2 run fr5_control telemetry_bridge --ros-args \
 #     --params-file $(ros2 pkg prefix fr5_control)/share/fr5_control/config/probe.yaml \
 #     -p bridge.px6d_port:=/dev/ttyACM0"
 #
 # The parameter file is required — the bridge derives its stack geometry from
 # probe.yaml and refuses to start without it.
+#
+# LD_LIBRARY_PATH has to be handed back in: sg is setuid-root, so the dynamic
+# linker clears LD_* from its environment and rclpy inside the wrapped shell
+# cannot find librcl_action.so. Nothing else about the ROS environment is lost.
 set -uo pipefail
 
 cd "$(dirname "$0")/.."

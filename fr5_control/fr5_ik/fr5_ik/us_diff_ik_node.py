@@ -20,6 +20,7 @@ import math
 import numpy as np
 import rclpy
 from geometry_msgs.msg import PoseStamped, Twist, WrenchStamped
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from scipy.spatial.transform import Rotation
@@ -28,7 +29,7 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Bool, Float32MultiArray, Float64, String
 
 from fr5_ik.dls_solver import DlsSolver
-from fr5_ik.force_regulator import ForceRegulator
+from fr5_ik.force_regulator import ForceRegulator, RegulatorOutput
 from fr5_ik.probing_mode import CONTACT_PROBING, ProbingModeSwitch
 from fr5_ik.teleop_frame import TeleopFrameMapper
 
@@ -115,6 +116,9 @@ class UsDiffIkNode(Node):
         )
         self.regulator = self._build_regulator()
         self.regulator_reason = ""
+        self.force_hold_enabled = bool(
+            self.get_parameter("contact_control.force_hold_enabled").value
+        )
         self.require_calibration = bool(
             self.get_parameter("contact_control.require_valid_calibration").value
         )
@@ -124,6 +128,8 @@ class UsDiffIkNode(Node):
         # 접촉 판정 보류를 한 번만 알리기 위한 표시. 렌치는 50 Hz 로 들어온다.
         self._mode_gate_warned = False
         self._calibration_blocked_announced = False
+        #: 보상 전 렌치를 버리고 있다는 사실을 한 번만 알리기 위한 표시.
+        self._raw_wrench_warned = False
 
         self.contact_probing_enabled = bool(
             self.get_parameter("teleop.contact_probing_enabled").value
@@ -173,6 +179,8 @@ class UsDiffIkNode(Node):
         self.last_joint_time = None
         self.retreat_started = None
         self._retreat_announced = False
+        #: 시간 상한 도달을 이미 알렸는가. 이것도 한 번만 찍는다 — 아래 참조.
+        self._retreat_gave_up = False
         self.rot_stylus = None
         self.last_stylus_time = None
         self._warned_no_stylus = False
@@ -305,6 +313,13 @@ class UsDiffIkNode(Node):
                f"{self.mode_switch.release_confirm_s:.1f} s"
                if self.mode_switch.reversible else " · 이탈 없음(단방향)")
         )
+        if not self.force_hold_enabled:
+            # 기동부터 대조군이면 화면에 크게 말한다. 본 시험을 이 상태로 받으면
+            # 파일은 멀쩡해 보이는데 제어가 없던 것이고, 그것은 나중에 알기 어렵다.
+            self.get_logger().warn(
+                "⚠️ 힘 유지가 꺼진 채로 기동한다 (contact_control.force_hold_enabled=false) — "
+                "대조군이다. z 를 잡지 않고 힘을 기록만 한다."
+            )
         if self.mode_switch.reversible and (
             self.regulator.target_force_n - self.regulator.deadband_n
             <= self.mode_switch.release_force_n
@@ -403,6 +418,15 @@ class UsDiffIkNode(Node):
         self.declare_parameter("contact_control.deadband_n", 0.5)
         self.declare_parameter("contact_control.admittance_b_z", 1000.0)
         self.declare_parameter("contact_control.retreat_speed_m_s", 0.005)
+        # 힘 유지를 켤지. **거짓이 위약(placebo) 대조군이다** — 접촉 모드도, 속도
+        # 상한도, 안전층도 그대로 두고 z 조절만 놓는다. 프로브는 그 자리에 선 채
+        # 팬텀이 변하는 대로 힘이 흐르고, 그것이 "제어가 없었다면 얼마였나" 다.
+        #
+        # 이 값 없이는 교란 시험이 무엇을 보였는지 말할 수 없다. 힘이 목표 근처에
+        # 머문 것이 제어 덕분인지, 애초에 교란이 그 정도였을 뿐인지 구별되지 않는다.
+        # 대조군을 같은 접촉점·같은 주입량으로 이어서 받아야 그 차이가 곧 제어의
+        # 기여가 된다.
+        self.declare_parameter("contact_control.force_hold_enabled", True)
         # 접촉 프로빙에서 조작자의 병진·회전을 그대로 통과시킬지. 기본은 거짓 —
         # 로봇이 힘만 잡고 나머지는 정지한다. policy 가 영상축을 맡기 전까지
         # 조작자가 미끄러뜨리며 쓰고 싶으면 켠다.
@@ -624,7 +648,37 @@ class UsDiffIkNode(Node):
             self.contact_force_mag if self.normal_force >= 0.0 else -self.contact_force_mag
         )
 
+    #: 브리지가 중력보상을 실었을 때 붙이는 프레임 이름의 꼬리.
+    #: 원값은 ``…_ft_sensor`` 로 나가므로 이 하나로 둘이 갈린다.
+    COMPENSATED_FRAME_SUFFIX = "_probe"
+
     def _on_wrench(self, msg: WrenchStamped) -> None:
+        # **이 메시지가 보상된 것인지 메시지 자신에게 묻는다.**
+        #
+        # 브리지는 보상할 수 없을 때 원값을 같은 토픽으로 낸다. 예전에는 그것을
+        # 아래 교정 게이트(calibration_valid 토픽)가 막는다고 보았는데, 둘은 서로
+        # **다른 토픽**이라 잠깐 어긋날 수 있다. 게이트가 열리는 순간 구독 큐에
+        # 남아 있던 보상 전 표본이 그대로 판정에 들어간다.
+        #
+        # 2026-09-04 02:15:09 에 그것이 일어났다. 교정 유효 20 ms 뒤에 F 10.52 N
+        # 으로 접촉 전환이 걸렸는데, 같은 자세의 보상값은 0.71 N 이었다 — 10.5 는
+        # 마운트·프로브 자중, 즉 보상 전 값이다. 게다가 그 값은 한계 5.0 N 을
+        # 넘으므로 조절기의 첫 분기가 **강제 후퇴**다. 아무것도 닿지 않은 세션
+        # 시작에 로봇이 움직였고, has_contacted 걸쇠까지 남았다.
+        #
+        # 프레임 이름은 그 메시지와 함께 온다. 토픽 사이의 시간차가 끼어들 자리가
+        # 없다.
+        if not msg.header.frame_id.endswith(self.COMPENSATED_FRAME_SUFFIX):
+            if not self._raw_wrench_warned:
+                self._raw_wrench_warned = True
+                self.get_logger().warn(
+                    f"보상 전 렌치를 버린다 (frame_id={msg.header.frame_id!r}) — "
+                    "자중이 실려 있어 접촉과 구분되지 않는다. 교정이 실리면 브리지가 "
+                    f"…{self.COMPENSATED_FRAME_SUFFIX} 프레임으로 낸다."
+                )
+            return
+        self._raw_wrench_warned = False
+
         now = self.get_clock().now()
         previous = self.wrench_stamp
         self.normal_force = self.normal_sign * msg.wrench.force.z
@@ -781,6 +835,23 @@ class UsDiffIkNode(Node):
 
         touched = {p.name: p.value for p in params if p.name in self.REGULATOR_PARAMS}
         switched = {p.name: p.value for p in params if p.name in self.SWITCH_PARAMS}
+
+        # 힘 유지 on/off 는 조절기를 다시 만들 필요가 없다. 대신 **로봇이 하는 일이
+        # 바뀌므로** 지나가는 줄로 두지 않는다 — 대조군을 켜 놓은 채 본 시험을
+        # 받으면 그 캡처는 조용히 쓸모가 없어지고, 파일만 봐서는 알기 어렵다.
+        for p in params:
+            if p.name != "contact_control.force_hold_enabled":
+                continue
+            self.force_hold_enabled = bool(p.value)
+            if self.force_hold_enabled:
+                self.get_logger().warn("힘 유지 켜짐 — z 를 로봇이 다시 잡는다")
+            else:
+                self.get_logger().warn(
+                    "⚠️ 힘 유지 꺼짐 (대조군) — z 를 놓는다. 프로브는 그 자리에 서고 "
+                    f"힘은 팬텀이 정하는 대로 흐른다. 한계 "
+                    f"{self.regulator.max_force_n:.1f} N 후퇴는 그대로 살아 있다."
+                )
+
         if not touched and not switched:
             return SetParametersResult(successful=True)
 
@@ -911,6 +982,7 @@ class UsDiffIkNode(Node):
         if self.retreat_started is None:
             self.retreat_started = now
             self._retreat_announced = False
+            self._retreat_gave_up = False
 
         elapsed = (now - self.retreat_started).nanoseconds / 1e9
         wrench_fresh = (
@@ -923,10 +995,24 @@ class UsDiffIkNode(Node):
         if wrench_fresh and self._control_force() < self.retreat_force:
             return None  # 접촉이 풀렸다
         if elapsed > self.max_retreat:
-            self.get_logger().error(
-                f"후퇴 시간 상한 {self.max_retreat} s 도달 — 정지한다. "
-                f"{'힘이 안 떨어진다' if wrench_fresh else 'wrench 도 두절이다'}."
-            )
+            # **한 번만 찍는다.** 여기서 None 을 내면 호출자는 속도 0 을 내고
+            # 돌아가지만 retreat_started 는 그대로 두므로, twist 가 돌아올 때까지
+            # 다음 주기에도 같은 가지로 들어온다. 예전에는 그때마다 error 를 찍어서
+            # 100 Hz 로 같은 줄이 쏟아졌다.
+            #
+            # 그게 왜 문제인가: 2026-09-04 에 touch_twist 가 장치를 못 잡고 죽었는데,
+            # 그 사실을 말하는 유일한 줄("No haptic devices found")이 몇 초 만에
+            # 수천 줄 밑으로 밀려났다. 조작자에게 남은 화면은 로봇이 무엇을 못 하는지
+            # 반복하는 문장뿐이고, **왜** 그런지는 스크롤 밖에 있었다.
+            #
+            # 로봇은 이 상태에서 이미 정지해 있다. 반복해서 알릴 새 소식이 없다.
+            if not self._retreat_gave_up:
+                self.get_logger().error(
+                    f"후퇴 시간 상한 {self.max_retreat} s 도달 — 정지한다. "
+                    f"{'힘이 안 떨어진다' if wrench_fresh else 'wrench 도 두절이다'}. "
+                    "twist 가 돌아올 때까지 이 자리에 선다 — 상류(touch_twist)를 보라."
+                )
+                self._retreat_gave_up = True
             return None
 
         if not self._retreat_announced:
@@ -989,7 +1075,21 @@ class UsDiffIkNode(Node):
             )
             return np.zeros(6)
 
-        out = self.regulator.update(self._control_force())
+        force = self._control_force()
+        out = self.regulator.update(force)
+
+        # 대조군: z 를 잡지 않는다.
+        #
+        # 조절기를 **부른 뒤에** 덮어쓴다. 그래야 한계 초과 판정이 대조군에서도
+        # 그대로 돌고, 넘었을 때는 조절기가 낸 강제 후퇴를 그대로 쓴다. 대조군은
+        # "제어를 안 한다" 이지 "안전층을 끈다" 가 아니다 — 팬텀에 물을 넣다 보면
+        # 힘은 조작자가 아니라 주사기가 올린다.
+        if not self.force_hold_enabled and force < self.regulator.max_force_n:
+            out = RegulatorOutput(
+                v_z=0.0,
+                reason=f"힘 유지 꺼짐 (대조군) — z 고정, 지금 {force:.3f} N",
+            )
+
         self.regulator_reason = out.reason
         self._last_v_z = float(out.v_z)
 
@@ -1097,6 +1197,7 @@ class UsDiffIkNode(Node):
             if self.retreat_started is not None:
                 self.get_logger().info("twist 복귀 — 후퇴 해제")
             self.retreat_started = None
+            self._retreat_gave_up = False
             self._force_hold_announced = False
             twist = self._clamp(self.twist_cmd) * self._hold_fade(now)
             twist = self._remap_twist(twist)
@@ -1150,15 +1251,30 @@ def main(args=None) -> None:
     try:
         node = UsDiffIkNode()
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
+        # 후자도 Ctrl-C 다. launch 아래에서는 SIGINT 를 rclpy 의 전역 처리기가 먼저
+        # 받아 컨텍스트를 내리고, 그러면 spin 은 KeyboardInterrupt 가 아니라
+        # ExternalShutdownException 을 낸다. 그것을 안 잡으면 **정상 종료 때마다**
+        # 트레이스백과 exit 1 이 나오고, launch 는 "process has died" 로 적는다.
+        #
+        # 조용한 종료가 목적이 아니다. 매번 나오는 트레이스백은 조작자에게
+        # 종료 로그를 읽지 않는 습관을 만들고, 그러면 진짜 종료 실패
+        # (us_servo 의 "종료 절차 예외", 접촉 중 홈잉 거부)가 같은 소음에 묻힌다.
         pass
     except RuntimeError as exc:
         print(f"[us_diff_ik_node] 기동 거부: {exc}")
     finally:
-        if node is not None:
-            node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        # 정리 중에 신호가 한 번 더 오면 (Ctrl-C 연타, 또는 launch 의 신호와
+        # 터미널의 신호가 겹칠 때) KeyboardInterrupt 가 **이 블록 안에서** 뜬다.
+        # except 절은 이미 지나갔으므로 그때는 아무도 안 잡고, 정상 종료가 다시
+        # 트레이스백으로 끝난다. 정리 도중의 중단은 그 자체로 소식이 아니다.
+        try:
+            if node is not None:
+                node.destroy_node()
+            if rclpy.ok():
+                rclpy.shutdown()
+        except KeyboardInterrupt:
+            pass
 
 
 if __name__ == "__main__":

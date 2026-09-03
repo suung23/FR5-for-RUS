@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 
@@ -37,7 +38,24 @@ def main(argv=None) -> int:
     parser.add_argument("--step-ml", type=float, default=None,
                         help="주사기 한 번의 부피 [mL]. 분석이 그대로 기록한다")
     parser.add_argument("--out-dir", default="runs")
+    parser.add_argument("--overwrite", action="store_true",
+                        help="같은 이름의 캡처가 있어도 덮어쓴다")
     args = parser.parse_args(argv if argv is not None else sys.argv[1:])
+
+    # 같은 이름이 이미 있으면 **찍기 전에** 멈춘다.
+    #
+    # save() 는 "w" 로 연다. 그래서 회차 번호를 재활용해 유지 구간만 다시 돌면
+    # 이전 회차의 같은 대역이 조용히 사라진다 — 30 초를 다시 받는 대신 30 초를
+    # 잃는다. 2026-09-04 에 4.0 N 만 깨끗한 유지였는데, 그 하나를 덮어쓰면
+    # 그날 쓸 수 있는 유일한 유지 구간이 없어진다.
+    #
+    # 로봇을 이미 접촉시킨 뒤에 알게 되면 늦으므로 인자 검사 단계에서 본다.
+    existing = os.path.join(args.out_dir, f"{args.label}_samples.csv")
+    if os.path.exists(existing) and not args.overwrite:
+        print(f"✗ {existing} 이 이미 있다. 덮어쓰지 않는다.", file=sys.stderr)
+        print("  다른 회차 이름을 쓰거나(예: run_repeat.sh 1h), "
+              "정말 버릴 것이면 --overwrite 를 준다.", file=sys.stderr)
+        return 2
 
     rclpy.init()
     node = Node("force_hold_capture")

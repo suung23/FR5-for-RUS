@@ -19,11 +19,11 @@
 # 인자 없이 띄우면 이렇게 돈다:
 #
 #   접근    freespace 상한 150 mm/s · 0.9 rad/s. 조작자가 여섯 축을 다 쥔다.
-#   ↓       접촉력 ‖F‖ 가 1 N 을 20 ms 넘으면
+#   ↓       접촉력 ‖F‖ 가 2 N 을 20 ms 넘으면
 #   접촉    상한 10 mm/s · 0.2 rad/s 로 내려가고, **로봇이 z 를 잡는다** —
-#           목표 ‖F‖ 3.0 ± 0.5 N. 나머지 다섯 축은 0 이다.
+#           목표 ‖F‖ 3.0 ± 0.05 N. 나머지 다섯 축은 0 이다.
 #           ⚠️ 목표가 진입 문턱보다 높다. 닿는 순간부터 조작자가 아무 지령도 주지
-#           않는 동안 로봇이 스스로 3 N 까지 파고든다 (처음 약 2 mm/s, 붙으며 감속).
+#           않는 동안 로봇이 스스로 3 N 까지 파고든다 (처음 약 0.33 mm/s, 붙으며 감속).
 #   ↓       ‖F‖ 가 0.3 N 아래로 0.5 s 지속되면
 #   접근    상한과 z 가 조작자에게 돌아온다. 세션을 다시 띄울 필요가 없다.
 #
@@ -32,7 +32,7 @@
 #
 # ⚠️ **힘 유지는 교정이 유효할 때만 열린다** (contact_control.require_valid_calibration).
 # 교정이 없으면 접촉 판정 자체가 보류되고 접근 상한을 유지한다 — 보상 전 렌치에는
-# 마운트·프로브 자중 10 N 이 자세에 따라 실려 있어 1 N 문턱과 구별되지 않는다.
+# 마운트·프로브 자중 10 N 이 자세에 따라 실려 있어 2 N 문턱과 구별되지 않는다.
 # 먼저 `--calib` 로 전자영점과 다자세 중력을 마쳐라.
 #
 # contact_probing:=false 는 이 층을 통째로 끈다. 전자저울 검증처럼 의도적으로 문턱을
@@ -199,6 +199,21 @@ fi
 # sg 로 감싸면 브리지가 그 자식이 되어 PID 추적이 한 단계 멀어지므로, 필요할 때만
 # 쓴다. 그래도 놓치는 경우는 종료 시 fr5_stop_all 이 경로로 잡는다.
 BRIDGE_CMD=(ros2 "${BRIDGE_ARGS[@]}")
+
+# sg 는 setuid-root(newgrp)다. 동적 링커는 setuid 실행 파일의 환경에서 LD_* 를
+# 지우므로, 감싼 안쪽 셸에는 LD_LIBRARY_PATH 가 **비어서** 도착한다. 그러면 rclpy
+# 가 librcl_action.so 를 못 찾고 브리지는 import 단계에서 죽는다 — 2026-09-03 에
+# 로그가 `ImportError: librcl_action.so` 트레이스백만 남기고 끝난 것이 이것이다.
+# 소켓이 안 열리니 GUI 는 NO TELEMETRY 를 보여주고, 원인은 브리지 코드 어디에도
+# 없다.
+#
+# 다른 ROS 변수(AMENT_PREFIX_PATH·PYTHONPATH·ROS_DISTRO)는 그대로 넘어오므로 이
+# 하나만 되돌린다. setup.bash 를 안쪽에서 다시 source 하지 않는 이유는 sg -c 가
+# /bin/sh 로 실행돼 bash 전용 setup 스크립트를 못 읽기 때문이다.
+sg_wrap() {
+  printf 'LD_LIBRARY_PATH=%q ' "${LD_LIBRARY_PATH:-}"
+  printf '%q ' "$@"
+}
 NEEDS_SG=0
 if (( USE_PX6D )) && { [[ ! -r "$PX6D_PORT" ]] || [[ ! -w "$PX6D_PORT" ]]; }; then
   NEEDS_SG=1
@@ -230,47 +245,87 @@ fi
 # 보게 된다. 화면에 찍힌 수와 거동이 다르면 그것이 곧 버그여야 한다.
 print_contact_summary() {
   local enabled="$1"
-  python3 - "$PROBE_YAML" "$enabled" <<'PY' 2>/dev/null || echo "  (probe.yaml 을 읽지 못했다 — 노드 기동 로그에서 확인하라)"
+  python3 - "$PROBE_YAML" "$enabled" <<'PY'
 import sys
 
 import yaml
 
 path, enabled = sys.argv[1], sys.argv[2] == "1"
-params = yaml.safe_load(open(path))["/**"]["ros__parameters"]
-teleop, control = params["teleop"], params["contact_control"]
-sensor, safety = params["ft_sensor"], params["safety"]
+
+# 한 줄씩 바로 찍지 않고 모아서 찍는다. 예전에는 print 를 그대로 흘려보내고
+# 실패하면 뒤에 "probe.yaml 을 읽지 못했다" 를 덧붙였는데, 중간에 키가 하나
+# 사라지면 **앞부분은 이미 화면에 나간 상태**에서 그 문장이 붙었다. 조작자는
+# 접촉 문턱은 읽었고 힘 유지 줄은 못 읽은 채 "읽지 못했다" 를 보게 되고, 무엇을
+# 못 읽었는지는 아무 데도 안 적힌다. 2026-09-02 에 safety 의 힘 한계 키가
+# max_normal_force_n → max_contact_force_n 으로 바뀐 뒤 실제로 그 상태였다.
+out = []
+
+
+def need(group, name, path_label):
+    """없으면 어느 키가 없는지 말하고 끝낸다. KeyError 트레이스백은 답이 아니다."""
+    try:
+        return group[name]
+    except (KeyError, TypeError):
+        print(f"  (probe.yaml 에 {path_label} 이 없다 — 스크립트와 설정이 어긋났다. "
+              "노드 기동 로그에서 실제 값을 확인하라)")
+        sys.exit(0)
+
+
+try:
+    params = yaml.safe_load(open(path))["/**"]["ros__parameters"]
+except (OSError, KeyError, yaml.YAMLError) as exc:
+    print(f"  (probe.yaml 을 읽지 못했다: {exc} — 노드 기동 로그에서 확인하라)")
+    sys.exit(0)
+
+teleop = params.get("teleop", {})
+control = params.get("contact_control", {})
+sensor = params.get("ft_sensor", {})
+safety = params.get("safety", {})
+
+# 2026-09-02 이후 이름. 법선력이 아니라 접촉력(‖F‖)에 걸리는 한계라서 이름이 바뀌었다.
+warn = need(safety, "warn_contact_force_n", "safety.warn_contact_force_n")
+limit = need(safety, "max_contact_force_n", "safety.max_contact_force_n")
 
 if not enabled:
-    print("  ⚠️ 접촉 전환·힘 유지 꺼짐 (contact_probing:=false) — 힘이 얼마가 되든")
-    print(f"     접근 상한을 유지한다. 남는 안전층은 힘 한계 "
-          f"{safety['max_normal_force_n']:.1f} N 뿐이다.")
+    out.append("  ⚠️ 접촉 전환·힘 유지 꺼짐 (contact_probing:=false) — 힘이 얼마가 되든")
+    out.append(f"     접근 상한을 유지한다. 남는 안전층은 힘 한계 {limit:.1f} N 뿐이다.")
+    print("\n".join(out))
     sys.exit(0)
 
 mode = sensor.get("contact_force_mode", "magnitude")
 label = "‖F‖" if mode == "magnitude" else "F_n"
-enter = teleop["contact_probing_force_n"]
+enter = need(teleop, "contact_probing_force_n", "teleop.contact_probing_force_n")
 release = teleop.get("contact_probing_release_n", 0.0)
-target, band = control["target_force_n"], control["deadband_n"]
+target = need(control, "target_force_n", "contact_control.target_force_n")
+band = need(control, "deadband_n", "contact_control.deadband_n")
+b_z = need(control, "admittance_b_z", "contact_control.admittance_b_z")
 
-print(f"  접촉 판정   {label} ≥ {enter:.1f} N "
-      f"({teleop['contact_probing_confirm_s'] * 1000:.0f} ms 연속)")
-print(f"  힘 유지     {target:.1f} ± {band:.1f} N   "
-      f"(경고 {safety['warn_normal_force_n']:.1f} · 한계 {safety['max_normal_force_n']:.1f} N)")
+out.append(f"  접촉 판정   {label} ≥ {enter:.1f} N "
+           f"({teleop.get('contact_probing_confirm_s', 0.0) * 1000:.0f} ms 연속)")
+out.append(f"  힘 유지     {target:.1f} ± {band:.2f} N   "
+           f"(경고 {warn:.1f} · 한계 {limit:.1f} N)")
+# 접근 속도까지 찍는다. B_z 는 거동을 가장 크게 바꾸는 값인데 이름만으로는
+# 무엇을 뜻하는지 안 보인다 — 조작자가 읽을 수 있는 단위는 mm/s 다.
+# 진입 문턱에서 목표까지 남은 오차가 첫 속도를 정한다.
+out.append(f"  접근 속도   B_z {b_z:.0f} N·s/m → 진입 직후 "
+           f"{1000.0 * (target - enter) / b_z:.2f} mm/s (붙으며 감속)")
 if release > 0.0:
-    print(f"  접근 복귀   {label} ≤ {release:.1f} N "
-          f"({teleop.get('contact_probing_release_confirm_s', 0.5):.1f} s 연속)")
+    out.append(f"  접근 복귀   {label} ≤ {release:.1f} N "
+               f"({teleop.get('contact_probing_release_confirm_s', 0.5):.1f} s 연속)")
 else:
-    print("  접근 복귀   없음 — 단방향 전환이다. 되돌리려면 세션을 새로 시작한다")
+    out.append("  접근 복귀   없음 — 단방향 전환이다. 되돌리려면 세션을 새로 시작한다")
 
 # 유지 밴드의 아래끝이 이탈 문턱 아래로 내려가면, 힘을 정상적으로 잡고 있는 동안에도
 # 이탈 조건이 성립한다. 노드도 기동할 때 경고하지만, 여기가 먼저 눈에 든다.
 if release > 0.0 and target - band <= release:
-    print(f"  ⚠️ 유지 밴드 아래끝 {target - band:.2f} N 이 복귀 문턱 {release:.2f} N "
-          "이하다 — 힘을 잡는 중에 모드가 오간다")
+    out.append(f"  ⚠️ 유지 밴드 아래끝 {target - band:.2f} N 이 복귀 문턱 {release:.2f} N "
+               "이하다 — 힘을 잡는 중에 모드가 오간다")
+# probe.yaml 에 없으면 us_diff_ik 의 선언 기본값(True)이 쓰인다.
 if not control.get("require_valid_calibration", True):
-    print("  ⚠️ 교정 게이트가 꺼져 있다 — 보상 안 된 값으로 힘을 잡는다")
+    out.append("  ⚠️ 교정 게이트가 꺼져 있다 — 보상 안 된 값으로 힘을 잡는다")
 else:
-    print("  (교정이 유효할 때만 열린다 — 아니면 접근 상한을 유지한다)")
+    out.append("  (교정이 유효할 때만 열린다 — 아니면 접근 상한을 유지한다)")
+print("\n".join(out))
 PY
 }
 
@@ -297,7 +352,7 @@ if (( DRY_RUN )); then
   echo
   echo "--- dry run, 실행하지 않는다 ---"
   if (( NEEDS_SG )); then
-    echo "  브리지: sg dialout -c \"${BRIDGE_CMD[*]}\"   > $BRIDGE_LOG"
+    echo "  브리지: sg dialout -c \"$(sg_wrap "${BRIDGE_CMD[@]}")\"   > $BRIDGE_LOG"
   else
     echo "  브리지: ${BRIDGE_CMD[*]}   > $BRIDGE_LOG"
   fi
@@ -318,7 +373,7 @@ fi
 mkdir -p "$(dirname "$BRIDGE_LOG")"
 : > "$BRIDGE_LOG"
 if (( NEEDS_SG )); then
-  sg dialout -c "$(printf '%q ' "${BRIDGE_CMD[@]}")" >>"$BRIDGE_LOG" 2>&1 &
+  sg dialout -c "$(sg_wrap "${BRIDGE_CMD[@]}")" >>"$BRIDGE_LOG" 2>&1 &
 else
   "${BRIDGE_CMD[@]}" >>"$BRIDGE_LOG" 2>&1 &
 fi
@@ -328,12 +383,31 @@ BRIDGE_PID=$!
 # 조작 중에 힘이 안 보이는 이유를 찾게 된다.
 for _ in $(seq 40); do
   grep -q "브리지 대기" "$BRIDGE_LOG" 2>/dev/null && break
+  # 죽었으면 10 초를 다 기다릴 이유가 없다. import 실패는 1 초 안에 끝난다.
+  kill -0 "$BRIDGE_PID" 2>/dev/null || break
   sleep 0.25
 done
 if grep -q "브리지 대기" "$BRIDGE_LOG" 2>/dev/null; then
+  # 센서 판정은 소켓보다 조금 늦게 나온다 (기동 로그상 100~200 ms). 여기서 안
+  # 기다리면 아래 grep 이 소켓 줄만 잡고, 조작자는 힘이 붙었는지 모른 채 넘어간다.
+  if (( USE_PX6D )); then
+    for _ in $(seq 20); do
+      grep -qE "PX6D 스트리밍 시작|PX6D 읽기 실패" "$BRIDGE_LOG" 2>/dev/null && break
+      sleep 0.25
+    done
+  fi
   grep -E "PX6D 스트리밍 시작|PX6D 읽기 실패|브리지 대기" "$BRIDGE_LOG" | sed 's/^.*\]: /  /' | head -3
 else
-  echo "  ⚠ 브리지가 10 초 안에 안 떴다 — $BRIDGE_LOG 를 볼 것"
+  # "로그를 봐라" 로 끝내지 않는다. 브리지가 못 뜨는 이유는 거의 항상 로그
+  # 마지막 몇 줄에 그대로 있고, 그것을 여기서 보여 주지 않으면 조작자는 세션이
+  # 이미 teleop 으로 넘어간 뒤에 힘이 없다는 사실부터 발견한다.
+  if kill -0 "$BRIDGE_PID" 2>/dev/null; then
+    echo "  ⚠ 브리지가 10 초 안에 소켓을 안 열었다 (프로세스는 살아 있다)"
+  else
+    echo "  ⚠ 브리지가 기동 중 죽었다"
+  fi
+  echo "     $BRIDGE_LOG 마지막 줄:"
+  tail -5 "$BRIDGE_LOG" 2>/dev/null | sed 's/^/       /'
 fi
 
 if (( USE_GUI )); then

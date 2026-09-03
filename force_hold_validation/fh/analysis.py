@@ -258,7 +258,15 @@ def hold_metrics(run: Run, settle_s: float = 3.0) -> dict:
     # 운전점 대비 오차. 목표 대비 편차는 대부분 데드밴드가 설계대로 낸 것이므로,
     # 추종이 얼마나 정확했는지는 이쪽으로 봐야 한다.
     point = settling_point(run)
+    # 유지 중 로봇이 간 거리. 팬텀은 유지 중에도 이완하며 물러나고 (2026-09-02
+    # r1: 30 s 에 0.49 → 0.38 N), 루프가 그것을 쫓았다면 이 값이 양수로 남는다.
+    # 0 인데 힘이 흘러내렸다면 지령이 실행되지 않은 것이다 — 그 구분이 이 열이다.
+    idx = np.where(mask)[0]
+    seg = axial_travel_series(run, int(idx[0]))[idx]
+    finite = np.isfinite(seg)
+    travel_mm = float(seg[finite][-1] * 1000.0) if finite.any() else None
     return {
+        "travel_mm": travel_mm,
         "samples": int(force.size),
         "settling_point_n": float(point),
         "error_vs_settling_n": float((force - point).mean()),
@@ -297,6 +305,20 @@ def disturbance_events(run: Run, settle_band_s: float = 0.5) -> list:
         peak_index = int(np.argmax(np.abs(error)))
         inside = np.abs(error) <= run.band
         settle_t = _first_sustained(t, inside, settle_band_s)
+
+        # 로봇 변위 — 힘 응답 옆에 두는 이유는, 힘이 돌아온 것이 로봇이 받아 낸
+        # 것인지 팬텀이 스스로 누운 것인지를 이 열 없이는 못 가르기 때문이다.
+        # 기준은 교란 직전이고, 양수 = 조직 쪽 전진, 음수 = 후퇴.
+        idx = np.where(window)[0]
+        base = (run.t >= onset - PRE_EVENT_S) & (run.t < onset)
+        ref = int(np.argmax(base)) if base.any() else int(idx[0])
+        seg = axial_travel_series(run, ref)[idx]
+        finite = np.isfinite(seg)
+        travel_mm = float(seg[finite][-1] * 1000.0) if finite.any() else None
+        peak_travel_mm = (
+            float(seg[finite][np.argmax(np.abs(seg[finite]))] * 1000.0)
+            if finite.any() else None
+        )
         out.append({
             "run": run.label,
             "target_n": run.target,
@@ -308,6 +330,8 @@ def disturbance_events(run: Run, settle_band_s: float = 0.5) -> list:
             "time_to_peak_s": float(t[peak_index] - onset),
             "settle_s": None if settle_t is None else float(settle_t - onset),
             "recovered": settle_t is not None,
+            "travel_mm": travel_mm,
+            "peak_travel_mm": peak_travel_mm,
             "window_s": float(t[-1] - t[0]),
         })
     return out
@@ -340,6 +364,24 @@ def probe_axis(run: Run, index: int) -> np.ndarray:
     # 회전행렬의 3열 = 도구 z 축이 베이스에서 보는 방향.
     return np.array([2 * (x * z + y * w), 2 * (y * z - x * w),
                      1 - 2 * (x * x + y * y)])
+
+
+def axial_travel_series(run: Run, ref: int) -> np.ndarray:
+    """기준 표본에서 본 프로브 축방향 이동의 시계열 [m].
+
+    양수 = 기준보다 조직 쪽으로 파고들었다. 자세가 없는 표본은 NaN 이다.
+
+    축은 **기준 시점 하나로 고정**한다. 표본마다 축을 다시 잡으면 프로브가
+    회전하는 실행에서 회전이 이동으로 섞여 든다 — 교란 응답처럼 축이 사실상
+    고정인 구간을 보는 용도이며, 힘과 나란히 그릴 "로봇이 얼마나 갔는가" 가
+    이것이다 (2026-09-03, 미소 지령 정체를 변위 부재로 잡아낸 뒤 상설화).
+    """
+    if run.tip.size == 0 or ref >= len(run.tip):
+        return np.full(run.t.size, np.nan)
+    axis = probe_axis(run, ref)
+    if axis is None or not np.all(np.isfinite(run.tip[ref])):
+        return np.full(run.t.size, np.nan)
+    return (run.tip - run.tip[ref]) @ axis
 
 
 def axial_travel(run: Run, start: int, stop: int):
@@ -636,10 +678,12 @@ def by_target(hold_rows: list) -> list:
         def pick(key):
             return np.array([r[key] for r in rows], float)
 
+        travels = [r.get("travel_mm") for r in rows if r.get("travel_mm") is not None]
         grouped.append({
             "target_n": target,
             "band_n": rows[0].get("band_n"),
             "settling_point_n": rows[0].get("settling_point_n"),
+            "travel_mm": float(np.mean(travels)) if travels else None,
             "error_vs_settling_n": float(
                 np.average(pick("error_vs_settling_n"), weights=weights)),
             "runs": len(rows),

@@ -260,3 +260,52 @@ def test_idle_epsilon_ignores_numerical_dust():
     run(limiter, robot, [IDLE_VEL_EPS_RAD_S / 2] * 6, 0.5)
     assert limiter.idle
     assert abs(limiter.commanded_deg[WRIST] - robot.actual[WRIST]) < 0.1
+
+
+# -- 접촉 프로빙: 의도를 추측하지 않는다 (2026-09-03) ------------------------
+
+def test_explicit_intent_executes_micro_velocities():
+    """힘 조절기의 미소 지령은 정지가 아니다 — 그대로 적분되어야 한다.
+
+    2026-09-03 팬텀 실측 (force_hold_validation A_t0p5_r1): 조절기가 0.1~0.3 mm/s
+    (관절 ~2~7e-4 rad/s) 전진을 18 초 동안 지령하는데, idle 문턱이 그것을 전부
+    "정지" 로 버려 팁이 2 µm 만 움직였고 힘이 목표 아래 0.1~0.3 N 에서 정체했다.
+    접촉 프로빙에서는 상위가 "0 = 정지" 를 보장하므로 크기 추측을 끈다.
+    """
+    micro = IDLE_VEL_EPS_RAD_S / 2          # teleop 이면 버려질 크기
+
+    limiter = make_limiter()
+    robot = LaggingRobot(START)
+    for _ in range(int(round(10.0 / DT))):
+        commanded = limiter.step(
+            vel(WRIST, micro), robot.actual, DT, explicit_intent=True
+        )
+        robot.follow(commanded, DT)
+
+    assert not limiter.idle
+    moved = robot.actual[WRIST] - START[WRIST]
+    expected = math.degrees(micro) * 10.0   # 10 초 x 문턱 절반 속도
+    assert moved == pytest.approx(expected, rel=0.05), (
+        f"미소 지령이 버려졌다: 기대 {expected:.3f}° 이동, 실측 {moved:.3f}°"
+    )
+
+
+def test_explicit_intent_still_idles_and_resyncs_on_exact_zero():
+    """정확히 0 이면 여전히 정지다 — 선행분 되감기도 그대로 산다.
+
+    추측을 껐다고 정지 거동까지 사라지면 안 된다. 조절기가 밴드에 들어
+    0 을 내는 순간부터는 teleop 정지와 똑같이 남은 선행분을 취소해야 한다.
+    """
+    limiter = make_limiter()
+    robot = LaggingRobot(START)
+    run(limiter, robot, vel(WRIST, MAX_VEL), 1.0)
+    stalled = list(robot.actual)            # 이 시점부터 로봇은 멈춰 있다
+    assert limiter.commanded_deg[WRIST] - stalled[WRIST] > 1.0
+
+    for _ in range(int(round(1.0 / DT))):
+        limiter.step([0.0] * 6, stalled, DT, explicit_intent=True)
+
+    assert limiter.idle
+    assert limiter.commanded_deg[WRIST] == pytest.approx(
+        stalled[WRIST], abs=RESYNC_DEADBAND_DEG
+    )

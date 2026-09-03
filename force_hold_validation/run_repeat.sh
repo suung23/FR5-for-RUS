@@ -19,16 +19,20 @@ NODE=/us_diff_ik_node
 TARGETS="0.5 1.0 1.5 2.0 3.0 4.0"
 HOLD_S=30
 STEP_ML=500
+# 캡처를 담을 디렉터리. 실험 하나를 통째로 새 디렉터리에 담으면, 분석이 예전
+# 실행과 섞이지 않는다 — run_force_hold_analysis.py 는 디렉터리 전체를 읽는다.
+OUT_DIR=runs
 
 REPEAT="${1:-}"
 [[ -z "$REPEAT" ]] && {
-  echo "사용법: $0 <회차> [--hold N] [--targets \"...\"] [--step-ml N]" >&2; exit 2; }
+  echo "사용법: $0 <회차> [--hold N] [--targets \"...\"] [--step-ml N] [--out-dir DIR]" >&2; exit 2; }
 shift
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --hold)    HOLD_S="$2"; shift 2 ;;
     --targets) TARGETS="$2"; shift 2 ;;
     --step-ml) STEP_ML="$2"; shift 2 ;;
+    --out-dir) OUT_DIR="$2"; shift 2 ;;
     *) echo "모르는 인자: $1" >&2; exit 2 ;;
   esac
 done
@@ -104,10 +108,10 @@ for tgt in $TARGETS; do
   esac
 
   python3 capture_force_hold.py --label "A_$(label "$tgt" "$REPEAT")" \
-      --run-type hold --seconds "$HOLD_S" || exit 1
+      --run-type hold --seconds "$HOLD_S" --out-dir "$OUT_DIR" || exit 1
   echo "  ── 교란: ${STEP_ML} mL 주입 3 회 · 회수 3 회. 시작할 때 i / w, 끝나면 q ──"
   python3 capture_force_hold.py --label "B_$(label "$tgt" "$REPEAT")" \
-      --run-type disturbance --step-ml "$STEP_ML" || exit 1
+      --run-type disturbance --step-ml "$STEP_ML" --out-dir "$OUT_DIR" || exit 1
   echo
 done
 echo "회차 $REPEAT 끝. 프로브를 떼고, 접촉 지점과 각도를 바꿔 다음 회차로."

@@ -8,6 +8,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+from fh.analysis import axial_travel_series
+
 INK = "#111111"
 ACCENT = "#17683a"
 BAND = "#17683a"
@@ -63,13 +65,24 @@ def force_traces(runs: list, stem: str = "fig1_force_traces") -> list:
         warn = run.meta.get("warn_force_n")
         if warn and run.force.max() > warn * 0.6:
             ax.axhline(warn, color=WARN, ls="-.", lw=0.8)
+        # 힘 옆에 로봇 변위를 겹친다. 힘이 평평한 것이 "로봇이 잡고 있다" 인지
+        # "로봇이 얼어 있는데 팬텀이 가만히 있다" 인지는 이 곡선 없이는 못 가른다
+        # (2026-09-03 — 미소 지령 정체가 정확히 그렇게 숨어 있었다).
+        probing_idx = np.where(probing)[0]
+        if probing_idx.size:
+            travel = axial_travel_series(run, int(probing_idx[0])) * 1000.0
+            if np.isfinite(travel).any():
+                twin = ax.twinx()
+                twin.plot(run.t, travel, color=INK, lw=0.6, ls="--", alpha=0.75)
+                twin.set_ylabel("travel [mm]", fontsize=7)
+                twin.grid(False)
         ax.set_title(f"{run.label} · target {run.target:.2f} N", fontsize=8)
         ax.set_ylabel("‖F‖ [N]")
         ax.set_xlabel("t [s]")
     for spare in range(len(usable), rows * columns):
         axes[spare // columns][spare % columns].axis("off")
-    figure.suptitle("Force held, per run. Shaded = deadband, dotted = syringe step",
-                    fontsize=9)
+    figure.suptitle("Force held (solid) and axial travel (dashed), per run. "
+                    "Shaded = deadband, dotted = syringe step", fontsize=9)
     figure.tight_layout()
     return _save(figure, stem)
 
@@ -111,13 +124,20 @@ def hold_quality(grouped: list, stem: str = "fig2_hold_quality") -> list:
 
 
 def disturbance(runs: list, events: list, stem: str = "fig3_disturbance") -> list:
-    """주사기 조작에 정렬한 응답. 겹쳐 그려 대역별 차이를 본다."""
+    """주사기 조작에 정렬한 응답 — 위는 힘 오차, 아래는 로봇 변위.
+
+    두 행을 같은 시간축에 두는 이유: 힘이 돌아오는 동안 변위가 계단으로 움직이면
+    로봇이 받아 낸 것이고, 변위가 평평하면 팬텀이 스스로 누운 것이다. 힘 행
+    하나로는 그 둘이 같은 그림이 된다.
+    """
     if not events:
         return []
     by_label = {run.label: run for run in runs}
-    figure, axes = plt.subplots(1, 2, figsize=(7.2, 2.8))
-    for panel, direction in zip(axes, ("in", "withdraw")):
+    figure, axes = plt.subplots(2, 2, figsize=(7.2, 5.0), sharex="col")
+    for col, direction in enumerate(("in", "withdraw")):
+        force_ax, travel_ax = axes[0][col], axes[1][col]
         drawn = 0
+        labelled = set()          # 목표당 한 줄만 범례에 올린다
         for event in [e for e in events if e["direction"] == direction]:
             run = by_label.get(event["run"])
             if run is None:
@@ -126,18 +146,32 @@ def disturbance(runs: list, events: list, stem: str = "fig3_disturbance") -> lis
                      (run.t <= event["onset_s"] + max(6.0, event["window_s"]))
             if window.sum() < 5:
                 continue
-            panel.plot(run.t[window] - event["onset_s"],
-                       run.force[window] - event["target_n"],
-                       lw=0.7, alpha=0.85,
-                       label=f"{event['target_n']:.1f} N" if drawn < 8 else None)
+            t = run.t[window] - event["onset_s"]
+            tag = f"{event['target_n']:.1f} N"
+            line, = force_ax.plot(
+                t, run.force[window] - event["target_n"],
+                lw=0.7, alpha=0.85,
+                label=None if tag in labelled else tag)
+            labelled.add(tag)
+            # 변위는 교란 직전 표본을 기준으로 한다 — 힘 오차와 같은 정렬이다.
+            idx = np.where(window)[0]
+            travel = axial_travel_series(run, int(idx[0])) * 1000.0
+            if np.isfinite(travel[idx]).any():
+                travel_ax.plot(t, travel[window], lw=0.7, alpha=0.85,
+                               color=line.get_color())
             drawn += 1
-        panel.axhline(0, color=INK, lw=0.8)
-        panel.axvline(0, color=INK, ls=":", lw=0.8)
-        panel.set_xlabel("t since step [s]"); panel.set_ylabel("error [N]")
-        panel.set_title(f"syringe {direction}", fontsize=8)
+        force_ax.axhline(0, color=INK, lw=0.8)
+        force_ax.axvline(0, color=INK, ls=":", lw=0.8)
+        force_ax.set_ylabel("error [N]")
+        force_ax.set_title(f"syringe {direction}", fontsize=8)
+        travel_ax.axhline(0, color=INK, lw=0.8)
+        travel_ax.axvline(0, color=INK, ls=":", lw=0.8)
+        travel_ax.set_xlabel("t since step [s]")
+        travel_ax.set_ylabel("axial travel [mm]")
         if drawn:
-            panel.legend(fontsize=6.5, frameon=False, ncol=2)
-    figure.suptitle("Response to the surface moving", fontsize=9)
+            force_ax.legend(fontsize=6.5, frameon=False, ncol=2)
+    figure.suptitle("Response to the surface moving — force (top), robot travel (bottom)",
+                    fontsize=9)
     figure.tight_layout()
     return _save(figure, stem)
 

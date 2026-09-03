@@ -39,10 +39,12 @@ def main(argv=None) -> int:
     write_csv(os.path.join(args.output_dir, "hold_by_target.csv"), grouped,
               ["target_n", "band_n", "settling_point_n", "runs", "samples", "seconds",
                "sd_n", "error_vs_settling_n", "mean_error_n", "rmse_n",
-               "rmse_pct_of_target", "in_band_pct", "p95_abs_error_n", "max_force_n"])
+               "rmse_pct_of_target", "in_band_pct", "p95_abs_error_n", "max_force_n",
+               "travel_mm"])
     write_csv(os.path.join(args.output_dir, "disturbance_events.csv"), summary.events,
               ["run", "target_n", "direction", "step_ml", "onset_s", "peak_error_n",
-               "peak_force_n", "time_to_peak_s", "settle_s", "recovered"])
+               "peak_force_n", "time_to_peak_s", "settle_s", "recovered",
+               "travel_mm", "peak_travel_mm"])
     write_csv(os.path.join(args.output_dir, "safety_margin.csv"), summary.safety,
               ["run", "run_type", "target_n", "peak_force_n", "warn_force_n",
                "max_force_n", "margin_to_limit_n", "reached_warn", "exceeded_limit",

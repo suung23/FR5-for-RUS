@@ -36,6 +36,14 @@ __all__ = ["JointCommandLimiter"]
 
 #: 이보다 작은 관절속도 지령은 "정지" 로 본다 [rad/s].
 #: 0.001 rad/s = 0.057 °/s — 1 분을 줘도 3.4° 다. 조작 의도로 볼 수 없는 크기다.
+#:
+#: ⚠️ **teleop 전용 추측이다** (``step`` 의 ``explicit_intent=False``). 접촉 프로빙의
+#: 힘 조절기는 목표에 붙을수록 작은 속도를 내고 — v_z = 오차/B_z, 오차 0.3 N 이면
+#: 관절 ~2~7e-4 rad/s — 그것은 잡음이 아니라 의도다. 2026-09-03 팬텀 실측
+#: (force_hold_validation A_t0p5_r1): 이 문턱이 조절기 지령을 전부 "정지" 로 버려,
+#: 조절기가 18 초 동안 전진을 지령하는데 팁이 2 µm 만 움직였고 힘이 목표 아래
+#: 0.1~0.3 N 에서 영원히 정체했다. 그래서 접촉 프로빙에서는 호출자가
+#: ``explicit_intent=True`` 를 넘겨 이 추측을 끈다.
 IDLE_VEL_EPS_RAD_S = 1e-3
 
 #: 되감기 불감대 [도]. 이보다 가까우면 되감지 않는다.
@@ -134,18 +142,30 @@ class JointCommandLimiter:
             out.append(math.radians(rate))
         return out
 
-    def step(self, target_vel_rad, actual_deg, dt: float) -> list[float]:
+    def step(
+        self, target_vel_rad, actual_deg, dt: float, *, explicit_intent: bool = False
+    ) -> list[float]:
         """한 주기. 관절속도 지령을 받아 ServoJ 에 보낼 관절각을 돌려준다.
 
         Args:
             target_vel_rad: 상위(미분 IK)가 낸 관절속도 6개 [rad/s].
             actual_deg: 로봇이 보고한 실제 관절각 6개 [도].
             dt: 이번 주기 길이 [s].
+            explicit_intent: 상위가 "0 = 정지, 0 아님 = 지령" 을 보장하는가.
+                접촉 프로빙에서 참이다 — 지령이 힘 조절기에서 오고, 조절기는
+                밴드 안에서 **정확히 0** 을 내므로 크기로 의도를 추측할 이유가
+                없다. 참이면 ``IDLE_VEL_EPS_RAD_S`` 를 보지 않고 0 인지만 본다.
+                미소 지령이 그대로 적분되고, 정지·되감기는 정확히 0 일 때만
+                일어난다. 거짓(기본)은 teleop 용 — 손 잡음과 IK 수치 부스러기를
+                정지로 해석한다.
 
         Returns:
             관절각 지령 6개 [도].
         """
-        commanding = any(abs(v) > IDLE_VEL_EPS_RAD_S for v in target_vel_rad)
+        if explicit_intent:
+            commanding = any(v != 0.0 for v in target_vel_rad)
+        else:
+            commanding = any(abs(v) > IDLE_VEL_EPS_RAD_S for v in target_vel_rad)
 
         if commanding:
             self.idle = False

@@ -6,6 +6,12 @@
 2. **그리퍼 없음.** 이전 노드는 그리퍼를 움직이려고 ``ServoMoveEnd`` → ``MoveGripper``
    → ``ServoMoveStart`` 를 했다. 접촉 중에 서보 모드가 끊기는 것은 그대로 사고다.
 3. **wrench 발행.** F/T 를 상태 패키지에서 읽어 100 Hz 로 낸다.
+4. **모드 인지** (2026-09-03). ``us_diff_ik`` 가 선언하는 ``probing_mode`` 를 구독한다.
+   접촉 프로빙에서는 관절 지령이 힘 조절기에서 오고 목표에 붙을수록 작아지는데,
+   teleop 용 idle 문턱(``IDLE_VEL_EPS_RAD_S``)이 그것을 전부 "정지 의도" 로 버렸다 —
+   팬텀 실측에서 조절기가 18 초 동안 전진을 지령하는데 팁이 2 µm 만 움직인 원인.
+   그래서 접촉 프로빙 중에는 크기 추측을 끄고 0 인지 아닌지만 본다
+   (``JointCommandLimiter.step`` 의 ``explicit_intent``).
 
 워치독은 2층 구조의 **하위 층**이다 (DESIGN_NOTES §12.2). 관절 지령이 끊기면 정지한다.
 후퇴하지 않는다 — 이 노드는 관절 공간에서 돌아 법선 방향을 모르고, 방향을 모르는 채
@@ -18,8 +24,10 @@ import math
 import rclpy
 from geometry_msgs.msg import Pose, TransformStamped, WrenchStamped
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from scipy.spatial.transform import Rotation
 from sensor_msgs.msg import JointState
+from std_msgs.msg import String
 from tf2_ros import TransformBroadcaster
 
 from fr5_control.joint_command_limiter import JointCommandLimiter
@@ -112,6 +120,23 @@ class UsServoNode(Node):
         # -- 인터페이스 --------------------------------------------------
         ns = f"/{self.robot_name}"
         self.create_subscription(JointState, f"{ns}/joint_velocity_cmds", self._on_velocity, 10)
+
+        #: us_diff_ik 가 선언한 모드가 접촉 프로빙인가. 참이면 idle 크기 추측을 끈다.
+        self._contact_probing = False
+        # 발행자(us_diff_ik)가 RELIABLE + TRANSIENT_LOCAL 로 래치해서 낸다. 같은
+        # 내구성으로 구독해야 늦게 붙어도 현재 모드를 즉시 받는다 — volatile 로
+        # 구독하면 다음 전환까지 아무것도 못 받고, 전환이 없는 세션에서는 영영
+        # 못 받는다 (capture.py 가 2026-09-02 에 같은 함정을 밟았다).
+        self.create_subscription(
+            String,
+            f"{ns}/probing_mode",
+            self._on_probing_mode,
+            QoSProfile(
+                depth=1,
+                reliability=ReliabilityPolicy.RELIABLE,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            ),
+        )
 
         self.joint_pub = self.create_publisher(JointState, f"{ns}/joint_states", 10)
         self.pose_pub = self.create_publisher(Pose, f"{ns}/ee_wrt_base", 10)
@@ -209,6 +234,24 @@ class UsServoNode(Node):
         self.target_vel_rad = list(msg.velocity[:6])
         self.last_cmd_time = self.get_clock().now()
 
+    def _on_probing_mode(self, msg: String) -> None:
+        """us_diff_ik 가 선언한 모드를 받는다.
+
+        "contact_probing" 으로 시작하는 값(순수 접촉 프로빙과 면내 회전 하위 모드 —
+        fr5_ik.probing_mode 참조)이면 접촉 프로빙이다. 이 모드에서 관절 지령의
+        출처는 힘 조절기이고, 조절기는 밴드 안에서 정확히 0 을 내므로 크기로 정지
+        의도를 추측할 이유가 없다 — 추측하면 수렴 중의 미소 지령이 전부 버려진다.
+        """
+        probing = msg.data.startswith("contact_probing")
+        if probing != self._contact_probing:
+            self.get_logger().info(
+                "접촉 프로빙 진입 — 미소 관절 지령을 그대로 실행한다 "
+                "(idle 크기 추측 꺼짐, 정지 판정은 지령 == 0 일 때만)"
+                if probing
+                else "접촉 프로빙 이탈 — teleop idle 문턱 복원"
+            )
+        self._contact_probing = probing
+
     def _control_loop(self) -> None:
         try:
             now = self.get_clock().now()
@@ -246,7 +289,11 @@ class UsServoNode(Node):
 
             # 속도 상한 · 가속/감속 상한 · 관절 한계 · 추종오차 밴드, 그리고 정지 중
             # 지령 되감기가 전부 여기서 일어난다 (joint_command_limiter 참조).
-            commanded_deg = self.limiter.step(self.target_vel_rad, actual_deg, dt)
+            # 접촉 프로빙에서는 힘 조절기의 미소 지령이 의도이므로 크기 추측을 끈다.
+            commanded_deg = self.limiter.step(
+                self.target_vel_rad, actual_deg, dt,
+                explicit_intent=self._contact_probing,
+            )
 
             # 정지로 넘어가는 순간의 선행분을 기록한다. 되감기가 없던 시절에는
             # 이만큼이 손을 멈춘 뒤에 그대로 실행됐고, 그것이 곧 "멈춰도 더 간다" 였다.

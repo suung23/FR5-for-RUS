@@ -65,20 +65,15 @@ from typing import Optional, Sequence
 
 import numpy as np
 
-from _common import REPO_ROOT  # noqa: F401  (sys.path bootstrap)
-
-from rus_perception.control.features import FeatureExtractionConfig, extract_control_state
-from rus_perception.control.roi import RoiConfig, build_roi_mask
-from rus_perception.data.io import load_grayscale, load_mask, resize_image, resize_mask
-from rus_perception.data.manifest import load_manifest
-from rus_perception.inference.predictor import Predictor, PredictorConfig
-
 logger = logging.getLogger(__name__)
 
-INK = "#101a20"
-INK_SOFT = "#4a5c66"
-ACCENT = "#0b6f7a"
-WARN = "#b5651d"
+# Text is black throughout; marks use a dark navy / grey pair. The model and
+# data imports live inside collect()/sweep() so the figure functions stay
+# importable on a machine without torch (see redraw_lateral_instruction_figures).
+INK = "#000000"
+INK_SOFT = "#444444"
+ACCENT = "#1f3864"
+WARN = "#767676"
 CRIT = "#a32316"
 GT_COLOR = "#16B9D4"
 PRED_COLOR = "#E17C32"
@@ -104,6 +99,13 @@ def beam_axis(roi: np.ndarray) -> float:
 
 def collect(config_path: str, checkpoint: str, splits: Sequence[str]) -> list[dict]:
     """Instruction and truth for every labelled frame of the requested splits."""
+    from _common import REPO_ROOT  # noqa: F401  (sys.path bootstrap)
+
+    from rus_perception.control.features import FeatureExtractionConfig, extract_control_state
+    from rus_perception.control.roi import RoiConfig, build_roi_mask
+    from rus_perception.data.io import load_grayscale, load_mask, resize_image, resize_mask
+    from rus_perception.data.manifest import load_manifest
+    from rus_perception.inference.predictor import Predictor, PredictorConfig
     from rus_perception.utils.config import load_config
 
     config = load_config(config_path)
@@ -167,6 +169,14 @@ def sweep(config_path: str, checkpoint: str, splits: Sequence[str],
     the segmentation intact.
     """
     import cv2
+
+    from _common import REPO_ROOT  # noqa: F401  (sys.path bootstrap)
+
+    from rus_perception.control.features import FeatureExtractionConfig, extract_control_state
+    from rus_perception.control.roi import RoiConfig, build_roi_mask
+    from rus_perception.data.io import load_grayscale, load_mask, resize_image, resize_mask
+    from rus_perception.data.manifest import load_manifest
+    from rus_perception.inference.predictor import Predictor, PredictorConfig
     from rus_perception.utils.config import load_config
 
     config = load_config(config_path)
@@ -306,8 +316,8 @@ def _style() -> None:
         "figure.facecolor": "white", "axes.facecolor": "white",
         "savefig.facecolor": "white", "font.family": "sans-serif",
         "font.sans-serif": ["DejaVu Sans"], "text.color": INK,
-        "axes.edgecolor": INK_SOFT, "axes.labelcolor": INK,
-        "xtick.color": INK_SOFT, "ytick.color": INK_SOFT,
+        "axes.edgecolor": INK, "axes.labelcolor": INK,
+        "xtick.color": INK, "ytick.color": INK,
         "pdf.fonttype": 42, "ps.fonttype": 42, "svg.fonttype": "none",
         "axes.spines.top": False, "axes.spines.right": False,
     })
@@ -344,7 +354,7 @@ def figure_agreement(rows: Sequence[dict], stats: dict):
                 f"|error| median  {entry['abs_error_median']:.2f} px\n"
                 f"slope  {entry['slope']:.3f}   r  {entry['pearson_r']:.3f}",
                 transform=ax.transAxes, va="top", ha="left", fontsize=7.6,
-                color=INK_SOFT, linespacing=1.5)
+                color=INK, linespacing=1.5)
         ax.set_xlabel("ground-truth lateral displacement  $e$  (px)", fontsize=8.5)
         ax.axhline(0, color=INK_SOFT, lw=0.6); ax.axvline(0, color=INK_SOFT, lw=0.6)
         ax.set_xlim(-limit, limit); ax.set_ylim(-limit, limit)
@@ -372,17 +382,17 @@ def figure_validity(stats: dict):
     curve = [c for c in stats["validity_curve"] if c["n"]]
     centres = [min((c["low"] + c["high"]) / 2, 50) for c in curve]
     observed = [c["observed_sign_error"] * 100 for c in curve]
-    ax.scatter(centres, observed, s=46, facecolor="white", edgecolor=ACCENT,
-               lw=1.8, zorder=5, label="observed")
+    ax.scatter(centres, observed, s=20, facecolor="white", edgecolor=ACCENT,
+               lw=1.3, zorder=5, label="observed")
     for c, x, y in zip(curve, centres, observed):
         ax.annotate(f"n={c['n']}", (x, y), textcoords="offset points", xytext=(0, 11),
-                    ha="center", fontsize=7, color=INK_SOFT)
+                    ha="center", fontsize=7, color=INK)
 
     for probability, colour in ((0.05, WARN), (0.01, ACCENT)):
         threshold = -normal.inv_cdf(probability) * sigma
         ax.axvline(threshold, color=colour, lw=1.0, ls=(0, (5, 3)), zorder=2)
         ax.text(threshold + 0.7, 34, f"{probability * 100:g}% at {threshold:.1f} px",
-                rotation=90, va="top", fontsize=7.4, color=colour)
+                rotation=90, va="top", fontsize=7.4, color=INK)
 
     ax.set_xlabel(r"required lateral displacement  $|e|$  (px at 256$\times$256)", fontsize=8.5)
     ax.set_ylabel("wrong-direction rate (%)", fontsize=8.5)
@@ -390,7 +400,7 @@ def figure_validity(stats: dict):
     ax.tick_params(labelsize=7.5)
     ax.text(0.985, 0.95,
             f"$\\sigma$ = {sigma:.2f} px  (lateral centroid error, {stats['n_frames']} frames)",
-            transform=ax.transAxes, ha="right", va="top", fontsize=7.8, color=INK_SOFT)
+            transform=ax.transAxes, ha="right", va="top", fontsize=7.8, color=INK)
     ax.legend(loc="upper right", bbox_to_anchor=(0.985, 0.86), fontsize=7.6, frameon=False)
     figure.tight_layout()
     return figure

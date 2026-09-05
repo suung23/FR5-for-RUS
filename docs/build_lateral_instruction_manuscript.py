@@ -26,6 +26,10 @@ from docx.shared import Cm, Pt, RGBColor
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIGDIR = os.path.join(REPO, "Unet_seg", "experiments", "lateral_instruction")
 STATS = json.load(open(os.path.join(FIGDIR, "lateral_instruction.json")))
+#: Segmentation metrics of the same checkpoint on the same frame sets, from the
+#: volume-gated audit; the manuscript's Table 2 is read from here, not typed.
+AUDIT = json.load(open(os.path.join(REPO, "Unet_seg", "experiments", "quality_retro",
+                                    "audit", "audit.json")))
 OUT = os.path.join(REPO, "Lateral_Instruction_Manuscript.docx")
 
 BODY_PT = 9.7
@@ -33,6 +37,10 @@ SERIF = "Times New Roman"
 RULE = "808080"
 
 S = STATS
+SEG_ALL = {s: next(e for e in AUDIT["sweep"][s] if e["floor"] == 0.0)
+           for s in ("val", "test")}
+SEG_DOMAIN = AUDIT["segmentation"]
+FLOOR = AUDIT["min_gt_area_ratio"]
 OVERALL, BY = S["overall"], S["by_split"]
 SIGMA = S["sigma_px"]
 NAT = S["natural_poses"]
@@ -122,13 +130,13 @@ def head(doc, text, level=1):
 
 
 def equation(doc, text, tag):
+    """Equation flush left, its number right-aligned exactly on the column edge."""
     from docx.enum.text import WD_TAB_ALIGNMENT
     p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.LEFT
     pf = p.paragraph_format
     pf.space_before = pf.space_after = Pt(4)
-    pf.tab_stops.add_tab_stop(Cm(3.9), WD_TAB_ALIGNMENT.CENTER)
-    pf.tab_stops.add_tab_stop(Cm(8.2), WD_TAB_ALIGNMENT.RIGHT)
-    p.add_run("\t")
+    pf.tab_stops.add_tab_stop(Cm(COL_CM), WD_TAB_ALIGNMENT.RIGHT)
     rich(p, text, size=BODY_PT, italic=True)
     p.add_run("\t")
     rich(p, "(%s)" % tag, size=BODY_PT)
@@ -296,9 +304,8 @@ def front_matter(doc):
          "axis, so a robotic probe holder can translate it into a twist command by lookup. "
          "An instruction is only as fine as the function issuing it, so we first measure "
          "what *Q* can judge. As originally specified *Q* attains [0.70, 1.00], 30% of its "
-         "nominal domain, and resolves only 9 levels above its own frame-to-frame noise; "
-         "three of its eight sub-scores are degenerate. Reformulated as a geometric mean "
-         "weighted toward the terms that read the image, it attains [0.14, 0.78] and "
+         "nominal domain, and resolves only 9 levels above its own frame-to-frame noise — "
+         "too few to ground an instruction set; reformulated, it attains [0.14, 0.78] and "
          "resolves 47 levels. The vocabulary is then derived rather than chosen: one "
          "boundary is physical (a lumen that is not anechoic cannot be a filled bladder — "
          "*check bladder filling*), the other statistical (a lateral offset below "
@@ -322,13 +329,13 @@ def introduction(doc):
     para(doc,
          "During the morcellation phase of holmium laser enucleation of the prostate (HoLEP) "
          "an assistant holds a suprapubic probe and keeps the bladder lumen in view. Keeping "
-         "it there is a skill: the lumen drifts as the bladder volume changes, and deciding "
+         "it there is a skill of the kind HoLEP training is built to teach [1]: the lumen "
+         "drifts as the bladder volume changes, and deciding "
          "which way to slide the probe — or recognising that the image has degraded for a "
          "reason no probe motion can fix — currently rests on the operator's judgment alone. "
-         "A companion study validated the contact-force channel of a robotic probe holder on "
-         "a phantom; between the image and any operator, human or robot alike, the missing "
-         "piece is not a better segmentation mask but the path from a mask to something the "
-         "operator can be told to do.")
+         "The image itself carries the information that judgment needs, and for any "
+         "operator, human or robot alike, the missing piece is not a better segmentation "
+         "mask but the path from a mask to something the operator can be told to do.")
     para(doc,
          "This paper builds that path as a three-stage pipeline: **segmentation** — a U-Net "
          "delineates the bladder lumen on each transabdominal frame; **quality judgment** — "
@@ -339,8 +346,8 @@ def introduction(doc):
          "guidance that can be displayed or spoken; to a robotic probe holder each word, "
          "carrying a defined condition and axis, translates deterministically into a twist "
          "command. The paper validates the pipeline up to the emitted instruction and "
-         "deliberately stops short of closing a robot loop; Section 8 records how the same "
-         "judgments would enter one.")
+         "deliberately stops short of closing a robot loop; Section 4.1 records how the "
+         "same judgments would enter one.")
     para(doc,
          "The central technical question is what instruction set *Q* can honestly support. "
          "The property that decides it is the function's **attained range** — the interval "
@@ -349,20 +356,22 @@ def introduction(doc):
          "narrower than its own frame-to-frame noise cannot separate any two decisions, "
          "however well it ranks. Range divided by noise is the number of levels available, "
          "and that number is an upper bound on the size of an honest instruction "
-         "vocabulary: Sections 4 and 5 measure it, and Section 6 derives the vocabulary "
-         "from it.")
+         "vocabulary: Sections 3.2 and 3.3 measure it, and Section 3.4 derives the "
+         "vocabulary from it.")
 
 
-def model_section(doc):
-    head(doc, "2. Segmentation and the Image State")
+def methods_section(doc):
+    head(doc, "2. Methods")
+    head(doc, "2.1 Segmentation and the Image State", 2)
     para(doc,
-         "A U-Net takes a 256 × 256 transabdominal B-mode frame and produces a lumen "
+         "A U-Net [2] takes a 256 × 256 transabdominal B-mode frame and produces a lumen "
          "probability map, thresholded at 0.5 and reduced to its largest connected component "
          "with interior holes filled. Frames come from PFUS1, a retrospective transabdominal "
-         "bladder dataset; the model was trained on a patient-disjoint split and reaches "
-         "Dice 0.807 ± 0.123 on 1,292 held-out frames. It was not retrained or re-tuned for "
-         "this study, and all measurements below are made on the two held-out frame sets "
-         "(1,661 and 1,292 frames) that share no patient with training or with each other.")
+         "bladder dataset; the model was trained on a patient-disjoint split and was not "
+         "retrained or re-tuned for this study. All measurements below are made on the two "
+         "held-out frame sets (1,661 and 1,292 frames) that share no patient with training "
+         "or with each other; the segmentation performance on those frames is reported in "
+         "Section 3.1.")
     para(doc,
          "From the mask an image state is computed — centroid, area, boundary statistics, "
          "and lumen-to-surround intensity contrast. Every ratio is taken over the insonified "
@@ -373,8 +382,7 @@ def model_section(doc):
          "sector edge registers as touching no edge.")
 
 
-def quality_section(doc):
-    head(doc, "3. The Quality Function")
+    head(doc, "2.2 The Quality Function", 2)
     para(doc,
          "*Q* is a weighted mean of sub-scores, each normalised to [0, 1], every term and "
          "weight logged so that a value can be traced back to its components. Two "
@@ -398,6 +406,22 @@ def quality_section(doc):
            ["temporal terms (3)", "mask history", "agreement with the previous mask"]],
           widths=[2.5, 1.5, 4.0], size=7.5)
     para(doc,
+         "The weights are set by rule, not fitted. A pre-declared tuning protocol — "
+         "candidate weightings scored on the validation cohort by their AUROC for "
+         "Dice ≥ 0.80 within bladder-volume bands, ties broken by dynamic range, the test "
+         "cohort untouched — was run and then set aside for cause: with eleven patients "
+         "per split, every candidate's bootstrapped confidence interval on the selection "
+         "metric spanned most of the unit interval, so this cohort cannot rank weightings "
+         "and a fitted weight would report sampling noise. The weights are therefore "
+         "tiered, and equal within a tier: the three terms that read the ultrasound image "
+         "share the top weight (1.5 each, 4.5 of the 6.0 total), the mask-side domain "
+         "check keeps a minority 0.5, and terms whose measured behaviour disqualifies them "
+         "— a border penalty duplicating a hard limit the validity gate already enforces, "
+         "a component-quality term that returns one value — are set to zero rather than "
+         "down-weighted, because a consistently inverted or saturated term is not a "
+         "tuning question. `segmentation confidence` keeps its inherited weight of 1.0; "
+         "what that buys is measured rather than assumed, in Section 3.2.")
+    para(doc,
          "The three temporal terms are switched off for this study. The frames are static "
          "examinations in which nothing moved in response to the image, so frame-to-frame "
          "agreement measures the smoothness of a recording rather than the stability of a "
@@ -405,8 +429,93 @@ def quality_section(doc):
          "asked to produce.")
 
 
-def range_section(doc):
-    head(doc, "4. The Attained Range of *Q*")
+    head(doc, "2.3 Range, Noise, and Resolvable Levels", 2)
+    para(doc,
+         "The first property measured is the **attained range** — the interval of values "
+         "*Q* actually takes, read over all 2,953 held-out frames and set against its "
+         "nominal domain [0, 1]. Because the geometric mean is additive in the logarithm, "
+         "the attained range decomposes exactly: each sub-score contributes its weight "
+         "share times the log-width of the interval it attains, so every part of the range "
+         "is traceable to one term.")
+    para(doc,
+         "A range is only useful relative to the noise on it. These are static "
+         "examinations, so the change in *Q* between adjacent frames is almost entirely "
+         "measurement noise, and its standard deviation is a direct estimate of the "
+         "function's own jitter. Two frames whose scores differ by less than that jitter "
+         "cannot be ordered — the difference is as likely noise as signal — so thresholds "
+         "spaced closer than one jitter step do not define distinct decisions; they hand "
+         "the same frame different labels on different frames. Dividing the attained "
+         "range by the jitter therefore gives the number of levels a reader of *Q* can "
+         "distinguish; the central 80% of the distribution — the operating region a "
+         "threshold would actually be placed in — is reported alongside the full range.")
+
+    head(doc, "2.4 The Instruction Axis", 2)
+    para(doc,
+         "The instruction is issued on the one image axis that leaves the imaging plane "
+         "invariant. Of the probe's six axes only *v*~x~, *v*~z~ and *ω*~y~ preserve the "
+         "plane; of the three the image policy holds, only lateral sliding *v*~x~ does, and "
+         "only it presents a measurable vector error rather than a scalar to be searched "
+         "(Figure 1a). Write the instruction as *ê* = *A* − *ĉ*, with *A* the beam axis and "
+         "*ĉ* the predicted lumen centroid abscissa (Figure 1b).")
+    wide_figure(doc, 1, "fig_axes.png",
+                "(a) Only *v*~x~ leaves the imaging plane invariant among the three axes the "
+                "image policy holds. (b) The lateral instruction on one frame: *A* is the "
+                "beam axis, *c* the lumen centroid abscissa, *e* = *A* − *c*.", 14.0)
+
+    head(doc, "2.5 Validation by Lateral Translation", 2)
+    para(doc,
+         "One property of the frames prevents the direction from being validated on them as "
+         "recorded: in all 2,953 the lumen lies on the same side of the beam axis, so *e* "
+         "never changes sign and a constant output would score 99.3%. The sonographer holds "
+         "a diagnostic view rather than centring the lumen on the axis, which is a property "
+         "of how the frames were acquired and not of the function.")
+    para(doc,
+         "The instruction is therefore exercised on laterally translated frames. Lateral "
+         "translation is the one probe motion single-plane frames can reproduce faithfully, "
+         "and it carries the lumen across the axis so that *e* changes sign; each frame is "
+         "shifted by the amount that places *e* on a prescribed target, sampled densely near "
+         "the crossing and sparsely away from it. Fabricated margin is filled by edge "
+         "replication, never black, which every intensity term would read as anechoic lumen. "
+         f"Across the sweep the segmentation is unaffected — Dice holds at "
+         f"{S['dice_under_translation']['median']:.3f} — and {S['n_frames']:,} frames "
+         "result, 43% with *e* < 0.")
+
+
+def results_section(doc):
+    head(doc, "3. Results")
+    head(doc, "3.1 Segmentation Performance", 2)
+    para(doc,
+         "Table 2 reports the segmentation stage on the two held-out frame sets, both "
+         "unfiltered and restricted to the distended-bladder working domain — frames "
+         f"whose annotated lumen occupies at least {FLOOR * 100:.1f}% of the sector, the "
+         "state morcellation irrigation is meant to maintain. Within that domain the "
+         "lateral centroid error, the quantity the instruction is built on, has a median "
+         "near 4 px. The tail below the domain is the same population the *check bladder "
+         "filling* branch of Section 3.4 addresses: segmentation degrades exactly where "
+         "the instruction refuses to steer.")
+    seg_rows = []
+    for split in ("val", "test"):
+        full = SEG_ALL[split]
+        seg_rows.append([
+            split + ", all frames", f"{full['n_frames']:,} / {full['n_patients']}",
+            f"{full['dice']['mean']:.3f} ± {full['dice']['sd']:.3f}",
+            f"{full['dice']['median']:.3f}", "—", "—"])
+    for split in ("val", "test"):
+        dom = SEG_DOMAIN[split]
+        seg_rows.append([
+            split + ", working domain", f"{dom['n_frames']:,} / {dom['n_patients']}",
+            f"{dom['dice']['mean']:.3f} ± {dom['dice']['sd']:.3f}",
+            f"{dom['dice']['median']:.3f}",
+            f"{dom['iou']['mean']:.3f} ± {dom['iou']['sd']:.3f}",
+            f"{dom['centroid_error_px']['median']:.2f}"])
+    table(doc, 2, "Segmentation performance of the U-Net [2] on the held-out frame sets. "
+                  "The working domain keeps frames whose annotated lumen area is at least "
+                  f"{FLOOR * 100:.1f}% of the sector; IoU and the lateral centroid error "
+                  "(median, px at 256 × 256) are computed there.",
+          ["Frame set", "Frames / pts", "Dice", "Dice med.", "IoU", "Centr. err."],
+          seg_rows, widths=[1.9, 1.2, 1.5, 1.0, 1.5, 1.0], size=7.5)
+
+    head(doc, "3.2 The Attained Range of *Q*", 2)
     para(doc,
          "*Q* is defined on [0, 1]. On 2,953 held-out frames the original specification "
          "attains [0.70, 1.00] — a width of 0.30, or 30% of the nominal domain — and its "
@@ -414,17 +523,15 @@ def range_section(doc):
          "weighted toward the terms that read the image, it attains [0.14, 0.78], a width "
          "of 0.64, with a central 80% of 0.45 (Figure 2a).")
     para(doc,
-         "Because the geometric mean is additive in the logarithm, the range decomposes "
-         "exactly: each term contributes its weight share times the log-width of the "
-         "interval it attains. **Two sub-scores account for 92.4% of the range** "
-         "(Figure 2b, Table 2), and both are terms that consult the ultrasound image "
-         "rather than the mask.")
+         "The decomposition of Section 2.3 attributes **92.4% of the range to two "
+         "sub-scores** (Figure 2b, Table 3), and both are terms that consult the "
+         "ultrasound image rather than the mask.")
     wide_figure(doc, 2, "fig_range.png",
                 "(a) The interval *Q* actually attains under the two aggregations, against "
                 "its nominal domain [0, 1]. (b) The interval each active sub-score attains "
                 "and its share of the resulting range. `segmentation confidence` occupies a "
                 "band 0.007 wide and contributes nothing.", 15.4)
-    table(doc, 2, "Attained interval of each active sub-score and its share of the range of "
+    table(doc, 3, "Attained interval of each active sub-score and its share of the range of "
                   "*Q*. Shares follow from the geometric aggregation and sum to 100%.",
           ["Sub-score", "Weight", "Attained interval", "Width", "Share"],
           [["lumen contrast", "1.5", "0.000 – 1.000", "1.000", "47.6%"],
@@ -442,15 +549,11 @@ def range_section(doc):
          "are already at weight 0.")
 
 
-def resolution_section(doc):
-    head(doc, "5. What the Range Permits")
+    head(doc, "3.3 Resolvable Levels", 2)
     para(doc,
-         "A range is only useful relative to the noise on it. These are static examinations, "
-         "so the change in *Q* between adjacent frames is almost entirely measurement noise; "
-         "its standard deviation is therefore a direct estimate of the function's own "
-         "jitter. Dividing the attained range by that jitter gives the number of levels a "
-         "reader of *Q* can distinguish.")
-    table(doc, 3, "Resolution of *Q*: attained range over frame-to-frame jitter. The central "
+         "Table 4 divides the attained range by the frame-to-frame jitter measured on the "
+         "same frames (Section 2.3).")
+    table(doc, 4, "Resolution of *Q*: attained range over frame-to-frame jitter. The central "
                   "80% figure is the operating region a threshold would actually be placed "
                   "in.",
           ["Aggregation", "Range", "Jitter", "Levels", "Central 80%", "Levels"],
@@ -465,31 +568,18 @@ def resolution_section(doc):
          "been reporting noise. The reformulated function has room for 47.")
 
 
-def vocabulary_section(doc):
-    head(doc, "6. From Quality Judgment to a Language Instruction")
-    para(doc,
-         "The instruction is issued on the one image axis that leaves the imaging plane "
-         "invariant. Of the probe's six axes only *v*~x~, *v*~z~ and *ω*~y~ preserve the "
-         "plane; of the three the image policy holds, only lateral sliding *v*~x~ does, and "
-         "only it presents a measurable vector error rather than a scalar to be searched "
-         "(Figure 1a). Write the instruction as *ê* = *A* − *ĉ*, with *A* the beam axis and "
-         "*ĉ* the predicted lumen centroid abscissa (Figure 1b).")
-    wide_figure(doc, 1, "fig_axes.png",
-                "(a) Only *v*~x~ leaves the imaging plane invariant among the three axes the "
-                "image policy holds. (b) The lateral instruction on one frame: *A* is the "
-                "beam axis, *c* the lumen centroid abscissa, *e* = *A* − *c*.", 14.0)
+    head(doc, "3.4 The Derived Vocabulary", 2)
     para(doc,
          "Two boundaries partition the range, and neither is a fitted hyperparameter.")
     para(doc,
          "**A physical boundary.** A urine-filled lumen is anechoic, so a non-positive "
          "lumen-to-surround contrast means the delineated region cannot be one. On 13.1% of "
          "frames the contrast is non-positive; those frames have Dice 0.665 against 0.840 "
-         "elsewhere. Running the platform's separate contact-quality score *Q*~raw~ on them "
-         "shows the cause is **not** the force channel: *Q*~raw~ is 0.821 against 0.852, "
-         "near-field echo and contact continuity differ by under 5%, and no contact "
-         "rejection reason fires in either group. What differs is that the lumen is 1.85 "
-         "times brighter and a third the area. The remedy is neither a lateral slide nor "
-         "more contact force; it is upstream, in bladder filling.")
+         "elsewhere, and what sets them apart is the delineated region itself — 1.85 times "
+         "brighter and a third the area, the signature of an under-distended bladder rather "
+         "than of a poorly placed probe. The remedy is not a lateral slide; it is upstream, "
+         "in bladder filling, and the instruction says so instead of commanding a movement "
+         "that cannot help.")
     para(doc,
          "**A statistical boundary.** The difference *δ* = *ê* − *e* is the segmentation's "
          "lateral centroid error, independent of where the lumen sits, with "
@@ -501,7 +591,7 @@ def vocabulary_section(doc):
          f"{TH['5%']['px']:.1f} px, where the modelled error rate reaches 5%. Below that "
          "boundary a controller that keeps acting is following its own segmentation noise; "
          "**this is a stopping condition, not a defect.**")
-    table(doc, 4, "The instruction vocabulary. Both boundaries are derived — one from the "
+    table(doc, 5, "The instruction vocabulary. Both boundaries are derived — one from the "
                   "physics of an anechoic lumen, one from the segmentation's centroid noise "
                   "— and neither is tuned.",
           ["Instruction", "Condition", "Acts on"],
@@ -513,11 +603,11 @@ def vocabulary_section(doc):
     para(doc,
          "Vocabulary size is bounded by the same noise. A magnitude class narrower than 2*σ* "
          "cannot be assigned reliably even at its centre, and the data bear this out: adding "
-         "graded magnitudes costs accuracy without buying direction (Table 5). Three words "
+         "graded magnitudes costs accuracy without buying direction (Table 6). Three words "
          "is what the function supports.")
-    table(doc, 5, "Accuracy of the emitted instruction against the instruction the ground "
-                  "truth implies, over the controlled sweep of Section 7. Direction errors "
-                  "stay negligible; it is the magnitude classes that fail.",
+    table(doc, 6, "Accuracy of the emitted instruction against the instruction the ground "
+                  "truth implies, over the controlled sweep of Section 2.5. Direction "
+                  "errors stay negligible; it is the magnitude classes that fail.",
           ["Vocabulary", "Size", "Accuracy", "Direction error"],
           [["move / hold", "2", "85.1%", "0.00%"],
            ["**move left / move right / hold**", "**3**", "**85.0%**", "**0.10%**"],
@@ -530,10 +620,10 @@ def vocabulary_section(doc):
          "direction rather than a number, which is the register in which probe handling is "
          "actually taught and corrected. To a robotic probe holder each word is a symbol "
          "with a defined condition and axis, so translation into a twist command is a "
-         "lookup, not an inference (Table 6). The language layer is thus the interface "
+         "lookup, not an inference (Table 7). The language layer is thus the interface "
          "between the two settings: the same judgment drives either operator, and nothing "
          "about the pipeline changes when the reader does.")
-    table(doc, 6, "One vocabulary, two readers. The mapping from word to action is fixed "
+    table(doc, 7, "One vocabulary, two readers. The mapping from word to action is fixed "
                   "in advance on both sides; no model sits between the instruction and its "
                   "execution.",
           ["Instruction", "Human operator", "Robotic probe holder"],
@@ -542,28 +632,14 @@ def vocabulary_section(doc):
            ["*move left* / *move right*", "slide the probe laterally as stated",
             "*v*~x~ = −*k ê*, saturated; other axes zero"],
            ["*hold*", "keep the current pose",
-            "zero lateral twist; the force channel keeps coupling"]],
+            "zero lateral twist; no correction commanded"]],
           widths=[2.2, 2.8, 2.8], size=7.5)
 
 
-def validation_section(doc):
-    head(doc, "7. Validating the Emitted Instruction")
+    head(doc, "3.5 Accuracy of the Emitted Instruction", 2)
     para(doc,
-         "One property of the frames prevents the direction from being validated on them as "
-         "recorded: in all 2,953 the lumen lies on the same side of the beam axis, so *e* "
-         "never changes sign and a constant output would score 99.3%. The sonographer holds "
-         "a diagnostic view rather than centring the lumen on the axis, which is a property "
-         "of how the frames were acquired and not of the function.")
-    para(doc,
-         "The instruction is therefore exercised on laterally translated frames. Lateral "
-         "translation is the one probe motion single-plane frames can reproduce faithfully, "
-         "and it carries the lumen across the axis so that *e* changes sign; each frame is "
-         "shifted by the amount that places *e* on a prescribed target, sampled densely near "
-         "the crossing and sparsely away from it. Fabricated margin is filled by edge "
-         "replication, never black, which every intensity term would read as anechoic lumen. "
-         f"Across the sweep the segmentation is unaffected — Dice holds at "
-         f"{S['dice_under_translation']['median']:.3f} — and {S['n_frames']:,} frames "
-         "result, 43% with *e* < 0.")
+         "Figure 3 shows one frame of the sweep at three lateral displacements, including "
+         "one inside the band where the direction is no longer trustworthy.")
     wide_figure(doc, 3, "fig_examples.png",
                 "One frame at three lateral displacements. Cyan is the annotation, orange "
                 "dashed the prediction, white dashed the beam axis, the arrow the "
@@ -581,7 +657,7 @@ def validation_section(doc):
                 "Instructed against ground-truth lateral displacement, one panel per "
                 "held-out frame set. Shaded quadrants are wrong-direction outcomes; every "
                 "one lies within a few pixels of the axis.", 15.2)
-    table(doc, 7, "Agreement between the emitted instruction and the truth.",
+    table(doc, 8, "Agreement between the emitted instruction and the truth.",
           ["Frame set", "n", "Sign agr.", "|err| med.", "|err| p90", "Slope", "*r*"],
           [[k, f"{v['n']:,}", pct(v["sign_agreement"]), f"{v['abs_error_median']:.2f}",
             f"{v['abs_error_p90']:.2f}", f"{v['slope']:.3f}", f"{v['pearson_r']:.3f}"]
@@ -592,13 +668,13 @@ def validation_section(doc):
          "directions occur only near the axis — their median required displacement is "
          "7.9 px against 15.8 px for correct ones — and their rate follows Equation (2) "
          "with *σ* fitted once to the centroid error and not to this curve (Figure 5, "
-         "Table 8). Agreement across two decades of error rate is what licenses deriving "
+         "Table 9). Agreement across two decades of error rate is what licenses deriving "
          "the vocabulary boundary from the model rather than reading it off the data.")
     wide_figure(doc, 5, "fig_validity.png",
                 "Wrong-direction rate against required displacement. The curve is Equation "
                 "(2); circles are observed rates with frame counts. Dashed verticals mark "
                 "where the modelled rate reaches 5% and 1%.", 15.2)
-    table(doc, 8, "Observed and modelled wrong-direction rates. The model is conservative in "
+    table(doc, 9, "Observed and modelled wrong-direction rates. The model is conservative in "
                   "the largest bins, where it predicts rates below what a few hundred frames "
                   "resolve.",
           ["|*e*| [px]", "n", "Observed", "Model"],
@@ -615,12 +691,12 @@ def validation_section(doc):
 
 
 def robot_section(doc):
-    head(doc, "8. Reflecting the Quality Judgment in Robot Control")
+    head(doc, "4.1 Reflecting the Quality Judgment in Robot Control", 2)
     para(doc,
          "The pipeline validated above ends at the words. The words, however, were shaped "
          "so that a robotic probe holder can consume them, and the quality judgment enters "
-         "that loop at three points. None of the three is validated here; this section "
-         "records the design, not a result.")
+         "that loop at two points. Neither is validated here; this section records the "
+         "design, not a result.")
     para(doc,
          "**Gating.** *check bladder filling* suspends image-based motion outright: when "
          "the lumen contrast is non-positive the segmentation cannot be delineating a "
@@ -634,23 +710,20 @@ def robot_section(doc):
          "**Scaling and stopping.** *move left* and *move right* carry the magnitude *ê*, "
          "so the robot realisation is proportional rather than bang-bang: "
          "*v*~x~ = −*k ê*, saturated, with every other axis commanded to zero. The "
-         f"{TH['5%']['k']:.2f}*σ* boundary of Section 6 becomes a deadband: inside it the "
+         f"{TH['5%']['k']:.2f}*σ* boundary of Section 3.4 becomes a deadband: inside it the "
          "commanded twist is zero, because Equation (2) says the sign of any correction "
          "would be noise. A controller that keeps acting below that floor is servoing its "
          "own segmentation error; *hold* is a stopping condition the robot inherits for "
          "free.")
     para(doc,
-         "**Composition with the force channel.** The instruction acts only on *v*~x~, the "
-         "one axis that leaves the imaging plane invariant, so it composes with the "
-         "companion study's validated contact-force channel without contention: force "
-         "regulation holds acoustic coupling along the probe axis while the image loop "
-         "slides laterally across it. Closing and validating this loop — its latency, and "
-         "*Q* measured while the probe actually moves — is deliberately outside this "
-         "paper's scope.")
+         "The instruction acts only on *v*~x~, the one axis that leaves the imaging plane "
+         "invariant, so nothing the image loop commands can rotate the anatomy out of its "
+         "own view. Closing and validating this loop — its latency, and *Q* measured while "
+         "the probe actually moves — is deliberately outside this paper's scope.")
 
 
 def discussion_section(doc):
-    head(doc, "9. Discussion and Limitations")
+    head(doc, "4. Discussion")
     para(doc,
          "Reporting an image-quality function by its correlation with a segmentation metric "
          "answers the wrong question. Correlation says how the score orders frames; the "
@@ -667,7 +740,9 @@ def discussion_section(doc):
          "somewhere the decision is hard or to remove it. Here the two terms that consult "
          "the ultrasound image carry 92.4% of the range while three mask-geometry and "
          "probability-map terms carry almost none.")
-    para(doc, "**Limitations.**", after=1.5)
+
+def limitations_section(doc):
+    head(doc, "4.2 Limitations", 2)
     for item in (
         "No real probe motion is validated. The frames are static examinations whose lumen "
         "centroid moves 0.45 px between samples, below the segmentation's own centroid "
@@ -686,8 +761,7 @@ def discussion_section(doc):
         "boundary where the segmentation is confident and loosen it where it is not.",
         "The *check bladder filling* branch is supported by 13.1% of frames from four "
         "patients; whether the cause is under-distension or annotation is not separable "
-        "here, and *Q*~raw~ only excludes the force channel [TO BE CONFIRMED: IRB approval "
-        "number, scanner model, annotation protocol].",
+        "here [TO BE CONFIRMED: IRB approval number, scanner model, annotation protocol].",
     ):
         para(doc, "— " + item, size=8.6, indent=0.35, after=1.8)
 
@@ -695,13 +769,19 @@ def discussion_section(doc):
 def references_section(doc):
     head(doc, "References")
     para(doc,
-         "[1] S. Jeong, M. Kim, D. Yee, Y. Seo, J. Oh, H.-J. Kong. Contact-Force Regulation "
-         "for Robotic Transabdominal Ultrasound in HoLEP Morcellation: Bench Validation on a "
-         "Volume-Changing Phantom. Companion submission.", size=8.6, after=2)
+         "[1] T. Jang, H.-J. Kong, C. Baek, J. Kim, M. S. Choo, S.-J. Oh. Effect of "
+         "Self-Training Using Virtual Reality Head-Mounted Display Simulator on the "
+         "Acquisition of Holmium Laser Enucleation of the Prostate Surgical Skills. "
+         "International Neurourology Journal 2024;28(2):138–146.", size=8.6, after=2)
     para(doc,
-         "[TO BE COMPLETED] Citations for HoLEP morcellation, U-Net segmentation, ultrasound "
-         "visual servoing and image-quality assessment are to be added before submission; no "
-         "external work is cited in this draft.", size=8.6, italic=True)
+         "[2] O. Ronneberger, P. Fischer, T. Brox. U-Net: Convolutional Networks for "
+         "Biomedical Image Segmentation. In: Medical Image Computing and Computer-Assisted "
+         "Intervention (MICCAI 2015), LNCS 9351, Springer, 2015, pp. 234–241.",
+         size=8.6, after=2)
+    para(doc,
+         "[TO BE COMPLETED] Citations for HoLEP morcellation, ultrasound visual servoing "
+         "and image-quality assessment are to be added before submission.",
+         size=8.6, italic=True)
 
 
 def build():
@@ -716,14 +796,11 @@ def build():
     columns(body, 2)
 
     introduction(doc)
-    model_section(doc)
-    quality_section(doc)
-    range_section(doc)
-    resolution_section(doc)
-    vocabulary_section(doc)
-    validation_section(doc)
-    robot_section(doc)
+    methods_section(doc)
+    results_section(doc)
     discussion_section(doc)
+    robot_section(doc)
+    limitations_section(doc)
     references_section(doc)
 
     doc.save(OUT)

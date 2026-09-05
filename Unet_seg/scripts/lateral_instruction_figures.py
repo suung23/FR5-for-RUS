@@ -19,20 +19,14 @@ from pathlib import Path
 
 import numpy as np
 
-from _common import REPO_ROOT  # noqa: F401  (sys.path bootstrap)
-
-from rus_perception.control.features import FeatureExtractionConfig, extract_control_state
-from rus_perception.control.roi import RoiConfig, build_roi_mask
-from rus_perception.data.io import load_grayscale, load_mask, resize_image, resize_mask
-from rus_perception.data.manifest import load_manifest
-from rus_perception.inference.predictor import Predictor, PredictorConfig
-
 logger = logging.getLogger(__name__)
 
-INK = "#101a20"
-INK_SOFT = "#4a5c66"
-MUTED = "#9aa8b0"
-ACCENT = "#0b6f7a"
+# Text is black throughout; the only colours are a dark navy / grey pair for
+# graphic marks, and the annotation colours the manuscript captions name.
+INK = "#000000"
+INK_SOFT = "#444444"
+MUTED = "#8a8a8a"
+ACCENT = "#1f3864"
 CRIT = "#a32316"
 GT_COLOR = "#16B9D4"
 PRED_COLOR = "#E17C32"
@@ -60,29 +54,30 @@ def figure_axes_and_instruction(roi: np.ndarray):
 
     # ---- (a) axis decomposition --------------------------------------
     left.set_xlim(0, 10); left.set_ylim(0, 8); left.axis("off")
-    left.add_patch(Rectangle((3.5, 5.6), 3.0, 1.0, facecolor="#dfe8ec",
+    left.add_patch(Rectangle((3.5, 5.6), 3.0, 1.0, facecolor="#ececec",
                              edgecolor=INK_SOFT, lw=0.9))
     left.text(5.0, 6.1, "probe", ha="center", va="center", fontsize=8.5, color=INK)
     # imaging plane, drawn as the sector the probe fills
-    left.fill([5.0, 2.6, 7.4], [5.6, 0.9, 0.9], color="#f0f4f6", edgecolor=INK_SOFT, lw=0.8)
-    left.text(5.0, 2.1, "imaging plane", ha="center", fontsize=8, color=INK_SOFT)
+    left.fill([5.0, 2.6, 7.4], [5.6, 0.9, 0.9], color="#f5f5f5", edgecolor=INK_SOFT, lw=0.8)
+    left.text(5.0, 2.1, "imaging plane", ha="center", fontsize=8, color=INK)
 
     left.add_patch(FancyArrow(5.0, 4.6, 2.0, 0, width=0.055, head_width=0.30,
                               head_length=0.42, color=ACCENT, length_includes_head=True))
     left.add_patch(FancyArrow(5.0, 4.6, -2.0, 0, width=0.055, head_width=0.30,
                               head_length=0.42, color=ACCENT, length_includes_head=True))
-    left.text(7.2, 4.95, "$v_x$", fontsize=10, color=ACCENT, ha="center", fontweight="bold")
-    left.text(7.25, 4.28, "in plane", fontsize=7.4, color=ACCENT, ha="center")
+    left.text(7.2, 4.95, "$v_x$", fontsize=10, color=INK, ha="center", fontweight="bold")
+    left.text(7.25, 4.28, "in plane", fontsize=7.4, color=INK, ha="center")
 
     left.add_patch(FancyArrow(5.0, 6.9, 1.15, 0.62, width=0.045, head_width=0.26,
                               head_length=0.36, color=MUTED, length_includes_head=True))
-    left.text(6.6, 7.55, "$v_y$", fontsize=10, color=MUTED, ha="center")
-    left.text(2.5, 7.55, "$\\omega_z$", fontsize=10, color=MUTED, ha="center")
+    left.text(6.6, 7.55, "$v_y$", fontsize=10, color=INK, ha="center")
+    left.text(2.5, 7.55, "$\\omega_z$", fontsize=10, color=INK, ha="center")
     left.annotate("", xy=(3.05, 7.2), xytext=(2.0, 6.75),
                   arrowprops=dict(arrowstyle="->", color=MUTED, lw=1.3,
                                   connectionstyle="arc3,rad=0.5"))
-    left.text(4.55, 7.9, "leave the plane", fontsize=7.4, color=MUTED, ha="center")
-    left.text(0.15, 0.25, "(a)", fontsize=10, fontweight="bold", color=INK)
+    left.text(4.55, 7.9, "leave the plane", fontsize=7.4, color=INK, ha="center")
+    left.text(0.0, 1.02, "(a)", transform=left.transAxes, fontsize=10,
+              fontweight="bold", color=INK, va="bottom")
 
     # ---- (b) the instruction on one frame ----------------------------
     right.imshow(roi, cmap="Greys", vmin=0, vmax=3, origin="upper")
@@ -95,15 +90,16 @@ def figure_axes_and_instruction(roi: np.ndarray):
     lumen = (86.0, 108.0)
     theta = np.linspace(0, 2 * np.pi, 200)
     right.fill(lumen[0] + 30 * np.cos(theta), lumen[1] + 21 * np.sin(theta),
-               facecolor="#12313a", edgecolor=GT_COLOR, lw=1.4, zorder=5)
-    right.plot(*lumen, marker="o", ms=5, mfc=GT_COLOR, mec="white", mew=1.0, zorder=7)
-    right.text(lumen[0], lumen[1] - 26, "lumen", fontsize=7.6, color=GT_COLOR,
+               facecolor="#14181d", edgecolor=ACCENT, lw=1.4, zorder=5)
+    right.plot(*lumen, marker="o", ms=5, mfc="white", mec=INK, mew=1.0, zorder=7)
+    right.text(lumen[0], lumen[1] - 26, "lumen", fontsize=7.6, color=INK,
                ha="center", va="bottom", zorder=7)
     right.annotate("", xy=(axis_x, 152), xytext=(lumen[0], 152), zorder=8,
-                   arrowprops=dict(arrowstyle="-|>", color=CRIT, lw=1.7))
-    right.text((axis_x + lumen[0]) / 2, 146, "$e = A - c$", fontsize=9.5, color=CRIT,
+                   arrowprops=dict(arrowstyle="-|>", color=INK, lw=1.7))
+    right.text((axis_x + lumen[0]) / 2, 146, "$e = A - c$", fontsize=9.5, color=INK,
                ha="center", va="bottom", zorder=8)
-    right.text(4, 246, "(b)", fontsize=10, fontweight="bold", color=INK)
+    right.text(0.0, 1.02, "(b)", transform=right.transAxes, fontsize=10,
+               fontweight="bold", color=INK, va="bottom")
 
     figure.tight_layout(w_pad=1.4)
     return figure
@@ -113,6 +109,8 @@ def figure_examples(predictor, feature_config, roi, image, truth, axis, targets)
     """One frame at three lateral displacements, with the instruction drawn."""
     import cv2
     import matplotlib.pyplot as plt
+
+    from rus_perception.control.features import extract_control_state
 
     _style()
     gy, gx = np.nonzero(truth)
@@ -152,16 +150,16 @@ def figure_examples(predictor, feature_config, roi, image, truth, axis, targets)
         wrong = np.sign(instruction) != np.sign(true)
         ax.annotate("", xy=(axis, 208), xytext=(float(px.mean()), 208), zorder=6,
                     arrowprops=dict(arrowstyle="-|>", lw=2.0,
-                                    color=CRIT if wrong else "#5ce0a0"))
+                                    color=CRIT if wrong else "#2e7d4f"))
         ax.set_title(f"$e$ = {true:+.1f} px", fontsize=9, color=INK, pad=5)
         ax.text(0.5, -0.055,
                 f"instruction {instruction:+.1f} px" + ("   wrong way" if wrong else ""),
                 transform=ax.transAxes, ha="center", va="top", fontsize=7.8,
-                color=CRIT if wrong else INK_SOFT,
+                color=CRIT if wrong else INK,
                 fontweight="bold" if wrong else "normal")
         ax.set_xticks([]); ax.set_yticks([])
         for spine in ax.spines.values():
-            spine.set_edgecolor("#c8d2d8"); spine.set_linewidth(0.6)
+            spine.set_edgecolor("#b3b3b3"); spine.set_linewidth(0.6)
 
     figure.tight_layout(w_pad=0.9)
     return figure
@@ -179,6 +177,14 @@ def main() -> int:
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
+    from _common import REPO_ROOT  # noqa: F401  (sys.path bootstrap)
+
+    from rus_perception.control.features import FeatureExtractionConfig
+    from rus_perception.control.roi import RoiConfig, build_roi_mask
+    from rus_perception.data.io import (load_grayscale, load_mask, resize_image,
+                                        resize_mask)
+    from rus_perception.data.manifest import load_manifest
+    from rus_perception.inference.predictor import Predictor, PredictorConfig
     from rus_perception.utils.config import load_config
     config = load_config(args.config)
     size = tuple(int(v) for v in config.section("data")["image_size"])

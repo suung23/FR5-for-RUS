@@ -35,6 +35,7 @@ import asyncio
 import json
 import math
 import os
+import sys
 import threading
 import time
 
@@ -43,6 +44,7 @@ import rclpy
 from ament_index_python.packages import get_package_share_directory
 from geometry_msgs.msg import Pose, WrenchStamped
 from std_msgs.msg import Bool, Float64, String
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSPresetProfiles, QoSProfile, ReliabilityPolicy
 from scipy.spatial.transform import Rotation
@@ -65,6 +67,11 @@ _IDLE_VEL_RAD_S = 0.002
 
 class TelemetryBridge(Node):
     """ROS 토픽을 모아 웹소켓으로 밀어 주는 노드."""
+
+    #: 소켓이 서지 못해 스스로 내려가는 중인가. 종료 코드를 정한다 —
+    #: 예외 종류로 판정하면 rclpy 버전에 따라 spin 이 그냥 돌아오기도 해서
+    #: 실패가 조용히 0 으로 끝난다.
+    socket_failed = False
 
     def __init__(self) -> None:
         """노드를 만들고 구독·서버를 띄운다."""
@@ -137,6 +144,8 @@ class TelemetryBridge(Node):
         # 발행자가 둘이면 구독자는 컨트롤러의 0 과 PX6D 값을 번갈아 받게 되고, 그
         # 섞임은 로그에 드러나지 않는다.
         self.declare_parameter("bridge.publish_wrench", True)
+        #: 교정 전이라 발행을 보류하고 있다는 사실을 한 번만 알리기 위한 표시.
+        self._raw_wrench_suppressed = False
         self.declare_parameter("bridge.wrench_topic", "wrench_px6d")
 
         # 교정 프로파일. 저장·되읽기 경로이며, 없으면 원값을 그대로 낸다 —
@@ -900,21 +909,42 @@ class TelemetryBridge(Node):
         교정을 하는 이유가 정확히 그것을 없애는 것인데, 그 결과가 제어까지 닿지
         않으면 화면만 맞고 로봇은 여전히 원시값으로 판단한다.
 
-        교정이 없거나 유효하지 않으면 원시값을 낸다. 그 경우 접촉 판정은
-        ``us_diff_ik`` 가 교정 게이트로 막으므로, 못 믿을 값으로 무엇도 바뀌지
-        않는다.
+        **보상할 수 없으면 아무것도 안 낸다.** 예전에는 원시값을 냈고, 그것을
+        ``us_diff_ik`` 의 교정 게이트가 막는다고 보았다. 그런데 게이트는 다른
+        토픽(``calibration_valid``)에 걸려 있어 이 토픽과 잠깐 어긋날 수 있고,
+        2026-09-04 02:15:09 에 실제로 어긋났다 — 교정 유효 20 ms 뒤에 큐에 남아
+        있던 보상 전 표본(10.52 N, 같은 자세의 보상값은 0.71 N)으로 접촉 전환이
+        걸렸다. 그 값은 한계 5 N 을 넘으므로 조절기는 강제 후퇴를 냈다. 아무것도
+        닿지 않은 세션 시작에 로봇이 움직인 것이다.
+
+        침묵이 옳은 이유: 제어 스택은 렌치가 끊긴 것을 이미 "모르니까 멈춘다" 로
+        다룬다. 반면 못 믿을 숫자는 믿을 수 있는 숫자와 생김새가 같다. 없는 것이
+        틀린 것보다 낫고, 여기서는 그 차이가 로봇이 움직이느냐 마느냐다.
+
+        받는 쪽도 프레임 이름으로 한 번 더 본다 (``us_diff_ik`` 의
+        ``COMPENSATED_FRAME_SUFFIX``). 두 겹인 이유는 이 토픽을 구독하는 다른
+        도구(``wait_settled.py`` 등)가 그 검사를 안 하기 때문이다.
         """
         if self.wrench_pub is None:
             return
 
-        published = values
-        frame = self._wrench_frame
         rot, valid, _ = self._compensation_state()
-        if rot is not None and valid:
-            published = compensate(self.profile, values, rot).contact_probe
-            # 프레임 이름도 바뀐다. 보상된 값은 센서 축이 아니라 프로브 축에
-            # 있고, 이름을 그대로 두면 TF 를 쓰는 쪽이 조용히 틀린다.
-            frame = f"{self.robot_name}_probe"
+        if rot is None or not valid:
+            if not self._raw_wrench_suppressed:
+                self._raw_wrench_suppressed = True
+                self.get_logger().warn(
+                    "교정 전이라 wrench 발행을 보류한다 — 보상 전 값은 자중이 실려 "
+                    "있어 제어가 접촉으로 오인한다. GUI 는 계속 원값을 받는다."
+                )
+            return
+        if self._raw_wrench_suppressed:
+            self._raw_wrench_suppressed = False
+            self.get_logger().info("교정 실림 — wrench 발행 재개")
+
+        published = compensate(self.profile, values, rot).contact_probe
+        # 프레임 이름도 바뀐다. 보상된 값은 센서 축이 아니라 프로브 축에
+        # 있고, 이름을 그대로 두면 TF 를 쓰는 쪽이 조용히 틀린다.
+        frame = f"{self.robot_name}_probe"
 
         msg = WrenchStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
@@ -1466,11 +1496,36 @@ class TelemetryBridge(Node):
         )
         thread.start()
 
+    def _socket_died(self, reason: str) -> None:
+        """소켓이 못 서면 프로세스를 내린다. 살려 두면 더 나쁘다.
+
+        예전에는 여기서 에러만 찍고 스레드가 조용히 끝났다. 그러면 노드는 계속
+        돌지만 **소켓이 없다**. 겉으로 드러나는 증상은 이렇다:
+
+        - GUI 는 붙을 데가 없어 NO TELEMETRY 를 보여준다. 브리지는 프로세스
+          목록에 멀쩡히 있으므로 "띄웠는데 안 붙는다" 가 된다.
+        - PX6D 시리얼 포트는 **잡은 채로** 남는다. 그래서 원인을 고치고 다시
+          띄워도 새 인스턴스가 포트를 못 열고 `multiple access on port` 로
+          실패한다 — 두 번째 증상이 첫 번째 증상을 가린다.
+
+        실제로 이 상태가 나오는 가장 흔한 경로는 8765 를 이미 쥔 이전
+        인스턴스가 남아 있는 경우다. 즉 좀비가 다음 좀비를 만든다.
+
+        내려가면 start_session.sh 의 기동 확인이 죽은 것을 보고 로그 끝을
+        보여 준다. 붙지 않는 이유를 찾는 자리가 한 군데로 모인다.
+        """
+        self.get_logger().error(reason)
+        self.socket_failed = True
+        try:
+            rclpy.shutdown()
+        except Exception:  # 이미 내려가는 중이면 할 일이 없다.
+            pass
+
     def _serve(self, host: str, port: int) -> None:
         try:
             import websockets
         except ImportError:
-            self.get_logger().error(
+            self._socket_died(
                 "websockets 가 없다: pip install websockets — 브리지를 열 수 없다"
             )
             return
@@ -1532,7 +1587,7 @@ class TelemetryBridge(Node):
         try:
             asyncio.run(main())
         except Exception as exc:
-            self.get_logger().error(f"브리지 종료: {exc}")
+            self._socket_died(f"브리지 종료: {exc}")
 
 
 def main(argv=None) -> None:
@@ -1541,12 +1596,18 @@ def main(argv=None) -> None:
     node = TelemetryBridge()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
+        # 후자는 소켓 스레드가 _socket_died 로 내린 경우다.
         pass
     finally:
+        # 소켓이 못 서서 내려온 것을 0 으로 끝내면 스크립트도 조작자도 정상
+        # 종료와 구별할 수 없다.
+        failed = node.socket_failed
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
+    if failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

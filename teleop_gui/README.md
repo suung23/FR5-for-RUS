@@ -68,10 +68,19 @@ Our PX6D is the USB variant, so `robot_state_pkg.ft_sensor_data` is empty and
 directly:
 
 ```bash
-sg dialout -c "ros2 run fr5_control telemetry_bridge --ros-args \
+sg dialout -c "LD_LIBRARY_PATH=$LD_LIBRARY_PATH \
+  ros2 run fr5_control telemetry_bridge --ros-args \
   --params-file $(ros2 pkg prefix fr5_control)/share/fr5_control/config/probe.yaml \
   -p bridge.px6d_port:=/dev/ttyACM0"
 ```
+
+`LD_LIBRARY_PATH` is passed back in on purpose, and leaving it out is not a
+style choice — `sg` is setuid-root, so the dynamic linker strips `LD_*` from
+its environment and the wrapped shell starts with an empty library path. The
+bridge then dies on `ImportError: librcl_action.so`, before any of its own
+code runs, and the console shows **NO TELEMETRY** with nothing in the bridge
+log but an import traceback. Every other ROS variable survives `sg`, which is
+why this is the only one restored. `scripts/start_session.sh` does it for you.
 
 Each wrench frame reports its `source`, and the console names it — the header
 reads `PX6D · USB DIRECT` or `VIA CONTROLLER` rather than claiming PX6D

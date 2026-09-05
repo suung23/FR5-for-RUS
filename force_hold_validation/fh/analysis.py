@@ -47,6 +47,20 @@ class Run:
     mode_reconstructed: bool = False
 
     @property
+    def force_hold(self) -> bool:
+        """이 실행에서 로봇이 z 를 잡고 있었는가.
+
+        거짓이면 **위약 대조군**이다 — 접촉도 속도 상한도 그대로지만 z 조절만
+        놓은 채 힘을 기록만 했다. 같은 교란을 제어 없이 받은 값이므로,
+        :func:`regulation_evidence` 가 강성으로 외삽하던 반사실을 이쪽은 직접
+        측정한다.
+
+        메타에 없는 캡처는 켜져 있던 것으로 본다 — 2026-09-04 이전에는 끌 방법
+        자체가 없었다.
+        """
+        return bool(self.meta.get("force_hold_enabled", True))
+
+    @property
     def target(self) -> float:
         return float(self.meta.get("target_force_n", float("nan")))
 
@@ -646,10 +660,15 @@ def summarise(runs: list) -> Summary:
             metrics = hold_metrics(run)
             if metrics.get("samples"):
                 out.hold.append({"run": run.label, "run_type": run.run_type,
+                                 "force_hold": run.force_hold,
                                  "target_n": run.target, "band_n": run.band, **metrics})
         if run.run_type == "disturbance":
             out.events.extend(disturbance_events(run))
-            out.evidence.extend(regulation_evidence(run, out.k_n_per_m))
+            # 대조군에는 조절 증거가 없다 — 조절을 안 했으니까. 물러난 거리를
+            # "팔이 흡수한 양" 으로 읽으면 0 을 실패로 적게 되는데, 여기서 0 은
+            # 설계대로다. 이 팔이 재는 것은 그 반대편, 반사실 자체다.
+            if run.force_hold:
+                out.evidence.extend(regulation_evidence(run, out.k_n_per_m))
     # 되돌아옴은 제외된 실행에서도 잰다 — 힘 제어가 안 걸린 실행이야말로
     # 비교의 반쪽(개루프)이고, 그것을 버리면 비교 자체가 사라진다.
     for run in runs:

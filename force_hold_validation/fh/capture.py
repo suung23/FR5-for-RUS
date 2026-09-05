@@ -134,7 +134,11 @@ class ForceHoldCapture:
         names = ["contact_control.target_force_n", "contact_control.deadband_n",
                  "contact_control.admittance_b_z", "teleop.contact_probing_force_n",
                  "teleop.contact_probing_release_n", "safety.warn_contact_force_n",
-                 "safety.max_contact_force_n", "ft_sensor.contact_force_mode"]
+                 "safety.max_contact_force_n", "ft_sensor.contact_force_mode",
+                 # 대조군인지 아닌지. 이것이 메타에 없으면 두 팔이 파일에서 구별되지
+                 # 않는다 — 힘 궤적만 보고 "제어가 나빴다" 와 "제어가 없었다" 를
+                 # 가르는 것은 사후에 불가능하다.
+                 "contact_control.force_hold_enabled"]
         client = node.create_client(GetParameters, f"{target_node}/get_parameters")
         if not client.wait_for_service(timeout_sec=timeout_s):
             return {"parameters_read": False,

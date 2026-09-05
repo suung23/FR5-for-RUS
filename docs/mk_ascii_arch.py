@@ -124,7 +124,7 @@ y = band(y, X, BW, "영상축   ~5 Hz   policy_node  +  offset_filter", [
 y = arrow(y, "V_i* = (v_x, v_y, ω_z)      ZOH 20×")
 
 y = band(y, X, BW, "힘축 + 합성   100 Hz   admittance_node  +  QP arbiter", [
-  "v_z = clamp( (F_n* − F_n)/B_z , ±10 mm/s )                     B_z = 1000 N·s/m",
+  "v_z = clamp( (F_n* − F_n)/B_z , ±10 mm/s )                     B_z = 3000 N·s/m",
   "ω_x = clamp( −M_x/B_r , ±0.2 rad/s )    ω_y = clamp( −M_y/B_r , ±0.2 )   B_r = 0.5",
   "",
   "QP   min ‖W_f S_f(Jq̇ − V_f*)‖² + ‖W_i S_i(Jq̇ − V_i*)‖² + w_r‖q̇‖² + w_m‖q̇ − q̇⁻‖²",

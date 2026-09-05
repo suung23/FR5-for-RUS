@@ -20,7 +20,7 @@ from docx.shared import Cm, Pt, RGBColor
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIGDIR = os.path.join(REPO, "imu_bench", "qc_track", "report", "figures")
-OUT = os.path.join(REPO, "Sonologger_Manuscript.docx")
+OUT = os.path.join(REPO, "Paper", "Sonologger_Manuscript.docx")
 
 BODY_PT = 9.2
 SERIF = "Times New Roman"

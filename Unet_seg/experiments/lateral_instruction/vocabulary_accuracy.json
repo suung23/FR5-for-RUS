@@ -1,0 +1,41 @@
+{
+  "n_frames": 1936,
+  "hold_threshold_px": 8.09158328289292,
+  "sigma_px": 4.919333337817811,
+  "grade_step_px": 8.09158328289292,
+  "vocabularies": [
+    {
+      "name": "move / hold",
+      "size": 2,
+      "grade_boundaries_px": [],
+      "accuracy": 0.8527892561983471,
+      "direction_error": 0.0
+    },
+    {
+      "name": "move left / move right / hold",
+      "size": 3,
+      "grade_boundaries_px": [],
+      "accuracy": 0.8517561983471075,
+      "direction_error": 0.0010330578512396695
+    },
+    {
+      "name": "+ two magnitude grades",
+      "size": 5,
+      "grade_boundaries_px": [
+        16.18316656578584
+      ],
+      "accuracy": 0.7649793388429752,
+      "direction_error": 0.0010330578512396695
+    },
+    {
+      "name": "+ three magnitude grades",
+      "size": 7,
+      "grade_boundaries_px": [
+        16.18316656578584,
+        24.27474984867876
+      ],
+      "accuracy": 0.7066115702479339,
+      "direction_error": 0.0010330578512396695
+    }
+  ]
+}

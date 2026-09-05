@@ -57,14 +57,15 @@ def figure_axes_and_instruction(roi: np.ndarray):
     left.add_patch(Rectangle((3.5, 5.6), 3.0, 1.0, facecolor="#ececec",
                              edgecolor=INK_SOFT, lw=0.9))
     left.text(5.0, 6.1, "probe", ha="center", va="center", fontsize=8.5, color=INK)
-    # imaging plane, drawn as the sector the probe fills
-    left.fill([5.0, 2.6, 7.4], [5.6, 0.9, 0.9], color="#f5f5f5", edgecolor=INK_SOFT, lw=0.8)
-    left.text(5.0, 2.1, "imaging plane", ha="center", fontsize=8, color=INK)
+    # imaging plane, drawn as the dark screen the probe fills — the same
+    # register as the B-mode panel beside it.
+    left.fill([5.0, 2.6, 7.4], [5.6, 0.9, 0.9], color="#14181d", edgecolor=INK_SOFT, lw=0.8)
+    left.text(5.0, 2.1, "imaging plane", ha="center", fontsize=8, color="#f2f2f2")
 
     left.add_patch(FancyArrow(5.0, 4.6, 2.0, 0, width=0.055, head_width=0.30,
-                              head_length=0.42, color=ACCENT, length_includes_head=True))
+                              head_length=0.42, color="#f2f2f2", length_includes_head=True))
     left.add_patch(FancyArrow(5.0, 4.6, -2.0, 0, width=0.055, head_width=0.30,
-                              head_length=0.42, color=ACCENT, length_includes_head=True))
+                              head_length=0.42, color="#f2f2f2", length_includes_head=True))
     left.text(7.2, 4.95, "$v_x$", fontsize=10, color=INK, ha="center", fontweight="bold")
     left.text(7.25, 4.28, "in plane", fontsize=7.4, color=INK, ha="center")
 
@@ -80,23 +81,51 @@ def figure_axes_and_instruction(roi: np.ndarray):
               fontweight="bold", color=INK, va="bottom")
 
     # ---- (b) the instruction on one frame ----------------------------
-    right.imshow(roi, cmap="Greys", vmin=0, vmax=3, origin="upper")
-    right.set_xlim(0, 256); right.set_ylim(256, 0); right.axis("off")
+    # Rendered as a synthetic B-mode: speckle-textured sector on black,
+    # anechoic lumen with a bright wall and posterior enhancement, white
+    # annotation — the register of an actual ultrasound display.
+    from PIL import Image as _PILImage
+    from PIL import ImageFilter as _PILFilter
+
+    def gaussian_filter(a, sigma):
+        im = _PILImage.fromarray((255 * (a - a.min()) / (float(np.ptp(a)) or 1)).astype(np.uint8))
+        return np.asarray(im.filter(_PILFilter.GaussianBlur(radius=sigma)), float)
+
+    rng = np.random.default_rng(7)
+    speckle = gaussian_filter(rng.gamma(2.0, 1.0, size=roi.shape), 1.1)
+    speckle = (speckle - speckle.min()) / (speckle.max() - speckle.min())
+    yy, xx = np.mgrid[0:256, 0:256]
+    depth_gain = 1.0 - 0.30 * (yy / 255.0)
+    frame = np.zeros(roi.shape, float)
+    frame[roi] = (0.14 + 0.34 * speckle[roi]) * depth_gain[roi]
+
     ys, xs = np.nonzero(roi)
     axis_x = xs.mean()
-    right.axvline(axis_x, color=INK, lw=1.1, ls=(0, (5, 3)), zorder=4)
-    right.text(axis_x + 4, 16, "beam axis $A$", fontsize=7.6, color=INK, va="top")
-
     lumen = (86.0, 108.0)
+    inside = ((xx - lumen[0]) / 30.0) ** 2 + ((yy - lumen[1]) / 21.0) ** 2
+    frame[(inside <= 1.0) & roi] = 0.03 + 0.03 * speckle[(inside <= 1.0) & roi]
+    # posterior acoustic enhancement below the anechoic lumen — feathered in
+    # x and ramped in y so it reads as physics, not as a painted rectangle
+    boost = np.exp(-(((xx - lumen[0]) / 24.0) ** 2))
+    ramp = 1.0 / (1.0 + np.exp(-(yy - (lumen[1] + 26)) / 7.0))
+    gain = boost * ramp
+    frame[roi] = np.clip(frame[roi] * (1 + 1.1 * gain[roi]) + 0.05 * gain[roi], 0, 1)
+    right.imshow(frame, cmap="gray", vmin=0, vmax=1, origin="upper",
+                 interpolation="antialiased")
+    right.set_xlim(0, 256); right.set_ylim(256, 0); right.axis("off")
+    US_INK = "#f2f2f2"
+    right.axvline(axis_x, color=US_INK, lw=1.1, ls=(0, (5, 3)), zorder=4)
+    right.text(axis_x + 4, 16, "beam axis $A$", fontsize=7.6, color=US_INK, va="top")
+
     theta = np.linspace(0, 2 * np.pi, 200)
-    right.fill(lumen[0] + 30 * np.cos(theta), lumen[1] + 21 * np.sin(theta),
-               facecolor="#14181d", edgecolor=ACCENT, lw=1.4, zorder=5)
+    right.plot(lumen[0] + 30 * np.cos(theta), lumen[1] + 21 * np.sin(theta),
+               color="#e9ede8", lw=1.6, zorder=5)
     right.plot(*lumen, marker="o", ms=5, mfc="white", mec=INK, mew=1.0, zorder=7)
-    right.text(lumen[0], lumen[1] - 26, "lumen", fontsize=7.6, color=INK,
+    right.text(lumen[0], lumen[1] - 26, "lumen", fontsize=7.6, color=US_INK,
                ha="center", va="bottom", zorder=7)
     right.annotate("", xy=(axis_x, 152), xytext=(lumen[0], 152), zorder=8,
-                   arrowprops=dict(arrowstyle="-|>", color=INK, lw=1.7))
-    right.text((axis_x + lumen[0]) / 2, 146, "$e = A - c$", fontsize=9.5, color=INK,
+                   arrowprops=dict(arrowstyle="-|>", color=US_INK, lw=1.7))
+    right.text((axis_x + lumen[0]) / 2, 146, "$e = A - c$", fontsize=9.5, color=US_INK,
                ha="center", va="bottom", zorder=8)
     right.text(0.0, 1.02, "(b)", transform=right.transAxes, fontsize=10,
                fontweight="bold", color=INK, va="bottom")

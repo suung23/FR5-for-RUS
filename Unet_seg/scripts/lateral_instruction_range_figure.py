@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Figure 2 of the lateral-instruction manuscript: the attained range of Q.
+"""Figure 3 of the lateral-instruction manuscript: the attained range of Q.
 
-(a) The interval Q actually attains under the two aggregations, against its
-nominal domain [0, 1].  (b) The interval each active sub-score attains and its
+(a) The interval Q actually attains against its nominal domain [0, 1].  (b) The interval each active sub-score attains and its
 share of the resulting range.
 
 The numbers reproduce Tables 2-3 of the manuscript (attained intervals, widths,
@@ -27,8 +26,7 @@ INK = "#000000"
 
 #: (label, attained interval, central 80%, pale colour, solid colour), top row first.
 AGGREGATIONS = (
-    ("weighted geometric\nimage-first", (0.14, 0.78), (0.270, 0.720), NAVY_PALE, NAVY),
-    ("arithmetic mean\n8 terms", (0.70, 1.00), (0.850, 0.973), GREY_PALE, GREY),
+    ("$Q$\n(weighted geometric,\nimage-first)", (0.14, 0.78), (0.270, 0.720), NAVY_PALE, NAVY),
 )
 
 #: (name, attained interval, share of the range of Q, colour), Table 2 order.
@@ -78,11 +76,11 @@ def build():
         a.text((attained[0] + attained[1]) / 2, y + 0.36,
                f"width {attained[1] - attained[0]:.2f}", ha="center", va="bottom",
                fontsize=8.5, fontweight="bold", color=INK)
-    a.set_yticks([step, 0.0])
+    a.set_yticks([0.0])
     a.set_yticklabels([entry[0] for entry in AGGREGATIONS], fontsize=8.5)
     a.set_xticks([0.0, 0.25, 0.50, 0.75, 1.00])
     a.set_xlim(0.0, 1.0)
-    a.set_ylim(-0.72, 2.25)
+    a.set_ylim(-0.72, 0.95)
     a.tick_params(labelsize=8)
     a.set_xlabel("$Q$", fontsize=9)
     a.legend(handles=[Patch(facecolor=GREY_PALE, edgecolor="#bbbbbb",

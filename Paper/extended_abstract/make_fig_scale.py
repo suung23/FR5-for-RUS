@@ -8,7 +8,7 @@ import os
 import numpy as np
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_ROOT = os.path.dirname(_HERE)
+_ROOT = os.path.dirname(os.path.dirname(_HERE))
 SRC = os.path.join(_ROOT, "force_validation", "outputs", "trial_results.csv")
 
 import matplotlib                                                # noqa: E402

@@ -382,8 +382,10 @@ def figure_validity(stats: dict):
     curve = [c for c in stats["validity_curve"] if c["n"]]
     centres = [min((c["low"] + c["high"]) / 2, 50) for c in curve]
     observed = [c["observed_sign_error"] * 100 for c in curve]
-    ax.scatter(centres, observed, s=20, facecolor="white", edgecolor=ACCENT,
-               lw=1.3, zorder=5, label="observed")
+    # 작은 원, clip 해제 — |e| 가 큰 빈은 관측 오류율이 0% 라 원이 x축 위에
+    # 앉는데, 잘린 반원은 값이 아니라 그림 실수로 읽힌다.
+    ax.scatter(centres, observed, s=11, facecolor="white", edgecolor=ACCENT,
+               lw=1.1, zorder=5, label="observed", clip_on=False)
     for c, x, y in zip(curve, centres, observed):
         ax.annotate(f"n={c['n']}", (x, y), textcoords="offset points", xytext=(0, 11),
                     ha="center", fontsize=7, color=INK)

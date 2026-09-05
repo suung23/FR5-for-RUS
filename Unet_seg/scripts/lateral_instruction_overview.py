@@ -150,55 +150,59 @@ def scanning_clinician(ax, x0, y0, sc=1.0):
     def E(cx, cy, rx, ry, fill, **kw):
         _ell(ax, cx, cy, rx * sc, ry * sc, fill, **kw)
 
-    # patient — drape mound with the abdomen exposed under the probe
-    _poly(ax, [(X(0.0), Y(0.0)), (X(12.8), Y(0.0)), (X(12.8), Y(1.5)),
-               (X(10.6), Y(2.6)), (X(7.2), Y(3.1)), (X(3.8), Y(2.6)),
-               (X(1.2), Y(1.7)), (X(0.0), Y(1.0))],
-          DRAPE, edge=OUTLINE, lw=0.9, z=5)
-    E(X(9.3), Y(2.5), 1.8, 0.8, SKIN, edge=OUTLINE, lw=0.9, z=6)
+    BED = "#8FB9CE"      # examination table
+    BED_TOP = "#A9CDDD"
+    GOWN = "#CDE3EE"     # patient drape / gown
 
-    # coat body over navy scrub V, with lapels
-    _poly(ax, [(X(2.0), Y(2.0)), (X(2.35), Y(7.0)), (X(3.0), Y(7.8)),
-               (X(5.8), Y(7.8)), (X(6.5), Y(7.0)), (X(6.75), Y(3.4)),
-               (X(5.8), Y(1.9))],
-          "white", edge=OUTLINE, lw=1.0, z=7)
-    _poly(ax, [(X(3.55), Y(7.7)), (X(5.25), Y(7.7)), (X(4.4), Y(5.4))],
-          OUTLINE, z=8)
-    _poly(ax, [(X(3.55), Y(7.7)), (X(4.35), Y(5.7)), (X(3.3), Y(6.8))],
-          "white", edge=OUTLINE, lw=0.8, z=9)
-    _poly(ax, [(X(5.25), Y(7.7)), (X(4.45), Y(5.7)), (X(5.5), Y(6.8))],
-          "white", edge=OUTLINE, lw=0.8, z=9)
+    # ---- examination bed: horizontal table the patient reclines on -----
+    _poly(ax, [(X(3.0), Y(0.0)), (X(13.2), Y(0.0)), (X(13.2), Y(2.4)),
+               (X(3.0), Y(2.4))], BED, edge=OUTLINE, lw=0.9, z=4)
+    _poly(ax, [(X(3.0), Y(2.1)), (X(13.2), Y(2.1)), (X(13.2), Y(2.4)),
+               (X(3.0), Y(2.4))], BED_TOP, z=5)
 
-    # left arm resting on the patient, right arm to the probe — both gloved
-    _poly(ax, [(X(2.35), Y(6.6)), (X(3.15), Y(6.9)), (X(5.7), Y(3.2)),
-               (X(4.9), Y(2.75))],
-          "white", edge=OUTLINE, lw=1.0, z=8)
-    E(X(5.45), Y(3.0), 0.58, 0.46, GLOVE, edge=OUTLINE, lw=0.8, z=9)
-    _poly(ax, [(X(5.95), Y(6.9)), (X(6.8), Y(7.15)), (X(9.35), Y(4.05)),
-               (X(8.55), Y(3.4))],
-          "white", edge=OUTLINE, lw=1.0, z=8)
-    E(X(9.05), Y(3.55), 0.62, 0.5, GLOVE, edge=OUTLINE, lw=0.8, z=9)
+    # ---- patient: reclining, head on a pillow at the right ------------
+    # body + gown draped along the table, exposed abdomen at the centre
+    _poly(ax, [(X(5.4), Y(2.4)), (X(12.4), Y(2.4)), (X(12.4), Y(3.9)),
+               (X(10.8), Y(4.4)), (X(9.0), Y(4.0)), (X(7.4), Y(3.7)),
+               (X(6.0), Y(3.4))], GOWN, edge=OUTLINE, lw=0.8, z=6)
+    E(X(11.7), Y(3.5), 1.5, 0.95, "white", edge=OUTLINE, lw=0.7, z=6)  # pillow
+    E(X(11.6), Y(4.4), 0.95, 0.9, SKIN, edge=OUTLINE, lw=0.8, z=7)     # head
+    E(X(11.75), Y(4.95), 1.05, 0.6, HAIR, z=8)                          # hair
+    E(X(7.35), Y(3.5), 1.5, 0.62, SKIN, edge=OUTLINE, lw=0.7, z=7)     # abdomen
 
-    # probe on the abdomen, cable arcing away
-    _poly(ax, [(X(8.85), Y(3.1)), (X(9.9), Y(3.1)), (X(9.62), Y(4.75)),
-               (X(9.13), Y(4.75))],
-          "white", edge=OUTLINE, lw=0.9, z=8)
-    ax.add_patch(Rectangle((X(8.8), Y(2.65)), 1.2 * sc, 0.5 * YS * sc,
-                           facecolor=MASK, edgecolor=OUTLINE, linewidth=0.8,
-                           zorder=8))
-    ax.add_patch(FancyArrowPatch(
-        (X(9.4), Y(4.85)), (X(11.9), Y(7.2)), arrowstyle="-",
-        connectionstyle="arc3,rad=-0.55", linewidth=1.1, color=OUTLINE,
-        zorder=7))
+    # ---- clinician: seated at the left, leaning toward the patient ----
+    # white coat torso
+    _poly(ax, [(X(0.6), Y(1.2)), (X(1.1), Y(6.6)), (X(2.0), Y(7.5)),
+               (X(4.6), Y(7.5)), (X(5.3), Y(6.7)), (X(5.2), Y(2.2)),
+               (X(4.2), Y(1.2))], "white", edge=OUTLINE, lw=1.0, z=8)
+    # scrub V-neck under the coat
+    _poly(ax, [(X(2.35), Y(7.4)), (X(4.05), Y(7.4)), (X(3.2), Y(5.2))],
+          NAVY, z=9)
+    _poly(ax, [(X(2.35), Y(7.4)), (X(3.15), Y(5.5)), (X(2.1), Y(6.6))],
+          "white", edge=OUTLINE, lw=0.7, z=10)
+    _poly(ax, [(X(4.05), Y(7.4)), (X(3.25), Y(5.5)), (X(4.3), Y(6.6))],
+          "white", edge=OUTLINE, lw=0.7, z=10)
 
-    # head — hair with bun, face, surgical mask; faceless like the reference
-    E(X(4.35), Y(9.05), 1.4, 1.45, HAIR, z=8)
-    E(X(2.95), Y(8.75), 0.66, 0.66, HAIR, z=8)
-    E(X(4.55), Y(8.8), 1.14, 1.2, SKIN, z=9)
-    E(X(4.4), Y(9.7), 1.28, 0.72, HAIR, z=10)
-    E(X(4.72), Y(8.28), 0.92, 0.65, MASK, edge=OUTLINE, lw=0.7, z=10)
-    ax.add_patch(Rectangle((X(3.95), Y(7.35)), 1.0 * sc, 0.7 * YS * sc,
-                           facecolor=SKIN, edgecolor="none", zorder=7))
+    # both arms sweeping from the shoulders down to the probe hand
+    _poly(ax, [(X(1.5), Y(6.3)), (X(2.5), Y(6.7)), (X(6.9), Y(3.9)),
+               (X(6.2), Y(3.1))], "white", edge=OUTLINE, lw=1.0, z=9)
+    _poly(ax, [(X(4.4), Y(6.9)), (X(5.2), Y(7.0)), (X(7.2), Y(4.2)),
+               (X(6.5), Y(3.5))], "white", edge=OUTLINE, lw=1.0, z=9)
+    E(X(6.75), Y(3.75), 0.62, 0.5, GLOVE, edge=OUTLINE, lw=0.8, z=11)
+    E(X(6.35), Y(3.35), 0.5, 0.42, GLOVE, edge=OUTLINE, lw=0.8, z=11)
+
+    # probe in the gloved hand, resting on the abdomen
+    _poly(ax, [(X(6.55), Y(2.9)), (X(7.35), Y(2.9)), (X(7.15), Y(3.9)),
+               (X(6.75), Y(3.9))], "white", edge=OUTLINE, lw=0.8, z=10)
+
+    # head: dark hair with a bun, skin, blue surgical mask (faceless)
+    E(X(2.75), Y(9.0), 1.45, 1.5, HAIR, z=9)
+    E(X(1.5), Y(9.35), 0.62, 0.62, HAIR, z=9)          # bun
+    E(X(2.95), Y(8.75), 1.15, 1.2, SKIN, z=10)
+    E(X(2.8), Y(9.65), 1.32, 0.72, HAIR, z=11)         # fringe
+    E(X(3.12), Y(8.2), 0.95, 0.66, MASK, edge=OUTLINE, lw=0.7, z=11)
+    ax.add_patch(Rectangle((X(2.35), Y(7.25)), 1.05 * sc, 0.7 * YS * sc,
+                           facecolor=SKIN, edgecolor="none", zorder=8))
 
 
 def main():

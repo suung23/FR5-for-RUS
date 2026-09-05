@@ -4,11 +4,12 @@
     python3 docs/build_lateral_instruction_manuscript.py
     soffice --headless --convert-to pdf Lateral_Instruction_Manuscript.docx
 
-Format follows the HoLEP contact-force extended abstract: A4, two columns,
-Times New Roman, numbered tables and figures with captions beneath. Every number
-in the text is read from experiments/lateral_instruction/lateral_instruction.json
-rather than typed, so the manuscript cannot drift from the analysis that
-produced it.
+Format follows the 대한의료정보학회(KOSMI) 연제논문 초록 포맷: A4, single column,
+10 mm top/bottom margins and 25 mm side margins, 10 pt body at 140% line
+spacing (abstract 120%), 장평 95% · 자간 −5%, Korean glyphs in 신명조 and Latin
+in Times New Roman. Numbered tables and figures carry captions; every number in
+the text is read from experiments/lateral_instruction/lateral_instruction.json
+rather than typed, so the manuscript cannot drift from the analysis.
 """
 from __future__ import annotations
 
@@ -40,8 +41,12 @@ PAPER = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(PAPER, "Lateral_Instruction_Manuscript.docx")
 USED_FIGURES: list[str] = []
 
-BODY_PT = 9.7
-SERIF = "Times New Roman"
+# 대한의료정보학회(KOSMI) 연제논문 초록 포맷을 따른다 (KOSMI_Abstract_style):
+# A4, 단일 단, 여백 위·아래·머리말·꼬리말 10 mm · 좌·우 25 mm, 본문 10 pt,
+# 줄간격 140 %(초록 120 %), 장평 95 %, 자간 −5 %, 국문 글꼴 신명조.
+BODY_PT = 10
+SERIF = "Times New Roman"     # 라틴(영문) 글꼴 — 신명조와 같은 명조 계열
+EAST = "신명조"               # 한글 글꼴 (KOSMI 지정)
 RULE = "808080"
 
 S = STATS
@@ -61,16 +66,21 @@ def style_doc(doc):
     st = doc.styles["Normal"]
     st.font.name = SERIF
     st.font.size = Pt(BODY_PT)
-    st.element.rPr.rFonts.set(qn("w:eastAsia"), SERIF)
+    rpr = st.element.get_or_add_rPr()
+    rpr.rFonts.set(qn("w:eastAsia"), EAST)
+    # 장평 95 % (w:w) · 자간 −5 % ≈ −0.5 pt = −10 twip (w:spacing). KOSMI 전 스타일 공통.
+    for tag, val in (("w:w", "95"), ("w:spacing", "-10")):
+        el = OxmlElement(tag)
+        el.set(qn("w:val"), val)
+        rpr.append(el)
     pf = st.paragraph_format
     pf.space_before = pf.space_after = Pt(0)
-    pf.line_spacing = 1.06
-    # 페이지 바닥에 홀로 남는 줄을 줄인다. 단락 단위 고아는 그림 폭(=높이)으로 잡는다.
+    pf.line_spacing = 1.4              # KOSMI 바탕글 줄간격 140 %
     pf.widow_control = True
     for s in doc.sections:
         s.page_width, s.page_height = Cm(21.0), Cm(29.7)
-        s.top_margin = s.bottom_margin = Cm(1.9)
-        s.left_margin = s.right_margin = Cm(1.8)
+        s.top_margin = s.bottom_margin = Cm(1.0)      # 위·아래 10 mm
+        s.left_margin = s.right_margin = Cm(2.5)      # 좌·우 25 mm
         s.header_distance = s.footer_distance = Cm(1.0)
 
 
@@ -133,8 +143,10 @@ def para(doc, text, *, size=BODY_PT, bold=False, italic=False, align="just",
 
 
 def head(doc, text, level=1):
-    p = para(doc, text, size={1: 10.0, 2: 9.4}[level], bold=True, align="left",
-             before=6.5 if level == 1 else 4.5, after=2.0)
+    # KOSMI: Ⅱ.소제목 = 가운데·문장위 3 mm, 2.소제목 = 왼쪽·문장위 2 mm, 둘 다 10 pt.
+    p = para(doc, text, size=10.0, bold=True,
+             align="center" if level == 1 else "left",
+             before=8.5 if level == 1 else 5.7, after=0.0)
     p.paragraph_format.keep_with_next = True
     return p
 
@@ -156,19 +168,19 @@ def equation(doc, text, tag):
 def figure(doc, number, filename, caption, width_cm):
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p.paragraph_format.space_before = Pt(6)
+    p.paragraph_format.space_before = Pt(4)
     p.paragraph_format.space_after = Pt(2)
     p.paragraph_format.keep_with_next = True
     p.add_run().add_picture(os.path.join(FIGDIR, filename), width=Cm(width_cm))
     USED_FIGURES.append(filename)
     c = doc.add_paragraph()
     c.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    c.paragraph_format.space_after = Pt(6)
+    c.paragraph_format.space_after = Pt(4)
     rich(c, "**Figure %d.** %s" % (number, caption), size=7.9)
 
 
-#: Text width of one body column [cm]: (page - margins - gutter) / 2.
-COL_CM = (21.0 - 2 * 1.8 - 0.7) / 2
+#: Text width [cm] — single column, page minus the 25 mm side margins (KOSMI).
+COL_CM = 21.0 - 2 * 2.5
 
 
 def _fix_layout(t, widths):
@@ -196,40 +208,22 @@ def _fix_layout(t, widths):
 
 
 def _scale(widths, full_width=False):
-    """Scale a width recipe to fill one column, or the whole text block."""
-    target = (21.0 - 2 * 1.8 - 0.05) if full_width else (COL_CM - 0.05)
+    """Scale a width recipe to the single-column text width."""
+    target = COL_CM - 0.05
     factor = target / sum(widths)
     return [w * factor for w in widths]
 
 
-def _span(doc, count):
-    """Continuous section break that changes the column count in place."""
-    section = doc.add_section(WD_SECTION.CONTINUOUS)
-    section.page_width, section.page_height = Cm(21.0), Cm(29.7)
-    section.top_margin = section.bottom_margin = Cm(1.9)
-    section.left_margin = section.right_margin = Cm(1.8)
-    columns(section, count)
-    return section
-
-
-def wide_figure(doc, number, filename, caption, width_cm=17.0):
-    """A figure spanning both columns.
-
-    The wide panels are drawn at a 2.5:1 aspect; squeezed into one 8.2 cm column
-    their axis labels fall below 5 pt. Spanning the page is the difference
-    between a figure a reviewer can read and one they cannot.
-    """
-    _span(doc, 1)
-    figure(doc, number, filename, caption, width_cm)
-    _span(doc, 2)
+def wide_figure(doc, number, filename, caption, width_cm=16.0):
+    """Full-width figure. In the KOSMI single-column layout there is nothing
+    to span — the figure simply sits in the one text column, centred."""
+    figure(doc, number, filename, caption, min(width_cm, COL_CM))
 
 
 def wide_table(doc, *args, **kwargs):
-    """A table spanning both columns, for row sets a column cannot hold."""
-    _span(doc, 1)
+    """Full-width table (single column)."""
     kwargs["full_width"] = True
     table(doc, *args, **kwargs)
-    _span(doc, 2)
 
 
 def table(doc, number, caption, header, rows, widths=None, size=7.8, full_width=False):
@@ -308,10 +302,10 @@ def front_matter(doc):
     para(doc, "From Segmentation to Instruction: Language-Level Operator Guidance Built on "
               "an Image-Quality Function in Transabdominal Bladder Ultrasound for HoLEP "
               "Morcellation",
-         size=13.5, bold=True, align="center", after=7)
+         size=12.0, bold=True, align="center", after=3)
     para(doc, "Seong Jeong^1, 2, 5^, Minsung Kim^1,2,4^, Dongho Yee^1,2,4^, "
               "Yechan Seo^1,2,5^, Juahn Oh^1,2,3^, Hyoun-Joong Kong^1,2,5,*^",
-         size=10.0, align="center", after=6)
+         size=10.0, align="center", after=3)
     for line in (
         "^1^ Department of Transdisciplinary Medicine, Seoul National University Hospital, Seoul, Republic of Korea",
         "^2^ Rosota Inc., Seoul, Republic of Korea",
@@ -319,51 +313,45 @@ def front_matter(doc):
         "^4^ Department of Mechanical Engineering, Seoul National University, Seoul, Republic of Korea",
         "^5^ Department of Medicine, Seoul National University, Seoul, Republic of Korea",
     ):
-        para(doc, line, size=8.4, align="left", after=0.6)
+        para(doc, line, size=8.0, align="center", after=0.4)
     doc.add_paragraph().paragraph_format.space_after = Pt(3)
 
-    para(doc, "Abstract", size=9.8, bold=True, align="left", after=2)
-    para(doc,
+    para(doc, "Abstract", size=10.0, bold=True, align="left", before=3, after=1)
+    _abs = para(doc,
          "During the morcellation phase of holmium laser enucleation of the prostate "
          "(HoLEP) an operator holds a suprapubic probe and must keep the bladder lumen in "
-         "view. We present a guidance architecture that turns each bladder ultrasound frame "
-         "into one corrective instruction with two readers: a U-Net segments the bladder "
-         "lumen, a transparent image-quality function *Q* judges the frame from the "
-         "segmentation and the image, and the judgment is emitted as a **language "
-         "instruction** naming the next corrective movement — *move left*, *move right*, "
-         "*hold*, or *check bladder filling*. To the human operator the instruction is "
-         "pixel-level probing feedback, displayed or spoken; to a robotic probe holder "
-         "the same instruction is an action token (word, *ê*), translated into a twist "
-         "command by lookup, because each word carries a defined condition and axis. "
-         "An instruction is only as fine as the function issuing it, so we first measure "
-         "what *Q* can genuinely tell apart: it attains [0.14, 0.78] of its nominal "
-         "[0, 1] domain, and against its own frame-to-frame noise that range separates "
-         "**47 states a reader can trust as distinct** — the ceiling under which any "
-         "honest instruction set must fit. The vocabulary is then derived rather than chosen: one "
-         "boundary is physical (a lumen that is not anechoic cannot be a filled bladder — "
-         "*check bladder filling*), the other statistical (a lateral offset below "
-         f"{TH['5%']['k']:.2f}σ of the segmentation's centroid noise, σ = {SIGMA:.2f} px, "
-         "cannot be signed reliably — *hold*). On "
-         f"{S['n_frames']:,} laterally displaced held-out frames the three-word vocabulary "
-         f"is emitted correctly on {VOCAB[3]['accuracy'] * 100:.1f}% of frames with a "
-         f"{VOCAB[3]['direction_error'] * 100:.2f}% direction-error rate. The magnitude of "
-         "the correction travels beside the word as a continuous value, validated at a "
-         f"regression slope of {S['overall']['slope']:.3f} against ground truth; words "
-         "cannot carry it — magnitude classes narrower than the noise cannot be assigned "
-         "reliably, and graded vocabularies drop accuracy to "
+         "view. We present a guidance architecture that turns each bladder ultrasound "
+         "frame into one corrective instruction with two readers: a U-Net segments the "
+         "lumen, a transparent image-quality function *Q* judges the frame, and the "
+         "judgment is emitted as a **language instruction** naming the next movement — "
+         "*move left*, *move right*, *hold*, or *check bladder filling*. To a human "
+         "operator it is pixel-level probing feedback, displayed or spoken; to a robotic "
+         "probe holder the same emission is an action token (word, *ê*), translated to a "
+         "twist by lookup. An instruction is only as fine as the function issuing it, so "
+         "we first measure what *Q* can tell apart: it attains [0.14, 0.78] of its "
+         "nominal domain, separating **47 states above its noise** — the ceiling any "
+         "honest vocabulary must fit under. The vocabulary is then derived, not chosen: "
+         "one boundary is physical (a non-anechoic lumen cannot be a filled bladder), the "
+         f"other statistical (an offset below {TH['5%']['k']:.2f}σ of the segmentation's "
+         f"centroid noise, σ = {SIGMA:.2f} px, cannot be signed). On {S['n_frames']:,} "
+         "displaced held-out frames the three-word vocabulary is emitted "
+         f"correctly on {VOCAB[3]['accuracy'] * 100:.1f}% of frames at a "
+         f"{VOCAB[3]['direction_error'] * 100:.2f}% direction-error rate; the magnitude "
+         f"travels beside the word as a continuous value (slope {S['overall']['slope']:.3f}), "
+         "since graded vocabularies drop accuracy to "
          f"{VOCAB[5]['accuracy'] * 100:.1f}% and {VOCAB[7]['accuracy'] * 100:.1f}%. We "
-         "close by outlining how the same judgments would enter robot control — gating, "
-         "twist scaling, and a noise-floor stopping band — without validating that loop "
-         "here.",
-         size=8.9)
+         "outline how the judgments would enter robot control, without validating "
+         "that loop.",
+         size=10.0)
+    _abs.paragraph_format.line_spacing = 1.2      # KOSMI 초록 줄간격 120 %
     para(doc, "**Keywords** — bladder ultrasound segmentation, image-quality function, "
               "operator guidance, language instruction, attained range",
-         size=8.9, before=3)
+         size=10.0, align="left", before=1, after=2)
     doc.add_paragraph().paragraph_format.space_after = Pt(4)
 
 
 def introduction(doc):
-    head(doc, "1. Introduction")
+    head(doc, "1. Backgrounds")
     para(doc,
          "During the morcellation phase of holmium laser enucleation of the prostate (HoLEP) "
          "an assistant holds a suprapubic probe and keeps the bladder lumen in view. Keeping "
@@ -564,7 +552,7 @@ def results_section(doc):
                 "the solid band is the central 80%, the operating region a threshold "
                 "would actually be placed in. (b) The interval each active sub-score attains "
                 "and its share of the resulting range. `segmentation confidence` occupies a "
-                "band 0.007 wide and contributes nothing.", 14.2)
+                "band 0.007 wide and contributes nothing.", 12.6)
     para(doc,
          "`segmentation confidence` is the cautionary term of the panel: it is not a weak "
          "term that could be rescued by more weight, but a degenerate one — it returns "
@@ -586,19 +574,23 @@ def results_section(doc):
 
     head(doc, "3.4 The Derived Vocabulary", 2)
     para(doc,
-         "Two boundaries partition the range, and neither is a fitted hyperparameter.")
-    para(doc,
-         "**A physical boundary.** A urine-filled bladder lumen is anechoic — a textbook "
-         "property of the organ [8], not something estimated from these frames — so a "
-         "non-positive lumen-to-surround contrast means the delineated region cannot be "
-         "a filled bladder. The boundary sits at zero because the physics puts it there: "
-         "there is no constant to fit, and none to re-fit in a new imaging domain. On 13.1% of "
-         "frames the contrast is non-positive; those frames have Dice 0.665 against 0.840 "
-         "elsewhere, and what sets them apart is the delineated region itself — 1.85 times "
-         "brighter and a third the area, the signature of an under-distended bladder rather "
-         "than of a poorly placed probe. The remedy is not a lateral slide; it is upstream, "
-         "in bladder filling, and the instruction says so instead of commanding a movement "
-         "that cannot help.")
+         "**A physical boundary.** Two boundaries partition the range, and neither is a "
+         "fitted hyperparameter. The first is physical. The lumen-to-surround contrast is "
+         "positive when the "
+         "delineated region is darker than the tissue ring around it, so a non-positive "
+         "value means the region is *no darker* than its surround. A urine-filled bladder "
+         "lumen, however, is anechoic — a textbook property of the organ [8], not "
+         "something estimated from these frames — so a region that fails to read dark "
+         "cannot be a filled bladder. The boundary sits at zero because the physics puts "
+         "it there: there is no constant to fit, and none to re-fit in a new imaging "
+         "domain. On 13.1% of frames the contrast is non-positive; those frames have "
+         "Dice 0.665 against 0.840 elsewhere, and what sets them apart is the delineated "
+         "region itself — 1.85 times brighter and a third the area, the signature of a "
+         "bladder that is not yet filled enough to read as anechoic rather than of a "
+         "poorly placed probe. The remedy is therefore not a lateral slide, which cannot "
+         "add urine to an under-distended bladder; it is upstream, in bladder filling, "
+         "and the instruction says exactly that instead of commanding a movement that "
+         "cannot help.")
     para(doc,
          "**A statistical boundary.** The difference *δ* = *ê* − *e* is the segmentation's "
          "lateral centroid error, independent of where the lumen sits, with "
@@ -681,15 +673,16 @@ def results_section(doc):
 
 
     head(doc, "3.5 Accuracy of the Emitted Instruction", 2)
-    para(doc,
+    _lead = para(doc,
          "Figure 4 shows one frame of the sweep at three lateral displacements, including "
          "one inside the band where the direction is no longer trustworthy.")
+    _lead.paragraph_format.keep_with_next = True
     wide_figure(doc, 4, "fig_examples.png",
                 "One frame at three lateral displacements. Cyan is the annotation, orange "
                 "dashed the prediction, white dashed the beam axis, the arrow the "
                 "instruction. At *e* = +2.1 px the instruction has collapsed to +0.8 px: "
                 "the loop has entered the band where Equation (2) says the direction is no "
-                "longer reliable.", 14.2)
+                "longer reliable.", 12.6)
     para(doc,
          f"The instruction agrees with the truth in {pct(OVERALL['sign_agreement'])} of "
          f"frames, with a median magnitude error of {OVERALL['abs_error_median']:.2f} px, a "
@@ -701,7 +694,7 @@ def results_section(doc):
                 "Instructed against ground-truth lateral displacement, one panel per "
                 "held-out frame set; per-set agreement statistics are inset. Shaded "
                 "quadrants are wrong-direction outcomes; every "
-                "one lies within a few pixels of the axis.", 13.8)
+                "one lies within a few pixels of the axis.", 11.5)
     para(doc,
          "**The result is not that percentage but the shape of its failure.** Wrong "
          "directions occur only near the axis — their median required displacement is "
@@ -712,7 +705,7 @@ def results_section(doc):
     wide_figure(doc, 6, "fig_validity.png",
                 "Wrong-direction rate against required displacement. The curve is Equation "
                 "(2); circles are observed rates with frame counts. Dashed verticals mark "
-                "where the modelled rate reaches 5% and 1%.", 13.8)
+                "where the modelled rate reaches 5% and 1%.", 10.8)
     para(doc,
          "The constants are stable against annotation quality. A model-blind label audit "
          "flags four of the frame sets' patients as carrying regions that cannot be lumen; "
@@ -748,7 +741,7 @@ def robot_section(doc):
 
 
 def discussion_section(doc):
-    head(doc, "4. Discussion")
+    head(doc, "4. Conclusion")
     para(doc,
          "Reporting an image-quality function by its correlation with a segmentation "
          "metric answers the wrong question. Correlation says how the score orders "
@@ -791,7 +784,7 @@ def limitations_section(doc):
         "patients; whether the cause is under-distension or annotation is not separable "
         "here [TO BE CONFIRMED: IRB approval number, scanner model, annotation protocol].",
     ):
-        para(doc, "— " + item, size=8.6, indent=0.35, after=1.8)
+        para(doc, "— " + item, size=9.0, indent=0.35, after=1.8)
 
 
 def references_section(doc):
@@ -800,58 +793,54 @@ def references_section(doc):
          "[1] T. Jang, H.-J. Kong, C. Baek, J. Kim, M. S. Choo, S.-J. Oh. Effect of "
          "Self-Training Using Virtual Reality Head-Mounted Display Simulator on the "
          "Acquisition of Holmium Laser Enucleation of the Prostate Surgical Skills. "
-         "International Neurourology Journal 2024;28(2):138–146.", size=8.6, after=2)
+         "International Neurourology Journal 2024;28(2):138–146.", size=9.0, after=2)
     para(doc,
          "[2] O. Ronneberger, P. Fischer, T. Brox. U-Net: Convolutional Networks for "
          "Biomedical Image Segmentation. In: Medical Image Computing and Computer-Assisted "
          "Intervention (MICCAI 2015), LNCS 9351, Springer, 2015, pp. 234–241.",
-         size=8.6, after=2)
+         size=9.0, after=2)
     para(doc,
          "[3] M. Saini, Y. Jiang, T. Gangopadhyay, D. P. Rosen, A. Alizad, M. Fatemi. "
          "BWS-Net: An Optimal Deep Learning Architecture for the Anterior Bladder Wall "
          "Segmentation using Ultrasound Imaging. IEEE Journal of Biomedical and Health "
-         "Informatics 2026. doi:10.1109/JBHI.2026.3675965.", size=8.6, after=2)
+         "Informatics 2026. doi:10.1109/JBHI.2026.3675965.", size=9.0, after=2)
     para(doc,
          "[4] Z. Song, M. Asiedu, S. Wang, Q. Li, A. Ozturk, V. Mittal, S. Schoen Jr., "
          "S. Ramaswamy, T. T. Pierce, A. E. Samir, Y. C. Eldar, A. Chandrakasan, V. Kumar. "
          "Memory-efficient low-compute segmentation algorithms for bladder-monitoring "
-         "smart ultrasound devices. Scientific Reports 2023;13:16450.", size=8.6, after=2)
+         "smart ultrasound devices. Scientific Reports 2023;13:16450.", size=9.0, after=2)
     para(doc,
          "[5] H.-L. Hsu, M. Zahiri, G. Y. Li, R. Al Mukaddim, H. Lee, M. G. Wilson, "
          "J. Grube, S. Schmidt, G. Ghoshal, B. Raju. Active guidance in ultrasound "
          "bladder scanning using reinforcement learning. Scientific Reports "
-         "2026;16:5273.", size=8.6, after=2)
+         "2026;16:5273.", size=9.0, after=2)
     para(doc,
          "[6] D. Solís-Martín, J. A. Sainz, J. Galán-Páez, J. Borrego-Díaz, "
          "J. A. García-Mejido. PFUS1: Premier pelvic floor ultrasound segmentation "
          "dataset. A resource for advancing research. Data in Brief 2026;64:112346.",
-         size=8.6, after=2)
+         size=9.0, after=2)
     para(doc,
          "[7] J. A. García-Mejido, D. Solís-Martín, M. Martín-Morán, "
          "C. Fernández-Conde, F. Fernández-Palacín, J. A. Sainz-Bueno. Applicability of "
          "deep learning to dynamically identify the different organs of the pelvic floor "
          "in the midsagittal plane. International Urogynecology Journal "
-         "2024;35(12):2285–2293.", size=8.6, after=2)
+         "2024;35(12):2285–2293.", size=9.0, after=2)
     para(doc,
          "[8] Trinkler, Dietrich. Ultrasound of the Urinary Bladder. In: EFSUMB Course "
          "Book, European Federation of Societies for Ultrasound in Medicine and Biology, "
-         "2019.", size=8.6, after=2)
+         "2019.", size=9.0, after=2)
     para(doc,
          "[TO BE COMPLETED] Citations for HoLEP morcellation, ultrasound visual servoing "
          "and image-quality assessment are to be added before submission.",
-         size=8.6, italic=True)
+         size=9.0, italic=True)
 
 
 def build():
     doc = Document()
     style_doc(doc)
     page_numbers(doc)
-    columns(doc.sections[0], 1)
+    columns(doc.sections[0], 1)      # 단일 단 (KOSMI)
     front_matter(doc)
-
-    body = doc.add_section(WD_SECTION.CONTINUOUS)
-    style_doc(doc)
-    columns(body, 2)
 
     introduction(doc)
     methods_section(doc)

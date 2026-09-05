@@ -314,8 +314,9 @@ def _style() -> None:
 
     plt.rcParams.update({
         "figure.facecolor": "white", "axes.facecolor": "white",
-        "savefig.facecolor": "white", "font.family": "sans-serif",
-        "font.sans-serif": ["DejaVu Sans"], "text.color": INK,
+        "savefig.facecolor": "white", "font.family": "serif",
+        "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
+        "mathtext.fontset": "stix", "text.color": INK,
         "axes.edgecolor": INK, "axes.labelcolor": INK,
         "xtick.color": INK, "ytick.color": INK,
         "pdf.fonttype": 42, "ps.fonttype": 42, "svg.fonttype": "none",

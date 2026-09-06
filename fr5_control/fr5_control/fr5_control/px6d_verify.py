@@ -1,6 +1,15 @@
 """무접촉 검증 — 보상된 렌치가 자세를 바꿔도 0 에 머무는지 잰다.
 
-    ros2 run fr5_control px6d_verify
+    ./scripts/start_session.sh --calib      # 터미널 1 — 브리지가 떠 있어야 한다
+    ros2 run fr5_control px6d_verify        # 터미널 2
+
+**브리지가 필요하다.** 이 도구는 시리얼을 직접 열지 않는다 — 재는 것이 원값이
+아니라 **보상된** 렌치이고, 보상은 브리지만 한다 (자세 × 교정 프로파일). 그래서
+``ws://localhost:8765`` 에 붙는다.
+
+자세도 필요하므로 ``--calib`` 로 띄운다. 그 모드는 브리지가 컨트롤러에서 관절각을
+읽기로만 가져오고 제어 스택은 안 띄우므로, 조작자가 드래그 모드로 팔을 옮기는
+동안 ``us_servo`` 가 맞서지 않는다.
 
 교정이 **유효하다고 판정된 것** 과 **실제로 맞는 것** 은 다르다. 적합은 잡은
 자세들 위에서 잔차를 최소화하므로, 그 자세들에서 작은 것은 당연하다. 이 도구는
@@ -195,6 +204,17 @@ def main(argv=None) -> int:
             except KeyboardInterrupt:
                 print("\n  중단.")
                 return 130
+            except (ConnectionRefusedError, OSError) as exc:
+                # 이 도구를 처음 쓰면 거의 항상 여기로 온다. 이름이
+                # `px6d_verify` 라 시리얼을 직접 여는 것처럼 보이기 때문이다.
+                # "Connect call failed" 만 찍고 끝내면 무엇을 안 띄웠는지가
+                # 어디에도 없다.
+                print(f"\n  브리지에 닿지 못했다 ({args.url}): {exc}", file=sys.stderr)
+                print("  이 도구는 시리얼이 아니라 **브리지의 보상된 렌치**를 읽는다.",
+                      file=sys.stderr)
+                print("  다른 터미널에서 먼저:  ./scripts/start_session.sh --calib",
+                      file=sys.stderr)
+                return 2
             except Exception as exc:  # noqa: BLE001 - 사람이 읽을 문장으로
                 print(f"\n  수집 실패: {exc}", file=sys.stderr)
                 return 2

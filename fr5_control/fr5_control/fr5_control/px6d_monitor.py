@@ -237,6 +237,11 @@ def _handshake(port, parser, args) -> None:
 
     if args.tare:
         print("영점 보정 — 무부하 상태여야 한다")
+        print("⚠️ 센서 쪽 영점을 다시 쓴다. 저장된 교정 프로파일의 전자영점\n"
+              "   (~/.ros/fr5_px6d_calibration.json 의 bias) 이 그 순간 무효가 되고,\n"
+              "   보상은 있지도 않은 오프셋을 계속 빼게 된다 — 자세와 무관한 수 N 의\n"
+              "   잔차로 나타난다. 이걸 보냈으면 --calib 로 교정을 다시 하라.",
+              file=sys.stderr)
         port.write(build_command(CMD_TARE))
         _drain(port, parser, 0.5)
 

@@ -14,7 +14,7 @@ import os
 import sys
 
 from fh import plotting
-from fh.analysis import by_target, load_run, summarise
+from fh.analysis import by_target, load_run, rank_sum_p, summarise
 from fh.report import report, write_csv
 
 
@@ -57,6 +57,24 @@ def main(argv=None) -> int:
     figures += plotting.safety_margin(summary.safety)
     figures += plotting.regulation_evidence(runs, summary.evidence, summary.stiffness)
     figures += plotting.excursion_recovery(runs, summary.excursions, summary.exposure)
+
+    # 위약 대조. 두 팔이 다 있을 때만 그린다 — 한쪽만 있는 회차에서는 그릴 것이
+    # 없고, 빈 축을 내보내면 보고서에 "없음" 이 아니라 "0" 처럼 보인다.
+    arms = {str(row["run"])[:1] for row in summary.events}
+    if {"B", "C"} <= arms:
+        on = [abs(float(r["peak_error_n"])) for r in summary.events
+              if str(r["run"])[:1] == "B"]
+        off = [abs(float(r["peak_error_n"])) for r in summary.events
+               if str(r["run"])[:1] == "C"]
+        # 안전 한계에 걸린 대역은 개루프가 아니다 — 그림에서 회색으로 덮는다.
+        contaminated = sorted({
+            float(row["target_n"]) for row in summary.safety
+            if str(row["exceeded_limit"]).lower() in ("true", "1")
+        })
+        figures += plotting.placebo_comparison(
+            summary.events, excluded_targets=contaminated,
+            p_value=rank_sum_p(on, off),
+        )
 
     write_csv(os.path.join(args.output_dir, "band_excursions.csv"), summary.excursions,
               ["run", "loop", "target_n", "band_top_n", "onset_s", "duration_s",

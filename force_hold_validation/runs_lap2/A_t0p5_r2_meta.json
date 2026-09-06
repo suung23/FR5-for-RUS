@@ -1,0 +1,18 @@
+{
+ "label": "A_t0p5_r2",
+ "run_type": "hold",
+ "recorded_at": "2026-09-06T20:11:00+0900",
+ "samples": 30139,
+ "step_ml": null,
+ "normal_force_sign": -1.0,
+ "parameters_read": true,
+ "target_force_n": 0.5,
+ "deadband_n": 0.05,
+ "admittance_b_z": 4500.0,
+ "contact_probing_force_n": 0.4,
+ "contact_probing_release_n": 0.1,
+ "warn_contact_force_n": 4.5,
+ "max_contact_force_n": 5.0,
+ "contact_force_mode": "magnitude",
+ "force_hold_enabled": true
+}

@@ -14,6 +14,12 @@ INK = "#111111"
 ACCENT = "#17683a"
 BAND = "#17683a"
 WARN = "#4a4a4a"
+#: 위약 대조 두 팔. 켠 쪽은 기존 ACCENT 그대로여서 fig1~6 과 이어진다.
+#: 짝은 dataviz 검증기를 통과한 값이다 — CVD ΔE 11.4 (protan) ·
+#: 정상시야 ΔE 31.8 · 대비 3:1 이상, 여섯 검사 모두 PASS.
+#: 색만으로 구분하지 않는다: 표식 모양도 함께 바꾼다 (인쇄 흑백 대비).
+HOLD_ON = "#17683a"
+HOLD_OFF = "#eb6834"
 
 plt.rcParams.update({
     "figure.facecolor": "white",
@@ -340,5 +346,119 @@ def safety_margin(rows: list, stem: str = "fig4_safety_margin") -> list:
     ax.set_xticklabels(labels, rotation=30, ha="right", fontsize=6.5)
     ax.set_ylabel("peak ‖F‖ [N]")
     ax.set_title("Worst force seen in each run, against the configured limits", fontsize=9)
+    figure.tight_layout()
+    return _save(figure, stem)
+
+
+def placebo_comparison(events: list, excluded_targets=(), p_value=float("nan"),
+                       stem: str = "fig7_placebo") -> list:
+    """위약 대조 — 같은 교란을 제어 켜고 한 번, 끄고 한 번.
+
+    이 그림 하나가 "힘이 목표 근처에 머물렀다" 를 해석 가능한 문장으로 바꾼다.
+    켠 쪽만 있으면 그 값이 제어 덕분인지 교란이 원래 그 정도였는지 알 수 없다.
+
+    왼쪽은 대역마다 두 팔을 나란히 놓는다 (중앙값과 IQR). 막대가 아니라 점과
+    수염인 이유는, 사건이 대역마다 10 개뿐이라 분포를 감추면 안 되기 때문이다.
+    오른쪽은 두 팔의 누적분포를 통째로 겹친다 — 겹치면 겹치는 대로 보인다.
+
+    Args:
+        events: ``disturbance_events`` 행. ``run`` 첫 글자로 팔을 가른다
+            (``B`` 제어 켬 · ``C`` 제어 끔).
+        excluded_targets: 안전 한계에 걸려 개루프가 아니게 된 대역. 회색으로
+            덮고 이유를 적는다 — 지우지 않는 이유는 지운 것이 보고서에서
+            사라지면 안 되기 때문이다.
+        p_value: 두 팔 전체의 순위합 양측 p.
+        stem: 파일 이름.
+
+    Returns:
+        저장된 경로 목록.
+    """
+    def peaks(arm, target=None):
+        out = [abs(float(row["peak_error_n"])) for row in events
+               if str(row["run"])[:1] == arm
+               and (target is None or float(row["target_n"]) == target)]
+        return np.asarray(out, dtype=float)
+
+    targets = sorted({float(row["target_n"]) for row in events})
+    figure, axes = plt.subplots(1, 2, figsize=(7.2, 2.9))
+
+    # -- (a) 대역별 -----------------------------------------------------
+    ax = axes[0]
+    for target in excluded_targets:
+        ax.axvspan(target - 0.22, target + 0.22, color="#e9ebee", zorder=0, lw=0)
+    arms = (("B", "force hold ON", HOLD_ON, "o"), ("C", "force hold OFF (control)", HOLD_OFF, "s"))
+    series = []
+    for index, (arm, label, color, marker) in enumerate(arms):
+        offset = (index - 0.5) * 0.15
+        xs, meds, los, his = [], [], [], []
+        for target in targets:
+            values = peaks(arm, target)
+            if not values.size:
+                continue
+            xs.append(target + offset)
+            meds.append(np.median(values))
+            los.append(np.percentile(values, 25))
+            his.append(np.percentile(values, 75))
+        ax.vlines(xs, los, his, color=color, lw=1.4, zorder=2)
+        ax.plot(xs, meds, marker, color=color, ms=5.0, mec="white", mew=0.8,
+                ls="none", label=label, zorder=3)
+        series.append((xs, meds, color, marker, offset))
+
+    # 축은 **비교가 성립하는 대역**에 맞춘다.
+    #
+    # 제외 대역(안전 한계에 걸린 쪽)이 축을 3 배 넘게 늘리면, 정작 읽어야 할
+    # 0.5~3.5 N 이 아래 3 분의 1 로 눌린다. 그렇다고 그 점을 빼면 보고서에서
+    # 사라지므로, 축 위에 얹고 값을 글자로 적는다 — 화면 밖이라는 사실이
+    # 보이는 채로 남는다.
+    keep = [row for row in events
+            if float(row["target_n"]) not in set(excluded_targets)]
+    if keep:
+        top = max(abs(float(row["peak_error_n"])) for row in keep) * 1.25
+        ax.set_ylim(0, top)
+        for xs, meds, color, marker, offset in series:
+            for x, median in zip(xs, meds):
+                if median <= top:
+                    continue
+                ax.plot([x], [top * 0.97], marker, color=color, ms=5.0,
+                        mec="white", mew=0.8, clip_on=False, zorder=4)
+                # 두 팔의 글자가 겹치지 않게 각자 바깥쪽으로 민다. 가운데
+                # 정렬하면 두 값이 한 자리에 겹쳐 찍힌다.
+                side = "right" if offset < 0 else "left"
+                ax.annotate(f"{median:.1f}", xy=(x, top * 0.97),
+                            xytext=(-3 if offset < 0 else 3, 7),
+                            textcoords="offset points",
+                            ha=side, fontsize=6.5, color=color)
+    if excluded_targets:
+        edge = min(excluded_targets)
+        ax.annotate("force limit reached\n— not open-loop", xy=(edge, 0),
+                    xytext=(edge - 0.12, ax.get_ylim()[1] * 0.30),
+                    ha="right", va="center", fontsize=7, color=WARN)
+    ax.set_xticks(targets)
+    ax.set_xticklabels([f"{t:g}" for t in targets], fontsize=7.5)
+    ax.set_xlabel("target [N]")
+    ax.set_ylabel("peak |F − target| per event [N]")
+    ax.set_title("(a) By band — median and IQR", loc="left", fontsize=8.5)
+    ax.legend(frameon=False, fontsize=7.5, loc="upper left")
+
+    # -- (b) 전체 분포 --------------------------------------------------
+    ax = axes[1]
+    for arm, label, color, marker in arms:
+        values = np.sort(peaks(arm))
+        if not values.size:
+            continue
+        fraction = np.arange(1, values.size + 1) / values.size
+        ax.step(values, fraction, where="post", color=color, lw=1.6,
+                label=f"{label}  (n={values.size})")
+        median = float(np.median(values))
+        ax.plot([median], [0.5], marker, color=color, ms=5.0, mec="white", mew=0.8)
+    ax.set_xlabel("peak |F − target| per event [N]")
+    ax.set_ylabel("cumulative fraction")
+    ax.set_ylim(0, 1.02)
+    ax.set_title("(b) All events, pooled", loc="left", fontsize=8.5)
+    ax.legend(frameon=False, fontsize=7.5, loc="lower right")
+    if p_value == p_value:
+        ax.text(0.44, 0.44, f"rank-sum two-sided\np = {p_value:.2f}",
+                transform=ax.transAxes, fontsize=7.5, color=INK, va="center")
+
     figure.tight_layout()
     return _save(figure, stem)

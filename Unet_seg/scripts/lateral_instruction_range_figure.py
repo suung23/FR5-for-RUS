@@ -32,7 +32,7 @@ AGGREGATIONS = (
 #: (name, attained interval, share of the range of Q, colour), Table 2 order.
 SUB_SCORES = (
     ("lumen contrast", (0.000, 1.000), "47.6%", NAVY),
-    ("lumen centering", (0.001, 0.999), "44.8%", NAVY),
+    ("lumen centring", (0.001, 0.999), "44.8%", NAVY),
     ("boundary sharpness", (0.237, 0.451), "4.4%", GREY),
     ("mask completeness", (0.250, 1.000), "3.2%", GREY),
     ("segmentation confidence", (0.992, 0.999), "0.0%", GREY),
@@ -121,7 +121,7 @@ def main() -> int:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    output = Path(__file__).resolve().parents[1] / "experiments" / "lateral_instruction"
+    output = Path(__file__).resolve().parents[2] / "Paper" / "figures"
     output.mkdir(parents=True, exist_ok=True)
     figure = build()
     for suffix in ("png", "pdf"):

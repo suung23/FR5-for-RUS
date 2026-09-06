@@ -18,7 +18,8 @@ from pathlib import Path
 import numpy as np
 
 UNET = Path(__file__).resolve().parents[1]
-OUTPUT = UNET / "experiments" / "lateral_instruction"
+OUTPUT = UNET / "experiments" / "lateral_instruction"      # cached artifacts (json/csv)
+FIGURES = UNET.parent / "Paper" / "figures"               # every paper figure lives here
 
 
 def main() -> int:
@@ -45,10 +46,10 @@ def main() -> int:
     )
     for figure, stem, dpi in jobs:
         for suffix in ("png", "pdf"):
-            figure.savefig(OUTPUT / f"{stem}.{suffix}", dpi=dpi,
+            figure.savefig(FIGURES / f"{stem}.{suffix}", dpi=dpi,
                            facecolor="white", bbox_inches="tight")
         plt.close(figure)
-        print("wrote", OUTPUT / f"{stem}.png")
+        print("wrote", FIGURES / f"{stem}.png")
     print("skipped fig_examples (needs the checkpoint; rerun "
           "lateral_instruction_figures.py on the training machine)")
     return 0

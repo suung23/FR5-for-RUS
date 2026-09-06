@@ -33,12 +33,12 @@ from PIL import Image                                            # noqa: E402
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(_HERE))
-FIGDIR = os.path.join(REPO, "Unet_seg", "experiments", "lateral_instruction")
+FIGDIR = os.path.join(REPO, "Unet_seg", "experiments", "lateral_instruction")   # stats json
 ASSETS = os.path.join(REPO, "imu_bench", "qc_track", "report", "figures", "assets")
 CLINICIAN_ART = os.path.join(REPO, "Paper", "figures", "assets", "clinician.png")
 #: 사용자가 승인한 완성 일러스트가 있으면 그 파일을 그대로 fig_overview 로 쓴다.
 FINAL_ART = os.path.join(REPO, "Paper", "figures", "assets", "fig_overview_final.png")
-OUT = os.path.join(FIGDIR, "fig_overview")
+OUT = os.path.join(REPO, "Paper", "figures", "fig_overview")
 
 S = json.load(open(os.path.join(FIGDIR, "lateral_instruction.json")))
 SIGMA = S["sigma_px"]

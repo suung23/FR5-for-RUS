@@ -45,7 +45,8 @@ large against the segmentation's own noise, and stops being so as the loop
 converges -- which is a stopping condition, not a defect. The prediction is
 compared against the observed rate rather than assumed.
 
-Outputs: a metrics table (CSV + JSON) and three figures.
+Outputs: a metrics table (CSV + JSON) under --output-dir and the figures under
+--figure-dir (Paper/figures by default, the single home of every paper figure).
 
 Example:
     python scripts/lateral_instruction.py --output-dir experiments/lateral_instruction
@@ -66,6 +67,9 @@ from typing import Optional, Sequence
 import numpy as np
 
 logger = logging.getLogger(__name__)
+#: Every paper figure lives under Paper/figures (the manuscript builds read
+#: it directly); the JSON/CSV artifacts stay under experiments/.
+PAPER_FIGURES = Path(__file__).resolve().parents[2] / "Paper" / "figures"
 
 # Text is black throughout; marks use a dark navy / grey pair. The model and
 # data imports live inside collect()/sweep() so the figure functions stay
@@ -362,7 +366,7 @@ def figure_agreement(rows: Sequence[dict], stats: dict):
         ax.set_aspect("equal")
         ax.tick_params(labelsize=7.5)
         ax.legend(loc="lower right", fontsize=7, frameon=False)
-    axes[0].set_ylabel(r"instructed displacement  $\hat{e}$  (px)", fontsize=8.5)
+    axes[0].set_ylabel(r"estimated displacement  $\hat{e}$  (px)", fontsize=8.5)
     figure.tight_layout()
     return figure
 
@@ -417,6 +421,8 @@ def main() -> int:
     parser.add_argument("--splits", nargs="+", default=["val", "test"])
     parser.add_argument("--output-dir", type=Path,
                         default=Path("experiments/lateral_instruction"))
+    parser.add_argument("--figure-dir", type=Path, default=PAPER_FIGURES,
+                        help="Where fig_agreement / fig_validity are written.")
     parser.add_argument("--frames-per-patient", type=int, default=4,
                         help="Frames per patient entering the lateral sweep.")
     parser.add_argument("--dpi", type=int, default=220)
@@ -451,10 +457,11 @@ def main() -> int:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    args.figure_dir.mkdir(parents=True, exist_ok=True)
     for figure, stem in ((figure_agreement(rows, stats), "fig_agreement"),
                          (figure_validity(stats), "fig_validity")):
         for suffix in ("png", "pdf"):
-            figure.savefig(args.output_dir / f"{stem}.{suffix}", dpi=args.dpi,
+            figure.savefig(args.figure_dir / f"{stem}.{suffix}", dpi=args.dpi,
                            facecolor="white", bbox_inches="tight")
         plt.close(figure)
 
@@ -466,7 +473,7 @@ def main() -> int:
     for name, entry in stats["thresholds"].items():
         print(f"  wrong-direction rate below {name}: |e| >= {entry['k']:.2f} sigma "
               f"= {entry['px']:.1f} px")
-    logger.info("Wrote figures and tables to %s", args.output_dir)
+    logger.info("Wrote tables to %s and figures to %s", args.output_dir, args.figure_dir)
     return 0
 
 

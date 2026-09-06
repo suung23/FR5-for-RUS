@@ -20,6 +20,9 @@ from pathlib import Path
 import numpy as np
 
 logger = logging.getLogger(__name__)
+#: Every paper figure lives under Paper/figures (the manuscript builds read
+#: it directly); the JSON/CSV artifacts stay under experiments/.
+PAPER_FIGURES = Path(__file__).resolve().parents[2] / "Paper" / "figures"
 
 # Text is black throughout; the only colours are a dark navy / grey pair for
 # graphic marks, and the annotation colours the manuscript captions name.
@@ -201,8 +204,8 @@ def main() -> int:
     parser.add_argument("--checkpoint", default="checkpoints/exp_seed43/best.pt")
     parser.add_argument("--patient", default="P041")
     parser.add_argument("--targets", type=float, nargs=3, default=[40, 13, 2])
-    parser.add_argument("--output-dir", type=Path,
-                        default=Path("experiments/lateral_instruction"))
+    parser.add_argument("--output-dir", type=Path, default=PAPER_FIGURES,
+                        help="Where fig_axes / fig_examples are written.")
     parser.add_argument("--dpi", type=int, default=300)
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")

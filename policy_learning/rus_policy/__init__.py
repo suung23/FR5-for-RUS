@@ -12,7 +12,17 @@
     model       ACT-lite (CVAE 또는 이산 헤드) + Q̂ 헤드
     losses      §5.3 loss
     train       학습 루프 · 진단
+    ensemble    실행시 chunk 혼합 — 모드 보존 temporal ensembling (§3.5, L12)
     synth       하드웨어 없이 파이프라인을 검증하는 합성 세션 생성기
+
+**범위: Stage 2 (면내 3축) 전용.** policy 가 내는 것은 (v_x, v_y, ω_z) 뿐이다. 힘축
+(v_z, ω_x, ω_y) 은 F/T 센서 + admittance 가 100 Hz 로 닫고, Stage 1 의 힘 탐색 (Q_raw
+격자) 도 학습 대상이 아니다 (DESIGN_NOTES §7). **이 분리는 결손이 아니라 설계다** —
+프리핸드 시연에서 힘 라벨을 얻을 방법이 없으므로 힘축을 학습에서 떼어낸 것이다.
+따라서 ``label/F``·``label/Fn_star`` 와 ``loss.lambda_force/feas/risk`` 는 쓰지 않는
+확장점이고, ``dataset.OBS_VEC_NAMES`` 의 wrench 7 칸도 **학습·추론 양쪽에서 0 이다**
+(추론 때만 채우면 학습에서 본 적 없는 입력이 되고, 방금 분리한 힘축을 관측으로 다시
+묶게 된다).
 """
 
 from __future__ import annotations

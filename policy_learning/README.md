@@ -1,5 +1,10 @@
 # policy_learning — 초음파 영상 + IMU 시연 → ACT policy 학습 파이프라인
 
+**범위는 Stage 2 (면내 3축) 다.** policy 가 내는 것은 `(v_x, v_y, ω_z)` 뿐이고, 힘축과 Stage 1 의
+힘 탐색은 F/T + admittance 가 맡는다 (DESIGN_NOTES §7). 프리핸드 시연에서 힘 라벨을 얻을 수 없다는 것이
+이 분리의 **이유**이므로, `label/F`·`Fn_star` 와 `loss.lambda_force/feas/risk` 는 쓰지 않는 확장점이고
+`obs/vec` 의 wrench 7 칸은 학습·추론 양쪽에서 0 이다.
+
 `imu_bench/host/us_imu_collect.py` 가 남기는 세션 디렉터리(US 프레임 + BNO085 IMU)만 있으면
 데이터셋 빌드 → 학습 → 진단까지 바로 돌아가는 파이프라인이다. 설계 근거는 전부
 [`docs/POLICY_LEARNING_MATH.md`](../docs/POLICY_LEARNING_MATH.md) 이고, 코드 주석에 절 번호를 남겼다.
@@ -16,7 +21,8 @@
                 │
                 ├─ model.py    ACT-lite: CNN 프레임 토큰 + Transformer enc/dec, CVAE z, Q̂·F̂ 헤드  (§3)
                 ├─ losses.py   이종분산 Huber(순변위+형상) + λ_Q Q̂ + λ_s smooth + β KL (+힘 항 마스크) (§5.3)
-                └─ train.py    학습 루프 + 모드 붕괴·모드 마진·부호 정확도 진단                   (§6)
+                ├─ train.py    학습 루프 + 모드 붕괴·모드 마진·부호 정확도 진단                   (§6)
+                └─ ensemble.py 실행시 chunk 혼합 — 모드 보존 temporal ensembling            (§3.5)
 ```
 
 ## 1. 설치
@@ -65,7 +71,7 @@ python scripts/eval_policy.py runs/exp1/best.pt --dataset data/policy_dataset.h5
 python scripts/make_synthetic_sessions.py --out data/synthetic --n 4 --duration 60
 python scripts/build_dataset.py --sessions data/synthetic/sessions.csv --out data/synthetic/dataset.h5 --set perception.backend=none
 python scripts/train_policy.py --dataset data/synthetic/dataset.h5 --out runs/synthetic --set train.epochs=5
-python -m pytest            # 31 tests, CPU 1–2 분
+python -m pytest            # 45 tests, CPU 1–2 분
 ```
 
 합성 세션은 수집기와 같은 파일 레이아웃이고 `truth.json` 에 정답이 있다. 라벨 검증: 회전 오차 0.03°,
@@ -120,6 +126,73 @@ R/Rᵀ 규약을 판정하는데, 빔이 중력과 평행하면 판정이 모호
 - **텔레오퍼레이션(FK 라벨) 로더.** `source=teleop` 는 명시적으로 `NotImplementedError`. US+FK 를 동기
   수집하는 수집기가 아직 없다 (`fr5_h5_collector.py` 는 구 복강경용). 수집기가 생기면 `label_segment` 의
   P_E/R_SE 입력만 FK 로 바꾸면 되고, σ 표와 힘 채널(`obs/vec`, `label/F`)은 이미 자리가 있다.
-- **실행시 통합 (QP arbiter, temporal ensembling 모드 보존, §3.5).** `select_action` 은 한 tick 의 선택까지만.
-- **§8-6, §8-7 의 대칭 붕괴·ensembling 수치 실험.** 합성 세션이 이봉성(|y| 만 영상에 보임)을 재현하므로
-  이 데이터로 바로 할 수 있다.
+- **QP arbiter 와의 결합.** `select_action` + `TemporalEnsembler` 는 한 tick 의 지령까지만 낸다.
+- **§8-6 의 대칭 붕괴 실험 (A6 / L11).** ⚠️ 지금 합성 세션으로는 못 한다 — 아래 "합성 데이터의 한계".
+
+## 8. 실행시 chunk 혼합 (`ensemble.py`, §3.5 · L12)
+
+ACT 의 표준 temporal ensembling 은 겹치는 chunk 예측의 지수가중 평균이라, 행동분포가 이봉이면
+`+d` 와 `−d` 를 상쇄해 **로봇을 제자리에 세운다**. `Q̂` 모드 선택(§3.3)이 이봉성을 살리려고 넣은
+것이므로 그 위에 평균을 얹으면 서로 지운다. `TemporalEnsembler` 가 §3.5 의 처방을 모드로 제공한다.
+
+| `EnsembleConfig.mode` | 내용 |
+|---|---|
+| `mean` | 표준 ACT. **대조군** — 모드 소멸을 보이는 데 쓴다 |
+| `cluster` | 처방 2. 평균 전에 `a_y` 부호로 클러스터링, 커밋된 모드 안에서만 평균 |
+| `hysteresis` | 처방 3. cluster + 전환을 chunk 경계로 제한하고 점수 차 임계 |
+| `none` | 혼합 없음 (최신 chunk 만) |
+
+처방 1(모드 일관성 보너스)은 혼합이 아니라 **선택** 단계라 `model.select_action` 의 `gamma`·`prev_dy`
+에 있다. 셋은 배타적이지 않으므로 1+2 또는 1+3 으로 겹쳐 쓰는 것이 정상이다.
+필수 진단은 `flip_rate_hz` — 🟡 1 Hz 초과면 모드 진동이다. 이 실패는 조용하다 (로봇이 안 움직일
+뿐이고 `Q_seg` 도 나빠지지 않는다).
+
+### §8-7 (A7 / L12) 수치 실험 — 검증 완료
+
+```bash
+python scripts/exp_ensembling.py --trials 200 --ticks 400 --json a7.json
+```
+
+학습도 데이터도 필요 없다. 이봉 policy(`±d` 확률 ½)를 각 처방에 통과시켜 **유지율**
+(`mean |a_y 방출| / |a_y chunk|`)과 부호 전환율을 잰다. `k = 8`, `f_p = 5 Hz`, `γ = 0.2`, `σ_Q = 1`:
+
+| 처방 | 유지율 (p=0.5) | 전환율 Hz | 유지율 (p=0.8) |
+|---|---|---|---|
+| 혼합 없음 (대조) | 1.000 | 2.41 | 1.000 |
+| **표준 ACT ensembling** | **0.280** | 1.12 | 0.610 |
+| + 처방1 | 0.438 | 0.63 | 0.808 |
+| 처방2 모드내 평균 | 1.000 | 1.12 | 1.000 |
+| + 처방1 | 1.000 | 0.63 | 1.000 |
+| 처방3 경계 히스테리시스 | 1.000 | 0.13 | 1.000 |
+| **+ 처방1** | **1.000** | **0.02** | 1.000 |
+
+**L12 확인.** 표준 ensembling 의 0.280 은 해석해와 일치한다 — 겹친 `k = 8` 개의 독립 `±1` 예측을
+균등평균한 `E|S₈|/8 = 560/256/8 = 0.2734` (`test_mean_annihilates_bimodal_analytically` 가 고정).
+즉 **모드 소멸은 구현 결함이 아니라 평균 연산자의 성질**이고, `k` 를 늘릴수록 나빠진다.
+
+**처방 판정.** 2·3 은 진폭을 온전히 되살린다(유지율 1.000). 다만 진폭만으로는 부족하다 — 처방 2 단독은
+전환율이 1.12 Hz 로 경보선 위라 매 tick 모드가 바뀌며 제자리 진동한다. **3 + 1 조합이 0.02 Hz 로
+유일하게 커밋한다** (순진행 0.413 대 처방2 단독 0.086). 시나리오 B 는 처방이 **정당한 증거까지**
+뭉개지 않는지 보는 대조군이고, 전부 다수 모드로 수렴하므로 통과다.
+
+> ⚠️ 이 실험은 **A7 만** 판정한다. `Q̂` 가 애초에 모드를 고를 수 있는가(A6 / L11)는 §8-6 이고,
+> 아래 한계 때문에 아직 못 한다.
+
+### 합성 데이터의 한계 — §8-6 을 아직 못 하는 이유
+
+`synth.py` 는 정지 구간마다 방광 오프셋을 **i.i.d. 로 새로 뽑는다**. 영상에는 슬라이스 두께로
+`|y_off|` 만 나타나고 `Ã_{t−1}` 은 *이전* 목표를 가리키므로, **현재 Δy 의 부호가 관측 어디에도
+없다.** 그래서 이 데이터에서 `vy_sign_acc ≈ 0.5` 는 실패가 아니라 정답이고, §3.4 가 요구한
+대조군("`Ã_{t−1}` 에 진짜 이전 변위를 넣으면 정확도가 회복되는가")을 만들 수 없다.
+
+§8-6 을 하려면 생성기가 실제 시연 프로토콜을 재현해야 한다 — 목표를 정지마다 새로 뽑지 말고
+**여러 chunk 에 걸쳐 수렴**시키면 `Ã_{t−1}` 의 부호가 곧 현재 필요한 운동의 부호가 되어 대칭이
+깨진다. 함께 걸리는 것 두 개:
+
+- `perception.backend=none` 이면 `Q_valid` 가 전부 False → `l_qual = 0` → **`quality_head` 그래디언트가 0**
+  이다 (학습 후 weight std 가 초기화값 `1/√(3·280)` 그대로인 것으로 확인). 합성 검증 경로가 정확히
+  이 설정이라, 지금은 `select_action` 이 학습되지 않은 헤드로 후보를 고른다.
+- `Q̂` 의 loss 는 **(관측, 정답 chunk) 쌍만** 본다 (`losses.py` 의 `predict_quality(…, P_lab)`).
+  같은 관측에 틀린 `A` 를 붙여 낮은 `Q` 를 주는 신호가 없다. §3.3 성립조건 1 이 이것을
+  "elevational 스윕이 학습 데이터에 포함되어야 한다" 로 짚어놨고 — 스윕이 목표를 지나쳐 나가는
+  구간이 자연스러운 음성이 된다 — 그 데이터가 아직 없다.

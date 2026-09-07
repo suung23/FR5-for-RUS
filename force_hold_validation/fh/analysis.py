@@ -468,6 +468,90 @@ def stiffness(run: Run, settle_s: float = 0.5) -> dict:
     }
 
 
+def stiffness_from_holds(runs: list, settle_s: float = 10.0, min_points: int = 3) -> dict:
+    """무교란 유지 실행들의 **평형점**에서 팬텀 강성을 잰다 [N/m].
+
+    힘 유지 제어는 팬텀 반력이 목표와 같아지는 자리에서 멈춘다. 그 정지점의
+    (힘, 축방향 위치)는 제어기와 무관하게 팬텀 F(z) 곡선 위의 한 점이다 — 제어기는
+    어느 점에 앉을지만 정한다. 목표가 여덟 개면 곡선 위 점이 여덟 개다.
+
+    개루프 캡처(:func:`stiffness`)와 달리 변위가 **측정**된다: 팁 위치는 베이스
+    좌표계 절대값이라 실행 사이에 비교할 수 있다. 대신 전제가 둘 붙는다 —
+    같은 부위·같은 자세에서 팬텀을 건드리지 않고 연속으로 찍었을 것, 그리고
+    이 값은 유지 구간 끝(``settle_s``)까지 이완된 **준정적** 강성이라는 것.
+    첫 전제는 프로브 축이 같은지(``axis_spread_deg``)와 곡선이 단조인지로
+    데이터 안에서 확인한다.
+
+    Returns:
+        ``ok`` 가 참이면 점 목록(``points``: target, force, depth_mm, creep_mm),
+        직선 맞춤(``k_n_per_m``, ``intercept_n``, ``r_squared``), 힘 0 으로 외삽한
+        접촉점(``contact_depth_mm``), 인접 목표 사이 접선 강성(``tangent``).
+        깊이는 가장 낮은 목표의 평형점 기준이다.
+    """
+    holds = [r for r in runs if r.included and r.run_type == "hold"
+             and not np.isnan(r.target) and r.tip.size]
+    if len(holds) < min_points:
+        return {"ok": False, "reason": f"무교란 유지 실행이 {len(holds)}개 — {min_points}개 이상 필요"}
+
+    points, axes = [], []
+    for run in sorted(holds, key=lambda r: r.target):
+        idx = np.where(run.probing())[0]
+        if idx.size < 10:
+            continue
+        end = run.t[idx[-1]]
+        tail = idx[run.t[idx] >= end - settle_s]
+        head = idx[run.t[idx] <= run.t[idx[0]] + settle_s / 2]
+        axis = probe_axis(run, int(idx[idx.size // 2]))
+        if axis is None or not np.all(np.isfinite(run.tip[tail])):
+            continue
+        depth_tail = float(np.mean(run.tip[tail] @ axis))
+        depth_head = float(np.mean(run.tip[head] @ axis))
+        points.append({"run": run.label, "target_n": float(run.target),
+                       "force_n": float(run.force[tail].mean()),
+                       "depth_m": depth_tail,
+                       "creep_mm": (depth_tail - depth_head) * 1000.0})
+        axes.append(axis)
+    if len(points) < min_points:
+        return {"ok": False, "reason": "자세가 없어 변위를 못 잰다 — ee_wrt_base 가 왔는가"}
+
+    base = points[0]["depth_m"]
+    for p in points:
+        p["depth_mm"] = (p["depth_m"] - base) * 1000.0
+    mean_axis = np.mean(axes, axis=0)
+    mean_axis /= np.linalg.norm(mean_axis)
+    spread = max(math.degrees(math.acos(min(1.0, float(a @ mean_axis)))) for a in axes)
+
+    depth = np.array([p["depth_m"] for p in points]) - base
+    force = np.array([p["force_n"] for p in points])
+    slope, intercept = np.polyfit(depth, force, 1)
+    predicted = slope * depth + intercept
+    ss_res = float(((force - predicted) ** 2).sum())
+    ss_tot = float(((force - force.mean()) ** 2).sum())
+    tangent = [{"from_n": points[i - 1]["target_n"], "to_n": points[i]["target_n"],
+                "k_n_per_mm": (force[i] - force[i - 1]) / ((depth[i] - depth[i - 1]) * 1000.0)
+                if depth[i] != depth[i - 1] else float("nan")}
+               for i in range(1, len(points))]
+    return {
+        "ok": True,
+        "method": "steady-state equilibria",
+        "run": "+".join(p["run"] for p in points),
+        "points": len(points),
+        "k_n_per_m": float(slope),
+        "k_n_per_mm": float(slope) / 1000.0,
+        "intercept_n": float(intercept),
+        "r_squared": float(1 - ss_res / ss_tot) if ss_tot > 0 else float("nan"),
+        "force_span_n": float(force.max() - force.min()),
+        "travel_span_mm": float((depth.max() - depth.min()) * 1000.0),
+        "contact_depth_mm": float(-intercept / slope * 1000.0) if slope else float("nan"),
+        "monotonic": bool(np.all(np.diff(depth) > 0)),
+        "axis_spread_deg": float(spread),
+        "settle_s": settle_s,
+        "curve": points,
+        "tangent": tangent,
+        "reason": "",
+    }
+
+
 def regulation_evidence(run: Run, k_n_per_m: float) -> list:
     """조절이 일어났다는 직접 증거 — 사건마다 팔이 얼마나 물러났는가.
 
@@ -625,6 +709,54 @@ def _seconds_where(run: Run, mask: np.ndarray) -> float:
     return float(mask.sum() * dt)
 
 
+#: 같은 실험인가를 가르는 조절기 설정. 이 값이 하나라도 다르면 같은 목표 힘이라도
+#: 다른 루프를 잰 것이고, 반복으로 합칠 수 없다 (B_z 1000 과 4500 은 한계 주기의
+#: 유무가 갈리는 다른 조절기다 — VALIDATION_SUMMARY §1).
+TUNING_KEYS = ("admittance_b_z", "deadband_n", "contact_probing_force_n",
+               "contact_probing_release_n", "contact_force_mode")
+
+
+def session_of(run: Run) -> str:
+    """실행이 속한 회차 — 기록 날짜. 같은 날 같은 접촉점에서 받은 것을 한 회차로 본다."""
+    return str(run.meta.get("recorded_at", ""))[:10] or "?"
+
+
+def tuning_mismatch(run: Run, reference: Run) -> list:
+    """``run`` 이 ``reference`` 와 다른 설정 항목. 비어 있으면 같은 실험이다."""
+    out = []
+    for key in TUNING_KEYS:
+        a, b = run.meta.get(key), reference.meta.get(key)
+        if a != b:
+            out.append(f"{key} {a} ≠ {b}")
+    return out
+
+
+def pool_holds(primary: list, extra: list) -> list:
+    """다른 회차의 정지 유지 실행을 반복으로 받아들일지 정한다.
+
+    받아들이는 조건은 **같은 목표 힘에 같은 조절기 설정**(:data:`TUNING_KEYS`)의
+    hold 실행이 기준 회차에 있을 것. 그 밖의 것은 버리지 않고 사유를 달아
+    제외한다 — 보고서의 실행 표에 그대로 남는다. hold 가 아닌 실행은 합침의
+    대상이 아니므로 돌려주지 않는다.
+    """
+    holds = [r for r in primary if r.included and r.run_type == "hold"]
+    pooled = []
+    for run in extra:
+        if run.run_type != "hold":
+            continue
+        if run.included:
+            reference = next((h for h in holds if float(h.target) == float(run.target)), None)
+            if reference is None:
+                run.included, run.reason = False, "기준 회차에 같은 목표 힘의 유지 실행이 없다"
+            else:
+                mismatch = tuning_mismatch(run, reference)
+                if mismatch:
+                    run.included = False
+                    run.reason = "설정이 달라 반복이 아니다: " + ", ".join(mismatch)
+        pooled.append(run)
+    return pooled
+
+
 @dataclass
 class Summary:
     runs: list = field(default_factory=list)
@@ -637,10 +769,14 @@ class Summary:
     excursions: list = field(default_factory=list)
     exposure: list = field(default_factory=list)
     k_n_per_m: float = float("nan")
+    #: 평형점 곡선 강성 (:func:`stiffness_from_holds`). ``ok`` 가 거짓이면 사유가 있다.
+    stiffness_curve: dict = field(default_factory=dict)
 
 
-def summarise(runs: list) -> Summary:
-    out = Summary(runs=runs)
+def summarise(runs: list, pooled_holds: list = ()) -> Summary:
+    """``pooled_holds`` 는 다른 회차에서 :func:`pool_holds` 로 받아들인 유지 실행.
+    유지 지표에만 들어간다 — 교란·안전·노출 그림은 기준 회차의 것이다."""
+    out = Summary(runs=list(runs) + list(pooled_holds))
 
     # 강성을 먼저 낸다 — 반사실이 그 값 위에 서기 때문이다.
     for run in runs:
@@ -651,6 +787,14 @@ def summarise(runs: list) -> Summary:
         # 여러 개면 R² 로 가중하지 않고 **중앙값**을 쓴다. 적합이 잘 된 것이 반드시
         # 대표적인 것은 아니고, 팬텀은 누른 자리마다 다르다.
         out.k_n_per_m = float(np.median([s["k_n_per_m"] for s in usable]))
+    # 개루프 캡처가 없거나 실패했으면 무교란 유지 실행의 평형점 곡선에서 잰다.
+    # 이쪽은 변위가 측정된 값이라, 있으면 이것을 대표 강성으로 쓴다 — 개루프
+    # 캡처는 팔이 고정돼 변위가 0 이라 원리적으로 기울기가 서지 않는다.
+    out.stiffness_curve = stiffness_from_holds(runs)
+    if out.stiffness_curve.get("ok"):
+        out.k_n_per_m = out.stiffness_curve["k_n_per_m"]
+        out.stiffness.append({k: v for k, v in out.stiffness_curve.items()
+                              if k not in ("curve", "tangent")})
 
     for run in runs:
         out.safety.append(safety_margin(run))
@@ -660,7 +804,7 @@ def summarise(runs: list) -> Summary:
             metrics = hold_metrics(run)
             if metrics.get("samples"):
                 out.hold.append({"run": run.label, "run_type": run.run_type,
-                                 "force_hold": run.force_hold,
+                                 "force_hold": run.force_hold, "session": session_of(run),
                                  "target_n": run.target, "band_n": run.band, **metrics})
         if run.run_type == "disturbance":
             out.events.extend(disturbance_events(run))
@@ -669,6 +813,15 @@ def summarise(runs: list) -> Summary:
             # 설계대로다. 이 팔이 재는 것은 그 반대편, 반사실 자체다.
             if run.force_hold:
                 out.evidence.extend(regulation_evidence(run, out.k_n_per_m))
+    # 합쳐 온 다른 회차의 유지 실행은 유지 지표에만 들어간다.
+    for run in pooled_holds:
+        if not run.included:
+            continue
+        metrics = hold_metrics(run)
+        if metrics.get("samples"):
+            out.hold.append({"run": run.label, "run_type": run.run_type,
+                             "force_hold": run.force_hold, "session": session_of(run),
+                             "target_n": run.target, "band_n": run.band, **metrics})
     # 되돌아옴은 제외된 실행에서도 잰다 — 힘 제어가 안 걸린 실행이야말로
     # 비교의 반쪽(개루프)이고, 그것을 버리면 비교 자체가 사라진다.
     for run in runs:
@@ -706,6 +859,7 @@ def by_target(hold_rows: list) -> list:
             "error_vs_settling_n": float(
                 np.average(pick("error_vs_settling_n"), weights=weights)),
             "runs": len(rows),
+            "sessions": len({r.get("session") for r in rows}),
             "samples": int(weights.sum()),
             "seconds": float(sum(r["seconds"] for r in rows)),
             "mean_error_n": float(np.average(pick("mean_error_n"), weights=weights)),

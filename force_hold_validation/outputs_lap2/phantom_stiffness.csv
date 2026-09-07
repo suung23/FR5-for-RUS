@@ -1,1 +1,2 @@
-run,points,k_n_per_m,k_n_per_mm,intercept_n,r_squared,force_span_n,travel_span_mm,ok,reason
+run,method,points,k_n_per_m,k_n_per_mm,intercept_n,r_squared,force_span_n,travel_span_mm,contact_depth_mm,monotonic,axis_spread_deg,ok,reason
+A_t0p5_r2+A_t1p0_r2+A_t1p5_r2+A_t2p0_r2+A_t2p5_r2+A_t3p0_r2+A_t3p5_r2+A_t4p0_r2,steady-state equilibria,8,373.85027863663976,0.3738502786366398,0.4909939864874557,0.9970534624906219,3.5192590224438907,9.621312855180031,-1.313343909433521,True,0.0010433798630595653,True,

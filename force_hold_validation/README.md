@@ -163,6 +163,14 @@ analysis excludes it by name.
 python3 run_force_hold_analysis.py --runs runs --output-dir outputs
 ```
 
+To pool undisturbed-hold repeats from another session into the hold-quality
+figure and table (only `hold` runs with the same controller tuning are accepted;
+the rest stay in the run table with a reason):
+
+```bash
+python3 run_force_hold_analysis.py --runs runs_lap2 --pool-holds runs_sweep500                                    --output-dir outputs_pooled
+```
+
 Outputs:
 
 ```

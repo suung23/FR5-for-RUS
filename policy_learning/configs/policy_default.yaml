@@ -1,0 +1,98 @@
+# rus_policy 기본 설정. 모든 키의 의미·근거는 rus_policy/config.py 주석 참조.
+# 🟡 = 제안값(튜닝 대상), ⏳ = 실측 후 갱신. 값을 비우면 config.py 의 기본값이 쓰인다.
+
+paths:
+  sessions_manifest: policy_learning/data/sessions.csv      # session_dir, subject, source, split, note
+  dataset: policy_learning/data/policy_dataset.h5
+  output_dir: policy_learning/runs/default
+  unet_checkpoint: Unet_seg/checkpoints/exp_seed43/best.pt  # 학습 머신에서 복사 (저장소에 없음)
+  unet_config: Unet_seg/configs/exp_seed43_retro.yaml       # 논문 Q 정의 (geometric, ROI file)
+  perception_cache_dir: policy_learning/data/perception_cache
+
+timing:
+  policy_hz: 5.0          # f_p
+  chunk_steps: 8          # k  🟡 (1.6 s)
+  obs_frames: 16          # m  🟡 (8 fps × dither 2 s) — f_us 확정 후 재산정
+  us_latency_s: 0.0       # ⏳ US 고정 엔드투엔드 지연 [s]. 실측값을 넣을 것 (§7.1)
+  obs_frame_max_age_s: 4.0
+
+imu:
+  quaternion: chip        # chip (BNO085 RV) | host (Madgwick)
+  still_win_s: 0.30
+  still_gyro_sd: 0.02     # ⏳ 프리핸드 정지 임계 — inspect_session.py 로 조정
+  still_gyro_mean: 0.03
+  still_accel_sd: 0.25
+  min_still_s: 0.30       # 🟡 §2.3 프로토콜
+  max_move_s: 8.0
+  min_move_s: 0.15
+  anchor_fraction: 0.25
+  sensor_to_probe:        # ⏳ R_SP (센서→프로브). 프로브: +x lateral, +y elevational, +z beam
+    - [1.0, 0.0, 0.0]
+    - [0.0, 1.0, 0.0]
+    - [0.0, 0.0, 1.0]
+  prev_motion_max_gap_s: 5.0
+
+labels:
+  sigma_translation_coeff_mm: 0.7   # ε = c τ^1.5 (QC_PLAN 9번)
+  sigma_rotation_deg: 0.1
+  sigma_shape_fraction: 0.3         # 🟡
+  teleop_sigma_translation_mm: 0.1
+  teleop_sigma_rotation_deg: 0.05
+
+perception:
+  backend: unet           # unet | none (none: Q̂ 항 마스크, 특징 0)
+  frame_size: [256, 256]  # 저장 관측 해상도
+  frame_transform: none   # ⏳ candidate 프레임 방향 (rot90_cw 등)
+  device: auto
+  cache: true
+  hold_deadband_px: 8.0916
+
+split:
+  strategy: manifest      # manifest | subject_random
+  ratios: [0.7, 0.15, 0.15]
+  seed: 42
+
+model:
+  head: cvae              # cvae | discrete (§9-1)
+  d_model: 256
+  n_heads: 8
+  encoder_layers: 4
+  decoder_layers: 4
+  dim_feedforward: 1024
+  dropout: 0.1
+  z_dim: 32
+  frame_channels: [32, 64, 128, 256]
+  frame_input_size: [128, 128]
+  discrete_bins: 21
+  discrete_range_mm: 20.0
+  discrete_range_deg: 10.0
+
+loss:                     # §5.4 (전부 🟡)
+  lambda_force: 0.3
+  lambda_quality: 1.0
+  lambda_smooth: 0.05
+  lambda_feas: 0.5
+  lambda_risk: 0.2
+  w_minus_over_plus: 5.0
+  beta_kl: 0.02
+  w_shape: 0.3
+  huber_delta_sigma: 2.0
+  B_z: 1000.0
+  v_z_max_mm_s: 10.0
+  net_weight_cap: 400.0
+
+train:
+  epochs: 50
+  batch_size: 16
+  lr: 1.0e-4
+  weight_decay: 1.0e-4
+  warmup_epochs: 2
+  amp: false
+  device: auto
+  num_workers: 0
+  seed: 0
+  grad_clip: 1.0
+  z_samples_eval: 32
+  gamma_mode_consistency: 0.2
+  log_every: 20
+  augment: true

@@ -1,0 +1,7 @@
+session_dir,subject,source,split,note
+# 한 줄에 세션 하나. session_dir 은 절대경로 또는 이 파일 기준 상대경로 (us_imu_<stamp>/ 디렉터리).
+# subject 가 같으면 같은 split 에 묶인다 (피험자 누수 방지). split 을 비우면 --set split.strategy=subject_random.
+# source: freehand (IMU 라벨) | teleop (FK 라벨 — 로더 미구현)
+# 예)
+# /data/rus/us_imu_20260910_101500,P01,freehand,train,phantom A
+# /data/rus/us_imu_20260910_113000,P02,freehand,val,

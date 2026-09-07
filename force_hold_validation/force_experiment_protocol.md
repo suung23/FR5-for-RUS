@@ -172,6 +172,19 @@ cd ~/FR5-for-RUS/force_hold_validation
 python3 run_force_hold_analysis.py --runs runs_sweep500 --output-dir outputs_sweep500
 ```
 
+회차를 합쳐 유지 품질의 재현성을 보이려면 (2026-09-07):
+
+```bash
+python3 run_force_hold_analysis.py --runs runs_lap2 --pool-holds runs_sweep500                                    --output-dir outputs_pooled
+```
+
+`--pool-holds` 디렉터리에서는 **정지 유지(hold) 실행만**, 그것도 기준 회차와 조절기
+설정(`B_z`, 데드밴드, 진입·해제 문턱, 힘 모드)이 같은 것만 반복으로 받아들인다.
+`runs_sweep500` 에서는 `A_*_r1h` 여덟 건(B_z 4500)이 들어오고 `A_*_r1`(B_z 1000/3000)은
+"설정이 달라 반복이 아니다" 사유로 실행 표에 남는다. 합쳐진 것은 fig2 와
+`hold_by_target.csv`(`runs`, `sessions` 열) 뿐이고, 회차별 값은 `hold_runs.csv` 에
+따로 적힌다. 교란·안전·노출 그림은 기준 회차(`--runs`)만으로 그린다.
+
 ### 나오는 표
 
 | 파일 | 내용 |
@@ -186,8 +199,9 @@ python3 run_force_hold_analysis.py --runs runs_sweep500 --output-dir outputs_swe
 
 | 그림 | 내용 |
 |---|---|
-| `fig1_force_traces` | 대역별 힘(실선) + **로봇 변위(점선)** 시계열, 밴드·한계 표시 |
-| `fig3_disturbance` | 교란 정렬 2×2 — 위 행 힘 오차, **아래 행 로봇 변위**, 같은 시간축 |
+| `fig1_force_traces` | 힘(실선) + **로봇 변위(점선)** 시계열. 행 = 목표 힘, 열 = 조건(교란 없음 / 힘 유지 켬 / 끔) |
+| `fig3_disturbance` | 교란 정렬 힘 오차. 행 = 목표 힘, 열 = 주입 / 인출, 켬(남색)·끔(주황) 겹침 |
+| `fig3b_disturbance_travel` | 같은 배치의 **로봇 변위** — fig3 과 나란히 읽는다 |
 | `fig2_hold_quality` | 대역별 유지 품질 (오차 · RMSE · 밴드 내 체류율) |
 | `fig4_safety_margin` | 실행별 최악 힘 vs 경고·한계 |
 | `fig5_regulation_evidence` | 힘 평평 + 팔 이동 = 흡수 증거 |
@@ -195,7 +209,7 @@ python3 run_force_hold_analysis.py --runs runs_sweep500 --output-dir outputs_swe
 
 ### 판독 요령
 
-- **fig3**: 힘이 돌아오는 동안 변위가 계단으로 움직이면 **로봇이 받아 낸 것**,
+- **fig3 / fig3b**: 힘이 돌아오는 동안 변위가 계단으로 움직이면 **로봇이 받아 낸 것**,
   변위가 평평한데 힘만 돌아오면 팬텀이 스스로 누운 것이다.
 - **hold 의 `travel_mm`**: 힘이 잡혀 있는데 이 값이 0 이면 지령이 실행되지 않은
   것이다 — 2026-09-03 버그가 정확히 이 모양으로 숨어 있었다.

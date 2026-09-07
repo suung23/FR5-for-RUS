@@ -1,0 +1,10 @@
+# policy_learning — 학습 파이프라인 의존성. Unet_seg/requirements.txt 와 겹치는 것은 같은 버전 범위.
+torch>=2.0
+numpy>=1.23
+h5py>=3.8
+PyYAML>=6.0
+Pillow>=9.3
+opencv-python-headless>=4.7   # Unet_seg 후처리(연결요소)에 필요 — perception.backend=unet
+tqdm>=4.64
+pytest>=7.2
+matplotlib>=3.6               # scripts/inspect_session.py --plot 에만

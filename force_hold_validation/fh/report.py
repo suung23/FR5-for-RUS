@@ -5,6 +5,8 @@ import csv
 import datetime
 import os
 
+from fh.analysis import session_of
+
 
 def write_csv(path: str, rows: list, columns: list) -> None:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -49,11 +51,11 @@ def report(summary, grouped: list, figures: list, path: str) -> None:
         "## Runs",
         "",
         _table(
-            [{"run": r.label, "type": r.run_type,
+            [{"run": r.label, "type": r.run_type, "session": session_of(r),
               "target_n": r.target, "samples": int(r.t.size),
               "included": "yes" if r.included else "no",
               "reason": r.reason or ""} for r in summary.runs],
-            ["run", "type", "target_n", "samples", "included", "reason"],
+            ["run", "type", "session", "target_n", "samples", "included", "reason"],
             {"target_n": f2},
         ),
         "",
@@ -75,8 +77,12 @@ def report(summary, grouped: list, figures: list, path: str) -> None:
         "",
         "정착 구간(프로빙 진입 직후 3 s)은 버렸다 — 목표로 가는 과도이지 유지가 아니다.",
         "",
+        "`runs` 는 그 목표 힘에 합쳐진 유지 실행 수, `sessions` 는 그것이 나온 회차",
+        "(기록 날짜) 수다. 회차가 둘 이상이면 표의 값은 회차를 표본 수로 가중해 합친",
+        "것이고, 회차별 값은 `hold_runs.csv` 에 있다.",
+        "",
         _table(grouped,
-               ["target_n", "band_n", "settling_point_n", "sd_n",
+               ["target_n", "band_n", "settling_point_n", "runs", "sessions", "sd_n",
                 "error_vs_settling_n", "mean_error_n", "seconds", "in_band_pct",
                 "max_force_n", "travel_mm"],
                {"target_n": f2, "band_n": f2, "settling_point_n": f2,
@@ -110,15 +116,34 @@ def report(summary, grouped: list, figures: list, path: str) -> None:
         "**애초에 오를 상황이 아니었는가.** 물러난 거리가 그 둘을 가른다 — 힘이",
         "일정한데 팔이 뒤로 갔다면, 그 변위가 로봇이 받아 낸 양이다.",
         "",
-        ("**팬텀 강성 k = %s N/mm** (개루프 실행에서 측정)."
+        ("**팬텀 강성 k = %s N/mm** (%s)."
          % ("—" if not (summary.k_n_per_m == summary.k_n_per_m)
-            else f"{summary.k_n_per_m / 1000.0:.3f}")),
+            else f"{summary.k_n_per_m / 1000.0:.3f}",
+            "무교란 유지 실행의 평형점 곡선에서 측정"
+            if summary.stiffness_curve.get("ok") else "개루프 실행에서 측정")),
         "",
         _table(summary.stiffness,
-               ["run", "points", "k_n_per_mm", "r_squared", "force_span_n",
-                "travel_span_mm", "reason"],
+               ["run", "method", "points", "k_n_per_mm", "r_squared", "force_span_n",
+                "travel_span_mm", "contact_depth_mm", "axis_spread_deg", "reason"],
                {"k_n_per_mm": lambda v: f"{v:.3f}", "r_squared": lambda v: f"{v:.4f}",
-                "force_span_n": f2, "travel_span_mm": f2}),
+                "force_span_n": f2, "travel_span_mm": f2,
+                "contact_depth_mm": lambda v: "—" if v is None else f"{v:+.2f}",
+                "axis_spread_deg": lambda v: "—" if v is None else f"{v:.2f}",
+                "method": lambda v: v or "open-loop syringe"}),
+        "",
+        *(["평형점 방식: 힘 유지 제어는 팬텀 반력이 목표와 같아지는 자리에서 멈추므로,",
+           "그 정지점의 (힘, 축방향 절대 위치)는 제어기와 무관하게 팬텀 F(z) 위의 점이다.",
+           "목표마다 한 점씩 얻어 직선을 맞췄다. 전제: 같은 부위·같은 자세에서 팬텀을",
+           "건드리지 않고 연속 촬영(`axis_spread_deg` 가 그 확인), 그리고 유지 구간 끝",
+           f"{summary.stiffness_curve.get('settle_s', 10):.0f} s 까지 이완된 **준정적** 값이라는 것.",
+           "개루프 주사 캡처는 팔이 고정돼 변위가 0 이라 기울기가 서지 않는다 —",
+           "그쪽은 스텝당 힘 변화(교란 크기)로만 쓴다.",
+           "",
+           _table(summary.stiffness_curve.get("curve", []),
+                  ["run", "target_n", "force_n", "depth_mm", "creep_mm"],
+                  {"target_n": f2, "force_n": lambda v: f"{v:.3f}",
+                   "depth_mm": lambda v: f"{v:+.2f}", "creep_mm": lambda v: f"{v:+.3f}"}),
+           ""] if summary.stiffness_curve.get("ok") else []),
         "",
         "`counterfactual_n` = 유지한 힘 + (물러난 거리 × k). **팔이 가만히 있었다면",
         "실렸을 힘** 이며, 이것이 안전 한계와 비교할 값이다.",
@@ -130,7 +155,7 @@ def report(summary, grouped: list, figures: list, path: str) -> None:
                 "held_max_n": f2, "absorbed_n": f2,
                 "counterfactual_n": lambda v: "—" if v is None else f"{v:.2f}"}),
         "",
-        "⚠️ 강성은 개루프 실행의 **한 지점 기울기**다. 팬텀이 비선형이면 외삽한 만큼",
+        "⚠️ 강성은 잰 힘 구간 안의 직선 기울기다. 팬텀이 비선형이면 외삽한 만큼",
         "틀리고, 누른 자리가 다르면 값도 다르다. `r_squared` 와 `force_span_n` 이",
         "그 외삽이 얼마나 먼지를 말해 준다 — 측정 구간 밖으로 크게 벗어난 반사실은",
         "근거가 아니라 추정이다.",

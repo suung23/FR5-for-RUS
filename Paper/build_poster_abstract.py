@@ -10,7 +10,7 @@ are merged into one figure; the beam-axis B-mode figure and the quantitative
 results table are kept; everything is compressed to fit two pages including
 references. Authors and affiliations are the finalised set (do not edit).
 
-Writes Lateral_Instruction_Manuscript_2page.docx; the five-page file is left
+Writes "<paper title>_poster.docx" (the submission file name); the five-page file is left
 untouched.
 """
 from __future__ import annotations
@@ -29,7 +29,9 @@ from docx import Document                              # noqa: E402
 from docx.enum.section import WD_SECTION               # noqa: E402
 from docx.shared import Pt                             # noqa: E402
 
-OUT = os.path.join(PAPER, "Lateral_Instruction_Manuscript_2page.docx")
+#: File name chosen by the user for submission (the paper title + "_poster").
+OUT = os.path.join(PAPER, "An Explainable Action-Token Generation Framework Based on "
+                   "Bladder Ultrasound Segmentation and Image Quality Assessment_poster.docx")
 
 # ---- finalised author / affiliation block (do not edit) --------------------
 AUTHORS = ("++Seong Jeong++^1,2,3^, Minsung Kim^2,3,4^, Dongho Yee^2,3,4^, "
@@ -56,24 +58,26 @@ def front_matter(doc):
 
     _abs = para(doc,
          "**Abstract:** "
-         "Automated ultrasound-image analysis requires an explicit, auditable "
-         "representation mapping image-derived states to actionable structured outputs. "
-         "We convert bladder ultrasound segmentation and image-quality assessment into a "
-         "safety-constrained, machine-readable action token τ = (*a*, *ê*, *Q*): a U-Net "
-         "segments the lumen, a transparent quality function *Q* summarises the frame, and "
-         "a discrete action state *a* ∈ {move-left, move-right, hold, check-filling} is "
-         "paired with a continuous lateral displacement *ê*. The vocabulary is bounded by "
-         "what *Q* distinguishes — *Q* attains [0.14, 0.78] of its domain and, against a "
-         "frame-to-frame jitter of 0.0095, separates 47 distinguishable states — and two "
-         f"derived boundaries (a physical anechoicity gate and a {TH['5%']['k']:.2f}σ = "
-         f"{TH['5%']['px']:.1f} px uncertainty deadband, σ = {SIGMA:.2f} px) define the "
-         f"states. On {S['n_frames']:,} laterally translated held-out frames the action "
-         f"state is classified at {VOCAB[3]['accuracy'] * 100:.1f}% accuracy "
-         f"({VOCAB[3]['direction_error'] * 100:.2f}% direction error) and displacement at "
-         f"slope {OVERALL['slope']:.3f}; graded magnitude drops accuracy to "
-         f"{VOCAB[5]['accuracy'] * 100:.1f}% / {VOCAB[7]['accuracy'] * 100:.1f}%. The "
-         "framework validates image-to-token generation for future downstream integration, "
-         "not closed-loop control.",
+         "During morcellation in holmium laser enucleation of the prostate (HoLEP), a "
+         "suprapubic probe must stay over the bladder lumen; automating that view needs "
+         "an explicit, auditable representation of image state, which a mask alone is "
+         "not. We convert segmentation and image-quality assessment into a "
+         "safety-constrained, machine-readable action token: a U-Net segments the lumen, "
+         "a transparent quality function *Q* summarises the frame, and a discrete action "
+         "state, one of *move-left*, *move-right*, *hold*, or *check-filling*, is paired "
+         "with a continuous lateral displacement *ê*. The vocabulary is bounded by what "
+         "*Q* distinguishes: against frame-to-frame jitter its attained range "
+         "[0.14, 0.78] separates 47 distinguishable states. Both boundaries are derived, "
+         "not tuned: an anechoicity gate assigns *check-filling* and an uncertainty "
+         f"deadband assigns *hold* below {TH['5%']['k']:.2f}σ = {TH['5%']['px']:.1f} px "
+         f"of centroid noise, σ = {SIGMA:.2f} px. On {S['n_frames']:,} laterally "
+         f"translated held-out frames the action state is "
+         f"{VOCAB[3]['accuracy'] * 100:.1f}% correct with "
+         f"{VOCAB[3]['direction_error'] * 100:.2f}% direction error and displacement "
+         f"follows slope {OVERALL['slope']:.3f}; graded magnitude classes drop accuracy "
+         f"to {VOCAB[5]['accuracy'] * 100:.1f}% and {VOCAB[7]['accuracy'] * 100:.1f}%. "
+         "The token layer targets HoLEP probe guidance; closed-loop validation remains "
+         "future work.",
          size=10.0)
     _abs.paragraph_format.line_spacing = 1.2
     para(doc, "**Keywords:** bladder ultrasound segmentation, image quality assessment, "

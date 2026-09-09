@@ -1,7 +1,7 @@
 session_dir,subject,source,split,note
 # 2026-09-09 C10UR Wi-Fi 손 수집, 팬텀 1 개 (subject 열 P01 = 팬텀 A). 팬텀이 하나라 세션 단위로 split. 앞 6 세션은 연속 이동 규약.
 # session_dir 은 이 파일 기준 상대경로. 다른 PC 에서는 경로만 바꾼다.
-../../imu_bench/logs/us_imu_20260909_153452,P01,freehand,train,day1 continuous-motion protocol
+# ../../imu_bench/logs/us_imu_20260909_153452,P01,freehand,train,제외 2026-09-10 — 그날 첫 세션이라 자력계 미수렴 (cal_mag=2 cal_rv=1). host(Madgwick)-chip(RV) 격차 중앙 43.8 deg / p95 72.6 deg 이고 분당 +7.4 deg 로 발산. 나머지 14 세션은 격차 ~1.1 deg 에 추세 -0.15 deg/분
 ../../imu_bench/logs/us_imu_20260909_160656,P01,freehand,train,day1 continuous-motion protocol
 ../../imu_bench/logs/us_imu_20260909_160858,P01,freehand,train,day1 continuous-motion protocol
 ../../imu_bench/logs/us_imu_20260909_161109,P01,freehand,train,day1 continuous-motion protocol

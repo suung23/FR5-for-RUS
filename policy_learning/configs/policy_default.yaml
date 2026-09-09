@@ -28,10 +28,10 @@ imu:
   max_move_s: 8.0
   min_move_s: 0.15
   anchor_fraction: 0.25
-  sensor_to_probe:        # ⏳ R_SP (센서→프로브). 프로브: +x lateral, +y elevational, +z beam
-    - [1.0, 0.0, 0.0]
-    - [0.0, 1.0, 0.0]
-    - [0.0, 0.0, 1.0]
+  sensor_to_probe:        # R_SP (센서→프로브), 2026-09-10 데이터로 확정 — 근거는 config.py ImuConfig 주석.
+    - [0.0, 1.0, 0.0]     #   x_p (lateral)     = 센서 +y  (횡이동 69 세션: 출발 가속 부호 = 영상 라인 이동 부호 146/146)
+    - [0.0, 0.0, 1.0]     #   y_p (elevational) = 센서 +z  (면외 스윕 20 세션)
+    - [1.0, 0.0, 0.0]     #   z_p (beam)        = 센서 +x  (정지 시 중력 −9.1 m/s² 가 센서 x 에)
   prev_motion_max_gap_s: 5.0
 
 labels:

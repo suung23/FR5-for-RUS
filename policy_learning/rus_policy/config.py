@@ -64,11 +64,16 @@ class ImuConfig:
     max_move_s: float = 8.0         # protocol.ZUPT_MAX_MOVE_S
     min_move_s: float = 0.15        # 이보다 짧은 "이동" 은 잡음으로 본다
     anchor_fraction: float = 0.25   # 정지 구간 끝쪽 25 % 안에 앵커 (analyze_track.move_segments)
-    # ⏳ 센서→프로브 회전 R_SP. 프로브 프레임: +x lateral, +y elevational, +z beam
-    # (docs/FRAMES_AND_SE2.md §1). IMU 마운트 방향을 측정해 채워야 한다.
-    sensor_to_probe: list = field(default_factory=lambda: [[1.0, 0.0, 0.0],
-                                                           [0.0, 1.0, 0.0],
-                                                           [0.0, 0.0, 1.0]])
+    # 센서→프로브 회전 R_SP (p = R_SP · s). 프로브 프레임: +x lateral, +y elevational, +z beam (docs/FRAMES_AND_SE2.md §1).
+    # 2026-09-10 C10UR 2차 수집 데이터로 확정 (board-6-qc 마운트):
+    #   * 정지 시 가속도가 센서 −x 에 −9.1 m/s² → 센서 +x 가 아래(빔) 방향  ⇒ z_p = +x_s
+    #   * 횡이동 세션 69 개: 가속 에너지가 센서 y (1.11 vs 0.17/0.18), 출발 가속 부호와 영상 속 구조물의 라인 이동 부호가
+    #     146/146 일치  ⇒ x_p = +y_s  (+x_p = 구조물이 높은 A-line 번호 쪽(부채꼴 표시의 오른쪽)으로 이동하는 방향)
+    #   * 면외 스윕 20 개: 가속 에너지가 센서 z (0.69 vs 0.09/0.14)  ⇒ y_p = +z_s  (= z_p × x_p, 오른손 좌표계 ✔)
+    # 행 = 프로브 축을 센서 좌표로 쓴 것. 로봇 배치 때 부호(좌우)는 flip_lines 와 함께 한 번 더 확인할 것.
+    sensor_to_probe: list = field(default_factory=lambda: [[0.0, 1.0, 0.0],
+                                                           [0.0, 0.0, 1.0],
+                                                           [1.0, 0.0, 0.0]])
     prev_motion_max_gap_s: float = 5.0   # Ã_{t−1} 을 유효로 보는 최대 공백
 
     def R_sp(self) -> np.ndarray:

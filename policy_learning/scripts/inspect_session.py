@@ -24,7 +24,7 @@ import numpy as np
 from _common import add_config_args, config_from_args
 
 from rus_policy.calibration import estimate_us_latency
-from rus_policy.imu_labels import _rolling_mean_std, _window_bounds, label_session
+from rus_policy.imu_labels import _rolling_mean_std, _window_bounds, imu_config_for_session, label_session
 from rus_policy.session import load_session
 
 
@@ -88,7 +88,7 @@ def main() -> int:
         print(f"  {name:22s} " + " ".join(f"{p[q]:.4f}" for q in (5, 25, 50, 75, 95, 99))
               + f"   임계 {thr}  → 통과 {below * 100:.1f} %")
 
-    labels = label_session(imu, cfg.timing, cfg.imu, cfg.labels,
+    labels = label_session(imu, cfg.timing, imu_config_for_session(s.meta, cfg.imu), cfg.labels,
                            convention=(s.zero_ref or {}).get("quat_convention"))
     d = labels.diagnostics
     print(f"\n분절: 정지 {d['n_still_segments']} 구간 (정지 비율 {d['still_fraction'] * 100:.1f} %), "

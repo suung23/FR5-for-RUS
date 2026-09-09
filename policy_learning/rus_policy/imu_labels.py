@@ -20,12 +20,25 @@ policy 가 쥔 3축은 (v_x, v_y, ω_z) → P[:, (0, 1, 5)] 이고, 힘축 (z, �
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Optional
 
 import numpy as np
 
 from .config import ImuConfig, LabelConfig, TimingConfig
+
+
+def imu_config_for_session(meta: dict[str, Any] | None, imu_cfg: ImuConfig) -> ImuConfig:
+    """세션 메타 ``imu.sensor_to_probe`` 가 있으면 설정의 R_SP 대신 그것을 쓴 ImuConfig 사본을 돌려준다.
+
+    R_SP 는 IMU 마운트에 붙는 값이라 세션이 알고 있는 것이 우선이다 — 합성 세션(rus_policy.synth) 은 센서 = 프로브(I) 로
+    만들어지고, 실기 세션은 수집기가 마운트 값을 남길 수 있다. 없으면 설정값(2026-09-10 board-6-qc 실측) 을 쓴다."""
+    R = ((meta or {}).get("imu") or {}).get("sensor_to_probe")
+    if R is None:
+        return imu_cfg
+    cfg = replace(imu_cfg, sensor_to_probe=[[float(v) for v in row] for row in R])
+    cfg.R_sp()   # 검증 (3x3 회전행렬)
+    return cfg
 
 G0 = 9.80665
 POLICY_AXES = (0, 1, 5)   # (x, y, θz) in the 6-dim (x, y, z, θx, θy, θz)

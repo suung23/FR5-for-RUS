@@ -11,7 +11,7 @@ import pytest
 
 from rus_policy.config import ImuConfig, PolicyConfig
 from rus_policy.imu_labels import (
-    G0, cumtrapz, earth_convention, label_session, move_segments, quat_to_matrix, rotmat_log,
+    G0, cumtrapz, earth_convention, imu_config_for_session, label_session, move_segments, quat_to_matrix, rotmat_log,
     segments_from_mask, sigma_for, still_mask, zupt_integrate,
 )
 from rus_policy.session import load_session
@@ -119,7 +119,7 @@ def test_sigma_window_is_capped_at_chunk_horizon(tmp_path):
                                                 move_s=(2.5, 3.5)), name="long")
     s = load_session(d)
     cfg = PolicyConfig()
-    labels = label_session(s.imu, cfg.timing, cfg.imu, cfg.labels)
+    labels = label_session(s.imu, cfg.timing, imu_config_for_session(s.meta, cfg.imu), cfg.labels)
     assert labels.labels, "이동 구간이 검출되어야 한다"
     horizon = cfg.timing.chunk_horizon_s
     for lab in labels.labels:
@@ -151,7 +151,7 @@ def test_labels_match_synthetic_truth(tmp_path):
                                                   t0_unix=1_700_000_000.0), name="s")
     s = load_session(root)
     cfg = PolicyConfig()
-    L = label_session(s.imu, cfg.timing, cfg.imu, cfg.labels)
+    L = label_session(s.imu, cfg.timing, imu_config_for_session(s.meta, cfg.imu), cfg.labels)
     truth = json.loads((root / "truth.json").read_text())["segments"]
     assert len(L.labels) >= 0.9 * len(truth)
     errs = []
@@ -180,6 +180,7 @@ def test_sensor_to_probe_rotation_rotates_labels(tmp_path):
                                                   t0_unix=1_700_000_000.0), name="s")
     s = load_session(root)
     cfg = PolicyConfig()
+    cfg.imu.sensor_to_probe = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]        # 설정 경로 자체를 시험 — 세션 메타 우선 헬퍼는 안 거친다
     L0 = label_session(s.imu, cfg.timing, cfg.imu, cfg.labels)
     cfg.imu.sensor_to_probe = [[0, -1, 0], [1, 0, 0], [0, 0, 1]]
     L1 = label_session(s.imu, cfg.timing, cfg.imu, cfg.labels)

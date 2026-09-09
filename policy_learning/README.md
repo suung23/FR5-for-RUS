@@ -93,7 +93,7 @@ python -m pytest            # 45 tests, CPU 1–2 분
 |---|---|---|
 | **US fps** (`timing.obs_frames` m) | **가정하지 않는다.** `inspect_session.py` 가 프레임 간격 중앙값에서 fps 를 재고 `m = ceil(f_us / f_dither)` 를 찍어 준다 (§1.3). 현재 16 은 자리표시자 | `python scripts/inspect_session.py <session>` 첫 줄 |
 | `timing.us_latency_s` | US 프레임의 고정 엔드투엔드 지연. 프레임 시각에서 뺀다 (§7.1) | `inspect_session.py <session> --latency` — 프로브를 젤에서 급히 떼었다 붙이는 사건 10–20 회가 든 세션. 영상 평균강도 급변 ↔ 가속도 스파이크 상호상관. 양수 = 영상이 늦다 |
-| `imu.sensor_to_probe` | R_SP (IMU 센서 → 프로브 프레임 x lateral / y elevational / z beam). 틀리면 라벨 축이 뒤바뀐다 | `python scripts/calibrate_sensor_to_probe.py <session>` — 프로브 x, y, z 축 둘레로 차례로 크게 돌린 30 s 세션. 출력이 곧 YAML 행 |
+| `imu.sensor_to_probe` | R_SP (IMU 센서 → 프로브 프레임 x lateral / y elevational / z beam). 틀리면 라벨 축이 뒤바뀐다 | **2026-09-10 확정 (board-6-qc 마운트)**: x_p = 센서 +y, y_p = 센서 +z, z_p = 센서 +x. 근거 — 정지 시 중력이 센서 x 에, 횡이동 69 세션의 가속 에너지가 센서 y 이고 출발 가속 부호 = 영상 라인 이동 부호 146/146, 면외 스윕 20 세션은 센서 z. 세션 메타 `imu.sensor_to_probe` 가 있으면 그것이 우선 (`imu_labels.imu_config_for_session`; 합성 세션은 I). 마운트를 바꾸면 `calibrate_sensor_to_probe.py` 또는 같은 방법으로 다시 잰다 |
 | `imu.still_gyro_sd / still_gyro_mean / still_accel_sd` | 프리핸드 정지 판정 임계 | `inspect_session.py` 의 분위수 표. qc_common 값은 로봇용이라 손에는 너무 빡빡하다 |
 | `perception.frame_transform` | candidate 프레임 방향 (scan conversion 검증 전) | `us_protocol.py` ⏳ |
 | `split.allow_subject_overlap` | 피험자 1 명 파일럿(첫날 15 세션, `data/sessions.csv`) 은 세션 단위 split — 누수 검사를 경고로 낮춘다. val/test 는 같은 사람 안의 재현성만 잰다 | `--set split.allow_subject_overlap=true` |

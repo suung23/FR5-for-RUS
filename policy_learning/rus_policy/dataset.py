@@ -34,7 +34,7 @@ import h5py
 import numpy as np
 
 from .config import PolicyConfig
-from .imu_labels import SegmentLabel, SessionLabels, label_session, previous_motion
+from .imu_labels import imu_config_for_session, SegmentLabel, SessionLabels, label_session, previous_motion
 from .perception import STATE_DIM, STATE_FEATURE_NAMES, PerceptionResult, apply_frame_transform, \
     build_backend, perceive_session, session_bmode_frames
 from .session import Session, SessionRecord, load_session, read_sessions_manifest
@@ -329,7 +329,8 @@ def build_dataset(cfg: PolicyConfig, out_path: Optional[Path] = None, compress: 
             summary = session.summary()
             logger.info("세션 %s: %s", session.name, summary)
             conv = (session.zero_ref or {}).get("quat_convention")
-            labels = label_session(session.imu, cfg.timing, cfg.imu, cfg.labels, source=rec.source,
+            labels = label_session(session.imu, cfg.timing, imu_config_for_session(session.meta, cfg.imu), cfg.labels,
+                                   source=rec.source,
                                    convention=conv)
             perc = perceive_session(cfg, session, backend)
             # C10UR 극좌표 세션은 여기서 부채꼴 B-mode 로 바뀐다 (rus_policy.bmode). SL-2C 는 항등.

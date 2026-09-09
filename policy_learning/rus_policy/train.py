@@ -2,6 +2,10 @@
 
 진단 (§5.3g · §6 "조용한 실패"):
   * mode_collapse_vy_std  검증 관측에서 z 를 M 개 뽑아 v_y 순변위의 표준편차. 0 으로 가면 붕괴.
+  * leak_gap_mm           select_mae_y (사전분포 z) − mae_y (사후분포 z). σ_net 을 크게 넘으면 **누설** —
+                          인코더가 라벨을 z 로 흘려보내고 디코더가 관측을 무시한다 (§5.3g 2026-09-08).
+                          β 선택 규칙: gap ≤ σ_net 이면서 vy_std > 0 인 최소 β.
+  * KL 워밍업             β 를 train.beta_warmup_epochs 동안 0 → loss.beta_kl 로 올린다.
   * mode_margin           Q̂ 로 고른 모드와 반대 부호 모드의 점수 차. 잡음 수준이면 대칭 붕괴 (L11).
   * vy_sign_acc           |Δy| > σ 인 샘플에서 v_y 부호 정확도.
   * mae_*                 축별 순변위 절대오차 (mm, mm, deg).
@@ -119,15 +123,23 @@ class Trainer:
         logger.info("재개: %s (epoch %d, best %.4f)", path, self.epoch, self.best)
 
     # ------------------------------------------------------------------ 한 epoch
+    def beta_scale(self) -> float:
+        """KL 워밍업: 첫 epoch 에서 1/warm, beta_warmup_epochs 번째 epoch 부터 1 (선형)."""
+        warm = int(self.cfg.train.beta_warmup_epochs)
+        if warm <= 0:
+            return 1.0
+        return float(min(1.0, (self.epoch + 1) / warm))
+
     def train_epoch(self) -> dict[str, float]:
         self.model.train()
         agg: dict[str, list[float]] = {}
         t0 = time.time()
+        bscale = self.beta_scale()
         for it, batch in enumerate(self.train_loader):
             batch = to_device(batch, self.device)
             with torch.autocast(device_type=self.device.type, enabled=self.use_amp):
                 out = self.model(batch, use_posterior=True)
-                loss, logs = compute_loss(self.model, out, batch, self.cfg.loss)
+                loss, logs = compute_loss(self.model, out, batch, self.cfg.loss, beta_scale=bscale)
             self.opt.zero_grad(set_to_none=True)
             self.scaler.scale(loss).backward()
             if self.cfg.train.grad_clip > 0:
@@ -184,6 +196,8 @@ class Trainer:
             res["select_mae_y_mm"] = float(np.mean(sel_mae_y))
         if sel_sign:
             res["select_vy_sign_acc"] = float(np.mean(sel_sign))
+        if sel_mae_y and "mae_y_mm" in res:
+            res["leak_gap_mm"] = res["select_mae_y_mm"] - res["mae_y_mm"]
         return res
 
     # ------------------------------------------------------------------ 전체
@@ -207,6 +221,9 @@ class Trainer:
                 msg += f"  vy_std {va['mode_collapse_vy_std']:.2f}"
             if "mode_margin" in va:
                 msg += f"  margin {va['mode_margin']:.3f}"
+            if "leak_gap_mm" in va:
+                msg += f"  leak_gap {va['leak_gap_mm']:.2f}mm"
+            msg += f"  beta {tr.get('beta', float('nan')):.3f}"
             logger.info(msg)
             self.save("last.pt")
             if score < self.best:

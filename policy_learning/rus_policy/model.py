@@ -5,9 +5,8 @@
     관측 토큰      프레임 m 장 (CNN 풀링 토큰 + 마지막 프레임 공간 토큰 4×4)
                    + 프레임별 지각 특징 s_t (토큰에 합성)
                    + 벡터 토큰 (Ã_{t−1}, 중력, wrench, 포화신호)
-                   + z 토큰 (CVAE, 학습시 사후분포 / 실행시 사전분포 표본)
-    인코더         TransformerEncoder (무효 프레임은 key padding mask)
-    디코더         k 개 학습 쿼리 → TransformerDecoder → 스텝별 특징
+    인코더         TransformerEncoder (무효 프레임은 key padding mask). **z 는 들어가지 않는다.**
+    디코더         k 개 학습 쿼리 **+ z_proj(z)** → TransformerDecoder → 스텝별 특징
     헤드
       action       스텝별 (v_x, v_y, ω_z)  [mm/s, mm/s, deg/s]  →  P̂ = Δt·cumsum
       discrete     (선택) 축별 순변위 bin 로짓 (B, 3, n_bins)  §5.3(g)
@@ -16,6 +15,12 @@
     CVAE 인코더    q_φ(z | A, o): 라벨 chunk + 벡터 + 마지막 프레임 특징 → (μ, logσ²)
 
 `z = 0` 관례를 쓰지 않는다 (§3.2, L6·L7): 실행시 z 를 M 개 뽑아 Q̂ 로 고른다 (select_action).
+
+**z 주입 지점 (2026-09-08 개정, §3.3-1).** 초판은 z 를 인코더 토큰으로 넣었다. 그러면 self-attention 이
+z 를 모든 토큰에 섞어 Q̂ 의 관측 요약 `memory_pooled` 에 라벨(사후분포 z ← A_lab) 이 새어 들어간다 —
+학습시 Q̂ 는 라벨을 보고, 실행시엔 후보별 사전분포 z 를 보는 학습·실행 불일치다. 지금은 z 가 디코더
+쿼리에만 더해진다. 결과: (1) Q̂ 는 구조적으로 관측만 본다, (2) `select_action` 에서 인코더가 M 회가 아니라
+**1 회** 돌고 디코더(쿼리 k 개)만 M 회 돈다 (§8-8 지연 예산).
 """
 
 from __future__ import annotations
@@ -92,7 +97,7 @@ def sinusoid(n: int, d: int) -> torch.Tensor:
 class PolicyOutput:
     a_hat: torch.Tensor                 # (B,k,3) 스텝 속도 [mm/s, mm/s, deg/s]
     P_hat: torch.Tensor                 # (B,k+1,3) 누적 변위, P_hat[:,0]=0
-    memory_pooled: torch.Tensor         # (B,d) 관측 요약 (Q̂ 입력)
+    memory_pooled: torch.Tensor         # (B,d) 관측 요약 (Q̂ 입력) — z 를 포함하지 않는다
     F_hat: torch.Tensor                 # (B,k)
     logits: Optional[torch.Tensor]      # (B,3,n_bins) 이산 헤드
     mu: Optional[torch.Tensor]          # (B,z)
@@ -123,12 +128,12 @@ class ActPolicy(nn.Module):
         self.frame_index_emb = nn.Parameter(torch.randn(self.m, d) * 0.02)
         self.frame_dt_emb = MLP(1, 64, d)
         self.vec_proj = MLP(OBS_VEC_DIM, 128, d)
-        self.type_emb = nn.Parameter(torch.randn(4, d) * 0.02)   # vec, z, frame, spatial
+        self.type_emb = nn.Parameter(torch.randn(4, d) * 0.02)   # vec, (예약), frame, spatial
 
         # CVAE
         self.z_dim = mcfg.z_dim
         if self.head_type == "cvae":
-            self.z_proj = nn.Linear(self.z_dim, d)
+            self.z_proj = nn.Linear(self.z_dim, d)       # z → 디코더 쿼리 (인코더에는 넣지 않는다)
             self.enc_action_proj = nn.Linear(ACTION_DIM, d)
             self.enc_ctx_proj = nn.Linear(OBS_VEC_DIM + STATE_DIM, d)
             self.enc_cls = nn.Parameter(torch.randn(1, 1, d) * 0.02)
@@ -167,7 +172,8 @@ class ActPolicy(nn.Module):
         return r[:, None] * grid[None, :]
 
     # ------------------------------------------------------------------ 관측 인코딩
-    def encode_observation(self, batch: dict[str, torch.Tensor], z: Optional[torch.Tensor]):
+    def encode_observation(self, batch: dict[str, torch.Tensor]):
+        """관측 → (memory, pad, pooled). z 와 무관하므로 실행시 tick 당 1 회만 부른다."""
         frames = batch["frames"]                       # (B,m,H,W) float [0,1]
         B, m, H, W = frames.shape
         x = frames.reshape(B * m, 1, H, W)
@@ -189,14 +195,9 @@ class ActPolicy(nn.Module):
         sp_tok = self.spatial_proj(sp) + self.spatial_pos[None] + self.type_emb[3]
 
         vec_tok = (self.vec_proj(batch["vec"]) + self.type_emb[0])[:, None]
-        tokens = [vec_tok]
-        mask = [torch.zeros(B, 1, dtype=torch.bool, device=valid.device)]
-        if self.head_type == "cvae":
-            assert z is not None
-            tokens.append((self.z_proj(z) + self.type_emb[1])[:, None])
-            mask.append(torch.zeros(B, 1, dtype=torch.bool, device=valid.device))
-        tokens += [frame_tok, sp_tok]
-        mask += [~valid, torch.zeros(B, sp_tok.shape[1], dtype=torch.bool, device=valid.device)]
+        tokens = [vec_tok, frame_tok, sp_tok]
+        mask = [torch.zeros(B, 1, dtype=torch.bool, device=valid.device), ~valid,
+                torch.zeros(B, sp_tok.shape[1], dtype=torch.bool, device=valid.device)]
         src = torch.cat(tokens, dim=1)
         pad = torch.cat(mask, dim=1)
         memory = self.enc_norm(self.encoder(src, src_key_padding_mask=pad))
@@ -219,8 +220,10 @@ class ActPolicy(nn.Module):
         return mu, logvar.clamp(-8.0, 8.0)
 
     # ------------------------------------------------------------------ 디코딩
-    def decode(self, memory, pad, B):
+    def decode(self, memory, pad, B, z: Optional[torch.Tensor] = None):
         q = self.queries[None].expand(B, -1, -1)
+        if z is not None:
+            q = q + self.z_proj(z)[:, None, :]                                     # z 는 여기서만
         h = self.dec_norm(self.decoder(q, memory, memory_key_padding_mask=pad))   # (B,k,d)
         a_hat = self.action_head(h) * (self.action_scale / (self.k * self.dt))     # 스케일: chunk 전체 ≈ 1 단위
         P_hat = torch.cat([torch.zeros_like(a_hat[:, :1]), torch.cumsum(a_hat, dim=1) * self.dt], dim=1)
@@ -246,8 +249,8 @@ class ActPolicy(nn.Module):
                     z = mu + torch.randn_like(mu) * torch.exp(0.5 * logvar)
                 else:
                     z = torch.randn(B, self.z_dim, device=batch["frames"].device)
-        memory, pad, pooled = self.encode_observation(batch, z)
-        a_hat, P_hat, F_hat, logits = self.decode(memory, pad, B)
+        memory, pad, pooled = self.encode_observation(batch)
+        a_hat, P_hat, F_hat, logits = self.decode(memory, pad, B, z)
         return PolicyOutput(a_hat=a_hat, P_hat=P_hat, memory_pooled=pooled, F_hat=F_hat,
                             logits=logits, mu=mu, logvar=logvar, z=z)
 
@@ -272,13 +275,16 @@ class ActPolicy(nn.Module):
             return {"P": P, "a": (P[:, 1:] - P[:, :-1]) / self.dt, "Q_hat": Q, "net_expected": net,
                     "net": net_argmax, "mode_margin": margin, "prob": prob}
 
-        # CVAE: 관측 인코딩은 z 마다 달라지므로 M 회 (배치 확장)
-        rep = {k: v.repeat_interleave(n_samples, dim=0) if torch.is_tensor(v) else v for k, v in batch.items()}
+        # CVAE: 인코더는 z 와 무관 → 1 회. 디코더만 M 회 (memory 를 M 배로 늘린다)
+        memory, pad, pooled = self.encode_observation(batch)
+        mem_rep = memory.repeat_interleave(n_samples, dim=0)
+        pad_rep = pad.repeat_interleave(n_samples, dim=0)
+        pooled_rep = pooled.repeat_interleave(n_samples, dim=0)
         z = torch.randn(B * n_samples, self.z_dim, device=dev)
-        out = self.forward(rep, z=z, use_posterior=False)
-        Q = self.predict_quality(out.memory_pooled, out.P_hat)                # (B*M,k)
+        _, P_hat, _, _ = self.decode(mem_rep, pad_rep, B * n_samples, z)
+        Q = self.predict_quality(pooled_rep, P_hat)                           # (B*M,k)
         score = Q.sum(1)
-        P = out.P_hat.reshape(B, n_samples, self.k + 1, 3)
+        P = P_hat.reshape(B, n_samples, self.k + 1, 3)
         Qm = Q.reshape(B, n_samples, self.k)
         score = score.reshape(B, n_samples)
         if prev_dy is not None and gamma > 0:

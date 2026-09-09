@@ -19,7 +19,12 @@ from rus_perception.control.features import (
     warp_mask_with_flow,
 )
 from rus_perception.control.postprocess import PostprocessConfig, postprocess_probability
-from rus_perception.control.quality import QUALITY_COMPONENT_NAMES, QualityConfig, compute_control_quality
+from rus_perception.control.quality import (
+    FORCE_SEARCH_WEIGHTS,
+    QUALITY_COMPONENT_NAMES,
+    QualityConfig,
+    compute_control_quality,
+)
 from rus_perception.control.state import COORDINATE_CONVENTION, BoundingBox, ControlState
 from rus_perception.control.validity import REJECTION_REASONS, ValidityConfig, evaluate_validity
 
@@ -293,6 +298,39 @@ def test_quality_config_validation() -> None:
         QualityConfig.from_dict({"weights": {"not_a_component": 1.0}})
     with pytest.raises(ValueError, match="must be > 0"):
         QualityConfig(target_area_ratio=0.0)
+
+
+def test_force_search_preset_ignores_mask_area_and_temporal_terms() -> None:
+    """Stage 1b's objective: contact force compresses the bladder, so mask
+    area is confounded with force and must not decide the optimum; changing
+    the force changes the image, so stability must not reward standing still."""
+    config = QualityConfig.for_force_search()
+    assert config.weights == FORCE_SEARCH_WEIGHTS
+    assert set(config.weights) == set(QUALITY_COMPONENT_NAMES)
+    assert config.weights["mask_completeness"] == 0.0
+    assert config.weights["segmentation_confidence"] < config.weights["boundary_sharpness"]
+
+    shared = dict(
+        segmentation_confidence=0.9,
+        largest_component_ratio=1.0,
+        border_contact_ratio=0.0,
+        lumen_surrounding_contrast=0.3,
+        mean_boundary_entropy=0.2,
+        config=config,
+    )
+    small = compute_control_quality(mask_area_ratio=0.02, **shared)
+    ideal = compute_control_quality(mask_area_ratio=config.target_area_ratio, **shared)
+    large = compute_control_quality(mask_area_ratio=0.60, **shared)
+    assert small.score == ideal.score == large.score
+    assert "mask_completeness" not in small.weights  # reported, not scored
+    assert set(small.weights) == {"segmentation_confidence", "boundary_sharpness", "lumen_contrast"}
+
+    # A partial weights override merges over the preset; unknown names still fail.
+    nudged = QualityConfig.for_force_search(weights={"segmentation_confidence": 0.8})
+    assert nudged.weights["segmentation_confidence"] == 0.8
+    assert nudged.weights["lumen_contrast"] == FORCE_SEARCH_WEIGHTS["lumen_contrast"]
+    with pytest.raises(ValueError, match="Unknown quality weight"):
+        QualityConfig.for_force_search(weights={"not_a_component": 1.0})
 
 
 # -- validity gate ---------------------------------------------------------

@@ -97,6 +97,49 @@ def test_dataset_h5_layout(built_dataset):
         assert len(sessions) == 3 and all(s["samples"] > 0 for s in sessions)
 
 
+def test_q_area_label_present_and_masked_without_perception(built_dataset):
+    import h5py
+
+    with h5py.File(built_dataset, "r") as fh:
+        assert "label/Q_area" in fh and "label/Q_area_valid" in fh
+        qa_valid = np.asarray(fh["label/Q_area_valid"][...])
+        assert qa_valid.shape[1] == fh["label/Q"].shape[1]
+        # backend=none → 마스크가 없으니 전부 False
+        assert not qa_valid.any()
+
+
+def test_observation_anchor_augmentation(synthetic_sessions, tmp_path):
+    """정지 A 안의 여러 시각을 '지금' 으로 잡으면 같은 라벨에 관측이 여러 개 붙는다 (2026-09-08 §8-2)."""
+    import json
+
+    import h5py
+
+    from rus_policy.dataset import build_dataset
+    from rus_policy.session import read_sessions_manifest
+
+    manifest, _ = synthetic_sessions
+    records = read_sessions_manifest(manifest, root=manifest.parent)
+    cfg1 = small_config()
+    r1 = build_dataset(cfg1, out_path=tmp_path / "one.h5", records=records)
+    cfg3 = small_config(**{"dataset.obs_anchor_samples": 3})
+    r3 = build_dataset(cfg3, out_path=tmp_path / "three.h5", records=records)
+    assert r3["n_samples"] > r1["n_samples"]
+    assert all(s["segments_used"] == s1["segments_used"] for s, s1 in zip(r3["sessions"], r1["sessions"]))
+    with h5py.File(tmp_path / "three.h5", "r") as fh:
+        metas = [json.loads(m) for m in np.asarray(fh["meta/json"][...]).astype(str)]
+        offs = np.array([m["obs_offset_s"] for m in metas])
+        P = np.asarray(fh["label/P"][...])
+    assert (offs > 0).any() and offs.min() >= 0.0
+    # 같은 구간의 증강 샘플은 라벨이 동일하다
+    keys = [(m["segment_index"], m["t_anchor_pc"]) for m in metas]
+    seen = {}
+    for kk, p in zip(keys, P):
+        if kk in seen:
+            assert np.allclose(seen[kk], p)
+        seen[kk] = p
+    assert "chunk_truncated_fraction" in r3["sessions"][0]
+
+
 def test_torch_dataset_items(built_dataset):
     import torch
 

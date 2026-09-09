@@ -325,6 +325,34 @@
       # 접촉에서 눈으로 확인할 첫 번째 항목이 이것이다.
       target_force_n: 3.0
 
+      # ---- Stage 1 배경 힘 적응 (DESIGN_NOTES §8.4, 2026-09-08 개정) 🟡 미연결 ----
+      #
+      # 위 target_force_n 을 Stage 1 이 찾은 뒤에도 고정하지 않고, 느린 디더 루프가
+      # 영상 품질의 경사 방향으로 옮긴다 (극값 탐색). 값을 받는 쪽은
+      # fr5_control/force_setpoint_adapter.py 의 ForceSetpointAdapter 이고,
+      # **supervisor 가 생기면** 그쪽이 여기서 읽어 넘긴다. 지금은 어느 노드도 읽지
+      # 않으므로 주석으로 둔다 — 주석을 풀어도 파싱은 되지만 아무 데도 닿지 않고,
+      # 켜진 것처럼 보이는데 아무것도 안 하는 파라미터가 가장 나쁘다.
+      #
+      # 디더를 얹은 설정값은 safety.max_contact_force_n 을 넘지 않는다 — 적응기가
+      # f_bar 를 [f_min + a, f_max − a] 로 묶는다. 상한으로는 하드 한계 5.0 이 아니라
+      # warn_contact_force_n(4.5, 상승 금지 선)을 넘기는 것이 맞다. policy 관측에는
+      # 디더 없는 f_bar 만 들어간다 (POLICY_LEARNING_MATH §1.4).
+      #
+      # 재탐색 트리거는 **Q̄_seg** 기준이다. Q̄_raw 는 접촉만 유지되면 힘에 대해
+      # 평탄해서 열화를 안 보인다. 결합 게이트가 닫히는 경우(rus_perception
+      # coupling_gate False)는 이것과 별개로 Stage 1a 로 돌아간다.
+      #
+      # 전부 🟡 — 팬텀 Q(F) 곡선을 얻기 전의 §8.4 제안값이다.
+      #
+      # force_search:
+      #   dither_amplitude_n: 0.25      # 🟡 설정값 디더 반폭 [N]
+      #   dither_period_s: 5.0          # 🟡 디더 주기 [s]. 반주기 2.5 s 가 힘 루프 정착보다 길어야 한다
+      #   settle_s: 0.5                 # 🟡 반주기 전환 뒤 버리는 시간 [s] — 조직 완화 구간
+      #   step_max_n: 0.1               # 🟡 한 주기에 옮기는 최대 [N]. 적응 시간 규모
+      #   retrigger_fraction: 0.25      # 🟡 Q̄_seg 가 Stage 1 종료값 대비 이만큼 열화하고
+      #   retrigger_hold_s: 3.0         # 🟡 …그 상태가 이 시간 지속되면 Stage 1b 재진입
+
       # 목표 둘레 밴드 반폭. 이 안에서는 움직이지 않는다.
       #
       # 밴드가 필요한 이유: PX6D 잡음이 축당 ±0.05 N 이고 자중 미보상분이 자세에

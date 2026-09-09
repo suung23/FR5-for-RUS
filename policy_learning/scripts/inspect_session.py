@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """세션 하나를 학습 없이 점검한다 — 데이터가 들어오면 **가장 먼저** 돌리는 스크립트.
 
-    python scripts/inspect_session.py <session_dir> [--set imu.still_gyro_sd=0.02 ...] [--plot out.png]
+    python scripts/inspect_session.py <session_dir> [--set imu.still_gyro_sd=0.02 ...] [--plot out.png] [--latency]
 
 보고 항목
-  1. 시간축: US fps, IMU Hz, dev_us↔pc_unix 시계 적합 (기울기·잔차), 프레임당 IMU 표본 수
+  1. 시간축: US fps (⏳ 실측 — 여기서 잰 값이 timing.obs_frames 를 정한다), IMU Hz,
+     dev_us↔pc_unix 시계 적합 (기울기·잔차), 프레임당 IMU 표본 수
   2. 정지 판정: 이동창 자이로/가속도 산포의 분위수 → 임계가 데이터 분포 어디에 놓이는지
   3. 분절: 정지 구간 수·길이, 이동 구간 수·길이, ZUPT 전 잔류 속도 (라벨 신뢰도)
   4. 라벨: 축별 순변위 분포, σ 분포, chunk 가 이동을 다 덮는 비율
   5. (옵션) --plot: 자이로/가속도 노름 + 정지 마스크 + 구간 앵커 그림
+  6. (옵션) --latency: 영상 평균강도 급변 ↔ 가속도 스파이크 상호상관으로 timing.us_latency_s 추정 (§7.1).
+     프로브를 젤에서 급히 떼었다 붙이는 사건이 10–20 회 있는 세션에서 돌린다.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ import numpy as np
 
 from _common import add_config_args, config_from_args
 
+from rus_policy.calibration import estimate_us_latency
 from rus_policy.imu_labels import _rolling_mean_std, _window_bounds, label_session
 from rus_policy.session import load_session
 
@@ -34,6 +38,8 @@ def main() -> int:
     add_config_args(parser)
     parser.add_argument("session_dir")
     parser.add_argument("--plot", default=None, help="PNG 로 저장")
+    parser.add_argument("--latency", action="store_true", help="US 지연 추정 (프레임 전부 읽는다)")
+    parser.add_argument("--dither-hz", type=float, default=0.5, help="m 재산정용 면외 dither 주파수 (§1.3)")
     args = parser.parse_args()
     cfg = config_from_args(args)
 
@@ -50,6 +56,22 @@ def main() -> int:
               f"최대 {fd.max() * 1e3:.1f} ms  → 프레임당 IMU 표본 ≈ {np.median(fd) * imu.rate_hz:.1f}")
         inside = (s.frame_t_pc >= imu.t_pc[0]) & (s.frame_t_pc <= imu.t_pc[-1])
         print(f"  IMU 시간 범위 안의 프레임 {inside.sum()}/{s.n_frames}")
+        fps = s.us_fps
+        m_needed = int(np.ceil(fps / args.dither_hz)) if np.isfinite(fps) and fps > 0 else None
+        print(f"  ⏳ US fps 실측 {fps:.2f} → m = ceil(f_us / f_dither={args.dither_hz}) = {m_needed}"
+              f"   (설정 timing.obs_frames = {cfg.timing.obs_frames}"
+              f"{' ← 갱신 필요' if m_needed is not None and m_needed != cfg.timing.obs_frames else ' ✓'})")
+
+    if args.latency and s.n_frames > 4:
+        fr = np.asarray(s.frames)
+        mean_i = fr.reshape(fr.shape[0], -1).mean(axis=1) / 255.0
+        est = estimate_us_latency(s.frame_t_pc, mean_i, imu.t_pc, imu.acc)
+        verdict = ("신뢰" if est.peak_corr > 0.15 and est.second_ratio > 1.5 and est.n_imu_events >= 5
+                   else "애매 — 사건이 적거나 피크가 약함")
+        print(f"
+US 지연 추정: {est.latency_s * 1e3:+.0f} ms (양수 = 영상이 늦다)  피크 상관 {est.peak_corr:.3f}  "
+              f"2위 대비 {est.second_ratio:.2f}  사건 영상 {est.n_image_events} / IMU {est.n_imu_events}  → {verdict}")
+        print(f"  → --set timing.us_latency_s={est.latency_s:.3f}   (설정 현재값 {cfg.timing.us_latency_s})")
 
     # 정지 판정 분포
     dt = float(np.median(np.diff(imu.t_dev)))

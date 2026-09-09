@@ -168,9 +168,17 @@ control:
   # the reference intensity all depend on the ultrasound machine's depth scale,
   # gain, TGC and dynamic range, none of which is known yet. `scan_geometry`
   # must be set to the real probe type before any of this means anything;
-  # `sector` is not implemented and raises rather than silently mis-sampling.
+  # `sector` bins pixels into (radius, angle) cells and needs the machine's
+  # fan geometry -- the same `apex_xy` / `radius_range` / `half_angle_deg`
+  # as `roi.mode: fan` above -- under a `fan:` key, or it refuses to run.
   raw_quality:
-    scan_geometry: linear          # linear | sector (sector: NOT IMPLEMENTED)
+    scan_geometry: linear          # linear | sector (sector requires `fan:`)
+    # fan:                         # sector only; copy the roi fan parameters
+    #   apex_xy: [0.5, -0.2]
+    #   radius_range: [0.25, 1.1]
+    #   half_angle_deg: 35.0
+    # n_a_lines: 64                # sector only: angular bins
+    # depth_bins: null             # sector only: radial bins (null = ~1 px)
     near_field_fraction: 0.15
     far_field_fraction: 0.35
     near_field_reference: 0.45
@@ -187,6 +195,7 @@ control:
     max_shadowed_a_line_ratio: 0.50
     min_near_field_echo: 0.25
     no_contact_intensity: 0.05
+    gate_min_contact_continuity: 0.8   # Stage 1a coupling gate (PROVISIONAL)
     weights:
       near_field_echo: 1.0
       contact_continuity: 1.5      # highest: a dead A-line is the least

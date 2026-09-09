@@ -11,7 +11,9 @@
 (e) L_feas   |v_z,req| = |F* − F̂|/B_z 가 v_z,max 를 넘는 만큼  (힘 채널 있을 때만)
     L_risk   비대칭 (5.6): 접촉 상실 쪽 w₋ ≫ 과압 쪽 w₊
 (f) L_smooth Δ² Â
-(g) L_KL     β 작게 — posterior collapse 는 L6 로 회귀 (§5.3g)
+(g) L_KL     β 는 붕괴와 **누설** 사이에서 고른다 (§5.3g, 2026-09-08 개정). β 가 너무 작으면 인코더가
+             라벨을 z 에 실어 보내고 디코더가 o 를 무시한다 — 사전분포 z 로는 무작위 chunk 가 나온다.
+             `beta_scale` 로 워밍업(0 → 1) 을 받는다. 누설 진단은 train.py 의 val/leak_gap_mm.
 
 이산 헤드: 순변위 bin 에 대한 CE. 타깃은 σ_net 폭의 가우시안 소프트 라벨이라 라벨 잡음이
 자연스럽게 들어간다 (FK 라벨은 뾰족, IMU 라벨은 퍼짐).
@@ -53,7 +55,8 @@ def soft_bin_targets(net: torch.Tensor, sigma: torch.Tensor, centers: torch.Tens
 
 
 def compute_loss(model: ActPolicy, out: PolicyOutput, batch: dict[str, torch.Tensor], cfg: LossConfig,
-                 ) -> tuple[torch.Tensor, dict[str, float]]:
+                 beta_scale: float = 1.0) -> tuple[torch.Tensor, dict[str, float]]:
+    """beta_scale: KL 워밍업 계수 (0..1). 학습 루프가 epoch 에 따라 올린다."""
     P_lab = batch["P"]                                  # (B,k+1,3)
     P_hat = out.P_hat
     k = P_lab.shape[1] - 1
@@ -116,9 +119,11 @@ def compute_loss(model: ActPolicy, out: PolicyOutput, batch: dict[str, torch.Ten
         l_kl = torch.zeros((), device=P_lab.device)
     logs["kl"] = l_kl.item()
 
+    beta = cfg.beta_kl * float(beta_scale)
     total = (l_act + cfg.lambda_force * l_force + cfg.lambda_quality * l_qual + cfg.lambda_smooth * l_smooth
-             + cfg.lambda_feas * l_feas + cfg.lambda_risk * l_risk + cfg.beta_kl * l_kl)
+             + cfg.lambda_feas * l_feas + cfg.lambda_risk * l_risk + beta * l_kl)
     logs["total"] = total.item()
+    logs["beta"] = beta
     # 진단: 축별 순변위 절대오차 (mm, mm, deg)
     with torch.no_grad():
         ae = net_err.abs().mean(0)

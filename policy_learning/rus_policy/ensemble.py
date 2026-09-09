@@ -21,6 +21,12 @@ ACT 의 표준 temporal ensembling 은 겹치는 chunk 예측들의 **지수가�
 ``model.ActPolicy.select_action`` 의 ``gamma``·``prev_dy`` 에 있다. 세 처방은 배타적이지
 않으므로 1 + 2 또는 1 + 3 으로 겹쳐 쓰는 것이 정상이다.
 
+**2026-09-08 — 모드의 출처.** §3.9 의 오프셋 필터 (``offset_filter.py``) 를 채택하면 커밋 모드는
+Q̂ 점수가 아니라 필터의 MAP 부호다. ``step(forced_mode=…)`` 로 넘긴다. 사후분포가 매 tick 실현
+운동과 면적 관측으로 갱신되므로, Q̂ 점수가 무정보일 때 히스테리시스가 첫 무작위 모드에 **잠기는**
+실패 (§9-6) 가 구조적으로 생기지 않는다. ``forced_mode=0`` 은 "필터가 아직 모름" 이고, 그때는
+기존 점수 규칙으로 돌아간다.
+
 진단 (§3.5 "진단을 반드시 발행하십시오"): 윈도우 내 `a_y` **부호 전환율**. 이 실패는
 조용하다 — 로봇이 제자리에 있을 뿐이고 `Q_seg` 도 나빠지지 않는다. 🟡 초당 1 회를 넘으면
 모드 진동이다.
@@ -134,7 +140,8 @@ class TemporalEnsembler:
         margin = scores[best] - scores.get(self.committed, 0.0)
         return best if margin > self.cfg.switch_margin else self.committed
 
-    def step(self) -> tuple[np.ndarray, dict[str, Any]]:
+    def step(self, forced_mode: Optional[int] = None) -> tuple[np.ndarray, dict[str, Any]]:
+        """forced_mode: 외부(오프셋 필터) 가 정한 모드 ±1. None/0 이면 점수 규칙 (처방 2·3)."""
         alive, acts, w = self._alive()
         if not alive:
             self.tick += 1
@@ -147,7 +154,10 @@ class TemporalEnsembler:
             a = (w[:, None] * acts).sum(0) / w.sum()           # 표준 ACT
             used = len(alive)
         else:                                                  # cluster | hysteresis
-            new_mode = self._select_mode(alive, w)
+            if forced_mode is not None and int(forced_mode) != 0:
+                new_mode = int(np.sign(forced_mode))
+            else:
+                new_mode = self._select_mode(alive, w)
             if new_mode != self.committed:
                 self.committed, self.committed_since = new_mode, self.tick
             keep = np.array([e.mode == self.committed or e.mode == 0 for e in alive], bool)

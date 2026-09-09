@@ -1115,6 +1115,15 @@ Sub-scores whose inputs are unavailable are **dropped from the mean** rather tha
 scored zero, so a first frame is not penalised for having no predecessor. All
 weights and normalisation scales are configurable under `control.quality`.
 
+The default weighting is a *validity* weighting. For the Stage 1b force search
+use `QualityConfig.for_force_search()` (`FORCE_SEARCH_WEIGHTS`): it zeroes the
+temporal terms — changing the force changes the image, so stability would
+reward standing still — and the area term, because contact force compresses
+the bladder and mask area is confounded with force; with it in, the unvalidated
+`target_area_ratio` would effectively pick the optimal force. What remains is
+`boundary_sharpness` and `lumen_contrast`, plus `segmentation_confidence` at
+low weight until the network is calibrated on the target domain.
+
 > This is a transparent heuristic for *how usable this frame is as a control
 > measurement*. It is **not clinically validated** and is not a measure of
 > anatomical correctness or diagnostic image quality.
@@ -1148,17 +1157,41 @@ Two design points worth stating because they are easy to get wrong:
   few A-lines with ROI support). Zero would be indistinguishable from a
   genuinely terrible frame.
 
-`sector` (curvilinear/phased) scan geometry raises `ScanGeometryError` rather
-than sampling image columns: after scan conversion an A-line is a ray from the
-virtual apex, not a column, and treating columns as A-lines would average across
-different depths.
+`sector` (curvilinear/phased) scan geometry does not sample image columns:
+after scan conversion an A-line is a ray from the virtual apex, not a column,
+and treating columns as A-lines would average across different depths. Instead
+every pixel is assigned a radius and angle in the same fan geometry the ROI
+mask uses, and the fan is binned into `depth_bins × n_a_lines` cells whose
+means are the A-line samples — no interpolation, one definition of the fan.
+It is configured by `fan` (`apex_xy`, `radius_range`, `half_angle_deg`, the
+`roi.mode: fan` parameters) and still needs those three values from the
+ultrasound machine before it measures anything ⏳.
 
-> **Skeleton status.** The structure, config schema and reason codes are final;
-> every numeric default is provisional and marked `PROVISIONAL` in source. They
-> cannot be fixed until the ultrasound image geometry is known (probe type,
-> depth scale, fan ROI). **None of the four sub-scores has been shown to be
-> monotone or unimodal in contact force.** That is an experiment, not an
-> assumption; until it is run, `Q_raw` must not be trusted as a search objective.
+**Stage 1a is a gate, not an optimiser.** `coupling_gate(result)` answers *is
+the probe acoustically coupled?* — a score, no rejection reason,
+`contact_continuity` at or above `gate_min_contact_continuity`, and a
+near-field echo — and that yes/no is what hands over to Stage 1b, where the
+search over force runs on `Q_seg` (see `QualityConfig.for_force_search()`
+above). Nothing climbs `Q_raw`.
+
+Reading the setpoint off a force sweep is `rus_perception/metrics/trust.py::
+force_response`. It reports the *smallest* force tied with the maximum
+(`f_left`) and, since the 2026-09-08 revision, adds a `margin_n` on top
+(`f_star = f_left + margin_n`; `asymmetric_margin` gives 0.636 σ for the
+design cost ratio w₋/w₊ = 5, so the setpoint does not sit on the edge of
+contact loss), can replace the fixed ε tie with a Welch-type `z_alpha` rule
+scaled by each level's standard error, corrects that standard error for the
+lag-1 autocorrelation of hold-window frames (`n_eff`), and judges unimodality
+by an umbrella (rise-then-fall) isotonic fit relative to the noise rather than
+by counting sign changes alone.
+
+> **Status.** The structure, config schema, reason codes and both A-line
+> samplers are in place; every numeric default is provisional and marked
+> `PROVISIONAL` in source. They cannot be fixed until the ultrasound image
+> geometry is known (probe type, depth scale, fan parameters). **None of the
+> four sub-scores has been shown to be monotone or unimodal in contact
+> force.** That is an experiment, not an assumption — and it is why `Q_raw`
+> is used as a coupling gate rather than as the search objective.
 
 ---
 
@@ -1195,7 +1228,7 @@ explanatory message rather than silently changing behaviour.
 | **Postprocessing** | `postprocess` | `threshold`, `largest_component`, `min_component_area_ratio`, `fill_holes`, `smooth_contour` |
 | **Control-validity heuristics** | `control.validity` | area bounds, confidence floor, border/component/temporal thresholds |
 | **`Q_seg` weights (clinically unvalidated)** | `control.quality` | per-component `weights`, `target_area_ratio`, normalisation scales |
-| **`Q_raw` bands and weights (all PROVISIONAL)** | `control.raw_quality` | `scan_geometry`, depth-band fractions, `dark_intensity_threshold`, `shadow_reference_percentile`, per-component `weights`, gate thresholds |
+| **`Q_raw` bands and weights (all PROVISIONAL)** | `control.raw_quality` | `scan_geometry`, `fan` (sector apex/radius/angle), depth-band fractions, `dark_intensity_threshold`, `shadow_reference_percentile`, per-component `weights`, gate thresholds, `gate_min_contact_continuity` |
 | **Monitoring** | `monitor` | queue size, drop policy, logs, snapshot, status colours |
 | **Reproducibility** | `experiment`, `logging` | `seed`, `output_dir`, `level` |
 
@@ -1382,8 +1415,8 @@ or a network connection. The ONNX test skips itself if `onnxruntime` is absent.
 | GPU memory usage | **Not yet benchmarked** |
 | Benefit of the temporal loss over the spatial-only baseline | **Not yet benchmarked** |
 | Validity-gate and `Q_seg` threshold calibration | **Not yet benchmarked** |
-| `Q_raw` sub-score monotonicity/unimodality in contact force | **Not yet benchmarked** — and the whole contact-search idea rests on it |
-| `Q_raw` band, ROI and threshold calibration | **Not yet benchmarked** — blocked on the ultrasound image geometry |
+| `Q_raw` sub-score monotonicity/unimodality in contact force | **Not yet benchmarked** — since 2026-09-08 `Q_raw` is the Stage 1a *coupling gate* (`coupling_gate`) and the force search climbs `Q_seg` (`QualityConfig.for_force_search()`), so what has to be shown is that the gate separates coupled from uncoupled, and that `Q_seg` is unimodal in force (`force_response`) |
+| `Q_raw` band, ROI and threshold calibration | **Not yet benchmarked** — blocked on the ultrasound image geometry. Sector geometry is supported via bin-based A-line sampling (`fan`), but the machine's apex, radius range and sweep angle are still needed ⏳ |
 
 Everything marked *Not yet benchmarked* has a command in this README that
 produces the number. None of them is estimated, extrapolated or quoted from the

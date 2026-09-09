@@ -80,6 +80,8 @@ __all__ = [
     "calibration",
     "component_attribution",
     "reason_code_report",
+    "asymmetric_margin",
+    "unimodal_regression",
     "force_response",
     "operating_point",
     "build_trust_report",
@@ -944,9 +946,174 @@ def reason_code_report(
 # ---------------------------------------------------------------------------
 
 
+def _normal_cdf(t: float) -> float:
+    return 0.5 * (1.0 + math.erf(t / math.sqrt(2.0)))
+
+
+def _normal_pdf(t: float) -> float:
+    return math.exp(-0.5 * t * t) / math.sqrt(2.0 * math.pi)
+
+
+def asymmetric_margin(sigma: float, w_minus_over_plus: float = 5.0) -> float:
+    """Safety margin above the left edge of the tie set, for asymmetric cost.
+
+    The Stage 1 rule picks the *smallest* force whose quality ties with the
+    maximum. Taken literally, that leaves zero margin on the side where an
+    error means **losing contact** -- and losing contact costs far more than
+    pressing slightly harder (DESIGN_NOTES §5.3, §7.1 correction of
+    2026-08-25). So the setpoint is moved inward from the edge by the ``u >= 0``
+    that minimises the expected asymmetric quadratic cost under a Gaussian
+    error ``n ~ N(0, sigma^2)`` on the true edge position:
+
+    .. math::
+
+        u^* = \\arg\\min_{u \\ge 0}\\;
+        \\mathbb{E}\\big[w_-\\,((-u-n)^+)^2 + w_+\\,((u+n)^+)^2\\big]
+
+    which is the root of
+    ``w_+ * E[(u+n)^+] = w_- * E[(-u-n)^+]`` with
+    ``E[(u+n)^+] = u*Phi(u/sigma) + sigma*phi(u/sigma)`` and
+    ``E[(-u-n)^+] = -u*Phi(-u/sigma) + sigma*phi(u/sigma)``, found by bisection
+    on ``t = u/sigma`` in ``[0, 5]``.
+
+    Args:
+        sigma: Standard deviation of the edge-position error, in newtons.
+            Typically the force-grid spacing or the spread of ``f_left`` over
+            repeated searches. ``sigma <= 0`` returns ``0``.
+        w_minus_over_plus: Cost ratio ``w_- / w_+`` of undershooting (losing
+            contact) to overshooting (extra pressure). ``5`` is the PROVISIONAL
+            design value; ``<= 1`` gives no margin.
+
+    Returns:
+        The margin in the units of ``sigma``: ``0.636 sigma`` for a ratio of 5,
+        ``0.436 sigma`` for 3, ``0.901 sigma`` for 10.
+    """
+    sigma = float(sigma)
+    ratio = float(w_minus_over_plus)
+    if sigma <= 0.0 or not math.isfinite(sigma):
+        return 0.0
+    if ratio < 0.0:
+        raise ValueError(f"w_minus_over_plus must be >= 0, got {ratio}.")
+
+    def imbalance(t: float) -> float:
+        # Positive when overshoot cost already dominates: push u no further.
+        over = t * _normal_cdf(t) + _normal_pdf(t)
+        under = -t * _normal_cdf(-t) + _normal_pdf(t)
+        return over - ratio * under
+
+    low, high = 0.0, 5.0
+    if imbalance(low) >= 0.0:
+        return 0.0
+    if imbalance(high) <= 0.0:
+        return high * sigma
+    for _ in range(100):
+        mid = 0.5 * (low + high)
+        if imbalance(mid) < 0.0:
+            low = mid
+        else:
+            high = mid
+        if high - low < 1e-12:
+            break
+    return 0.5 * (low + high) * sigma
+
+
+def _pava_increasing(values: np.ndarray, weights: np.ndarray) -> np.ndarray:
+    """Weighted pool-adjacent-violators: the closest non-decreasing sequence."""
+    blocks: list[list[float]] = []  # [weighted mean, total weight, count]
+    for value, weight in zip(values, weights):
+        blocks.append([float(value), float(weight), 1.0])
+        while len(blocks) > 1 and blocks[-2][0] > blocks[-1][0]:
+            mean_b, weight_b, count_b = blocks.pop()
+            mean_a, weight_a, count_a = blocks.pop()
+            total = weight_a + weight_b
+            pooled = (mean_a * weight_a + mean_b * weight_b) / total if total > 0 else 0.5 * (mean_a + mean_b)
+            blocks.append([pooled, total, count_a + count_b])
+    fit = np.empty(values.size, dtype=np.float64)
+    start = 0
+    for mean, _, count in blocks:
+        stop = start + int(count)
+        fit[start:stop] = mean
+        start = stop
+    return fit
+
+
+def unimodal_regression(
+    means: np.ndarray, weights: Optional[np.ndarray] = None
+) -> tuple[np.ndarray, int, float]:
+    """Umbrella (rise-then-fall) weighted isotonic regression.
+
+    For every candidate peak ``p`` the left part ``means[:p+1]`` is fitted
+    non-decreasing and the right part ``means[p:]`` non-increasing (both by
+    weighted PAVA, the right one on the reversed sequence); the two fits share
+    index ``p`` and the peak takes the larger of the two values there, which
+    keeps both halves feasible. The ``p`` with the smallest weighted sum of
+    squared residuals wins.
+
+    This is the shape the force search assumes ``Q(F)`` has. How far the data
+    sit from their best umbrella fit -- relative to their own noise -- is a
+    direct test of that assumption, and one that, unlike counting sign
+    changes, does not depend on an ad-hoc step threshold.
+
+    Args:
+        means: Per-level values in force order.
+        weights: Non-negative weights of the same length; ``None`` means equal.
+
+    Returns:
+        ``(fit, peak_index, weighted_sse)``. For an empty input the fit is empty,
+        the index ``0`` and the SSE ``0``.
+    """
+    values = np.asarray(means, dtype=np.float64).ravel()
+    n = values.size
+    if weights is None:
+        w = np.ones(n, dtype=np.float64)
+    else:
+        w = np.asarray(weights, dtype=np.float64).ravel()
+        if w.shape != values.shape:
+            raise ValueError(f"weights shape {w.shape} does not match means {values.shape}.")
+        if np.any(w < 0):
+            raise ValueError("weights must be non-negative.")
+    if n == 0:
+        return values.copy(), 0, 0.0
+
+    best_fit = values.copy()
+    best_peak = 0
+    best_sse = math.inf
+    for p in range(n):
+        left = _pava_increasing(values[: p + 1], w[: p + 1])
+        right = _pava_increasing(values[p:][::-1], w[p:][::-1])[::-1]
+        fit = np.empty(n, dtype=np.float64)
+        fit[:p] = left[:p]
+        fit[p + 1 :] = right[1:]
+        fit[p] = max(left[p], right[0])
+        sse = float(np.sum(w * (values - fit) ** 2))
+        if sse < best_sse - 1e-15:
+            best_fit, best_peak, best_sse = fit, p, sse
+    return best_fit, best_peak, best_sse
+
+
+def _lag1_autocorrelation(values: np.ndarray) -> float:
+    """Lag-1 autocorrelation of a hold-window sample sequence; 0 when undefined."""
+    if values.size < 3:
+        return 0.0
+    centred = values - values.mean()
+    denominator = float(np.dot(centred, centred))
+    if denominator < _EPS:
+        return 0.0
+    rho = float(np.dot(centred[:-1], centred[1:]) / denominator)
+    return max(-1.0, min(1.0, rho))
+
+
 @dataclass
 class ForceLevelSummary:
-    """Q averaged over the hold window at one force level."""
+    """Q averaged over the hold window at one force level.
+
+    Attributes:
+        rho: Lag-1 autocorrelation of the usable samples in hold-window order;
+            ``0`` when fewer than three samples or no spread.
+        n_eff: Effective sample count ``n (1 - rho) / (1 + rho)`` clipped to
+            ``[2, n]`` -- consecutive frames of a hold window are not
+            independent, and ``sem`` is computed against this count, not ``n``.
+    """
 
     force: float
     n: int
@@ -954,6 +1121,8 @@ class ForceLevelSummary:
     std: Optional[float]
     sem: Optional[float]
     valid_fraction: float = 1.0
+    rho: Optional[float] = None
+    n_eff: Optional[float] = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -963,6 +1132,8 @@ class ForceLevelSummary:
             "std": self.std,
             "sem": self.sem,
             "valid_fraction": self.valid_fraction,
+            "rho": self.rho,
+            "n_eff": self.n_eff,
         }
 
 
@@ -974,6 +1145,19 @@ class ForceResponseReport:
     If the response is flat, noisy, or multi-modal, the search is optimising
     nothing and the whole stage needs rethinking -- so this is the experiment
     that decides whether Stage 1 is viable, not a nice-to-have diagnostic.
+
+    Attributes:
+        f_left: Smallest force in the tie set with the maximum -- the literal
+            "smallest force" of the Stage 1 rule.
+        margin_n: Safety margin added to ``f_left`` (see :func:`asymmetric_margin`).
+        f_star: ``f_left + margin_n``, the recommended setpoint.
+        tie_rule: ``"epsilon"`` (fixed quality tolerance) or ``"welch"``
+            (tolerance scaled by the two levels' standard errors).
+        unimodal_sse_ratio: Residual of the best umbrella fit per level,
+            divided by the mean squared standard error -- about ``1`` when the
+            data are unimodal up to noise, large when they are not.
+        unimodal_fit: The umbrella fit itself, one value per measured level.
+        unimodal_peak_force: Force at the umbrella fit's peak.
     """
 
     levels: list[ForceLevelSummary] = field(default_factory=list)
@@ -984,6 +1168,14 @@ class ForceResponseReport:
     argmax_force: Optional[float] = None
     f_star: Optional[float] = None
     epsilon: float = 0.03
+    f_left: Optional[float] = None
+    margin_n: float = 0.0
+    tie_rule: str = "epsilon"
+    z_alpha: Optional[float] = None
+    unimodal_sse_ratio: Optional[float] = None
+    unimodal_ratio_max: float = 2.0
+    unimodal_fit: Optional[list[float]] = None
+    unimodal_peak_force: Optional[float] = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -994,6 +1186,14 @@ class ForceResponseReport:
             "argmax_force": self.argmax_force,
             "f_star": self.f_star,
             "epsilon": self.epsilon,
+            "f_left": self.f_left,
+            "margin_n": self.margin_n,
+            "tie_rule": self.tie_rule,
+            "z_alpha": self.z_alpha,
+            "unimodal_sse_ratio": self.unimodal_sse_ratio,
+            "unimodal_ratio_max": self.unimodal_ratio_max,
+            "unimodal_fit": self.unimodal_fit,
+            "unimodal_peak_force": self.unimodal_peak_force,
             "levels": [level.to_dict() for level in self.levels],
         }
 
@@ -1002,23 +1202,66 @@ def force_response(
     samples_by_force: Mapping[float, Sequence[Optional[float]]],
     epsilon: float = 0.03,
     min_valid_fraction: float = 0.60,
+    *,
+    margin_n: float = 0.0,
+    z_alpha: Optional[float] = None,
+    autocorr_correct: bool = True,
+    unimodal_ratio_max: float = 2.0,
 ) -> ForceResponseReport:
     """Summarise ``Q`` against contact force and test the shape the search assumes.
 
+    The 2026-09-08 revision of DESIGN_NOTES §7.1/§7.3 changed four things about
+    how the setpoint is read off the response, all of which are keyword-only
+    here so that a legacy call keeps its exact former behaviour:
+
+    * **Autocorrelation.** The frames of a 1 s hold window are not independent
+      samples: tissue relaxes and speckle drifts slowly, so ``std/sqrt(n)``
+      overstates how well a level's mean is known. Each level's lag-1
+      autocorrelation ``rho`` is estimated and ``sem`` uses
+      ``n_eff = n (1 - rho) / (1 + rho)`` (clipped to ``[2, n]``) instead of
+      ``n``. ``autocorr_correct=False`` restores ``n``.
+    * **Tie rule.** With ``z_alpha=None`` a level ties with the maximum when
+      ``mean >= peak - epsilon`` (legacy). With ``z_alpha`` set the tolerance is
+      Welch-type, ``z_alpha * sqrt(sem^2 + sem_peak^2)``, so "statistically
+      indistinguishable from the best" is measured against the data's own
+      noise rather than a fixed 0.03.
+    * **Margin.** ``f_left`` is the smallest force in the tie set; the
+      recommended setpoint is ``f_star = f_left + margin_n``. The literal
+      left edge leaves no room on the side where an error means losing
+      contact, and under a ``w_-/w_+ = 5`` asymmetric cost the optimum sits
+      ``0.636 sigma`` inside it (:func:`asymmetric_margin`). With the default
+      ``margin_n=0`` the two coincide, as before. The caller keeps ``f_star``
+      inside the safe force range; nothing here clamps it.
+    * **Unimodality.** ``sign_changes`` (turns larger than ``epsilon``) is
+      still reported, but when every measured level has a positive ``sem`` the
+      verdict comes from :func:`unimodal_regression`: the best rise-then-fall
+      fit's residual per level, divided by the mean ``sem^2``, is about ``1``
+      for a unimodal response and grows without bound for a multimodal one;
+      ``is_unimodal`` is ``ratio <= unimodal_ratio_max``. When the ratio is
+      undefined (a level with zero spread) the legacy ``sign_changes <= 1``
+      rule decides.
+
     Args:
         samples_by_force: ``{force_newtons: [q, q, None, ...]}`` -- every sample
-            collected during that level's hold window. ``None`` entries are
-            unmeasured frames and are counted, not zeroed.
-        epsilon: Quality difference treated as a tie when choosing ``f_star``.
+            collected during that level's hold window, in time order. ``None``
+            entries are unmeasured frames and are counted, not zeroed.
+        epsilon: Quality difference treated as a tie under the legacy rule, and
+            the step size below which a turn is noise for ``sign_changes``.
         min_valid_fraction: A level with fewer usable samples than this is a
             **measurement failure**, reported with ``mean=None`` and excluded
             from the shape tests, rather than contributing a mean over a handful
             of frames.
+        margin_n: Newtons added to ``f_left`` to obtain ``f_star``.
+        z_alpha: One-sided normal quantile for the Welch tie rule (``1.64`` for
+            alpha = 0.05); ``None`` keeps the ``epsilon`` rule.
+        autocorr_correct: Use ``n_eff`` rather than ``n`` in ``sem``.
+        unimodal_ratio_max: Largest umbrella-fit SSE ratio still called unimodal.
 
     Returns:
         A :class:`ForceResponseReport`. ``f_star`` follows the Stage 1 rule --
-        the *smallest* force whose mean is within ``epsilon`` of the maximum, not
-        the argmax -- so the choice is biased toward less pressure on the patient.
+        the *smallest* force whose mean ties with the maximum, not the argmax,
+        plus the margin -- so the choice is biased toward less pressure on the
+        patient without sitting on the edge of contact loss.
     """
     levels: list[ForceLevelSummary] = []
     for force in sorted(samples_by_force):
@@ -1040,46 +1283,89 @@ def force_response(
             )
             continue
         array = np.asarray(usable, dtype=np.float64)
-        std = float(array.std(ddof=1)) if array.size > 1 else 0.0
+        n = int(array.size)
+        std = float(array.std(ddof=1)) if n > 1 else 0.0
+        rho = _lag1_autocorrelation(array)
+        if autocorr_correct and n >= 3 and rho > -1.0:
+            n_eff = float(min(max(n * (1.0 - rho) / (1.0 + rho), 2.0), float(n)))
+        else:
+            n_eff = float(n)
         levels.append(
             ForceLevelSummary(
                 force=float(force),
-                n=int(array.size),
+                n=n,
                 mean=float(array.mean()),
                 std=std,
-                sem=(std / math.sqrt(array.size)) if array.size > 1 else 0.0,
+                sem=(std / math.sqrt(n_eff)) if n > 1 else 0.0,
                 valid_fraction=valid_fraction,
+                rho=rho,
+                n_eff=n_eff,
             )
         )
 
     measured = [level for level in levels if level.mean is not None]
     if len(measured) < 2:
-        return ForceResponseReport(levels=levels, epsilon=float(epsilon))
+        return ForceResponseReport(
+            levels=levels,
+            epsilon=float(epsilon),
+            margin_n=float(margin_n),
+            tie_rule="epsilon" if z_alpha is None else "welch",
+            z_alpha=None if z_alpha is None else float(z_alpha),
+            unimodal_ratio_max=float(unimodal_ratio_max),
+        )
 
     forces = np.asarray([level.force for level in measured], dtype=np.float64)
     means = np.asarray([float(level.mean) for level in measured], dtype=np.float64)
+    sems = np.asarray([float(level.sem) for level in measured], dtype=np.float64)
 
     differences = np.diff(means)
     monotone_fraction = float(np.count_nonzero(differences >= 0) / differences.size)
 
-    # Unimodal <=> the difference sequence changes sign at most once (rises then
-    # falls). Steps smaller than epsilon are noise and are not counted as turns.
+    # Legacy shape test: the difference sequence changes sign at most once
+    # (rises then falls). Steps smaller than epsilon are noise, not turns.
     significant = differences[np.abs(differences) > epsilon]
     signs = np.sign(significant)
     sign_changes = int(np.count_nonzero(np.diff(signs) != 0)) if signs.size > 1 else 0
 
-    peak = float(means.max())
-    within = forces[means >= peak - epsilon]
+    # Umbrella fit: how far are the level means from the nearest rise-then-fall
+    # sequence, relative to their own standard errors?
+    fit, peak_index, sse = unimodal_regression(means)
+    if np.all(sems > 0.0):
+        unimodal_sse_ratio: Optional[float] = float((sse / means.size) / float(np.mean(sems**2)))
+        is_unimodal = bool(unimodal_sse_ratio <= unimodal_ratio_max)
+    else:
+        unimodal_sse_ratio = None
+        is_unimodal = bool(sign_changes <= 1)
+
+    # Tie set with the maximum, then the smallest force in it.
+    argmax = int(np.argmax(means))
+    peak = float(means[argmax])
+    if z_alpha is None:
+        tie = means >= peak - epsilon
+        tie_rule = "epsilon"
+    else:
+        tolerance = float(z_alpha) * np.sqrt(sems**2 + sems[argmax] ** 2)
+        tie = means >= peak - tolerance
+        tie_rule = "welch"
+    f_left = float(forces[tie].min())
 
     return ForceResponseReport(
         levels=levels,
         spearman_with_force=spearman(forces, means),
         monotone_fraction=monotone_fraction,
         sign_changes=sign_changes,
-        is_unimodal=bool(sign_changes <= 1),
-        argmax_force=float(forces[int(np.argmax(means))]),
-        f_star=float(within.min()) if within.size else None,
+        is_unimodal=is_unimodal,
+        argmax_force=float(forces[argmax]),
+        f_star=f_left + float(margin_n),
         epsilon=float(epsilon),
+        f_left=f_left,
+        margin_n=float(margin_n),
+        tie_rule=tie_rule,
+        z_alpha=None if z_alpha is None else float(z_alpha),
+        unimodal_sse_ratio=unimodal_sse_ratio,
+        unimodal_ratio_max=float(unimodal_ratio_max),
+        unimodal_fit=[float(v) for v in fit],
+        unimodal_peak_force=float(forces[peak_index]),
     )
 
 

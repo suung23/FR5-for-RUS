@@ -34,8 +34,10 @@ class PathsConfig:
 class TimingConfig:
     policy_hz: float = 5.0          # f_p  (§1.2)
     chunk_steps: int = 8            # k    (§2.5 🟡)
-    obs_frames: int = 16            # m    (§1.3 🟡, f_us 확정 후 재산정)
-    us_latency_s: float = 0.0       # ⏳ US 고정 엔드투엔드 지연 (§7.1). 실측 후 갱신
+    # ⏳ m = ceil(f_us / f_dither). f_us 는 가정하지 않는다 — inspect_session.py 가 세션에서 잰 값으로
+    # 재산정한다 (§1.3). 16 은 "8 fps × 2 s" 의 자리표시자일 뿐이다.
+    obs_frames: int = 16
+    us_latency_s: float = 0.0       # ⏳ US 고정 엔드투엔드 지연 (§7.1). inspect_session.py --latency 로 실측
     obs_frame_max_age_s: float = 4.0  # 관측 프레임이 이보다 오래되면 무효 마스크
 
     @property
@@ -102,6 +104,34 @@ class PerceptionConfig:
 
 
 @dataclass
+class DatasetConfig:
+    # 관측 창 증강 (§8-2 2026-09-08): 정지 A 안의 어느 시각을 "지금" 으로 잡아도 같은 라벨의 유효한 관측이다
+    # (프로브가 정지해 있으므로 이동은 동일). 앵커 외에 (obs_anchor_samples − 1) 개를 정지 A 안에서 추가로 뽑는다.
+    obs_anchor_samples: int = 1
+    obs_anchor_min_still_s: float = 0.15   # 정지 시작 후 이 시간이 지난 뒤부터 뽑는다 (정지 판정 창의 반)
+    obs_anchor_seed: int = 0
+    require_chunk_covers_move: bool = False  # True 면 이동이 chunk 창(1.6 s) 을 넘는 구간을 버린다
+
+
+@dataclass
+class OffsetFilterConfig:
+    """§3.9 오프셋 필터 (2026-09-08 채택). 값의 근거는 offset_filter.py 참조. 전부 🟡."""
+    d_range_mm: float = 30.0
+    d_step_mm: float = 0.5
+    R_grid_mm: list = field(default_factory=lambda: [30.0, 40.0, 50.0, 60.0, 75.0, 90.0])
+    A0_grid: list = field(default_factory=lambda: [0.85, 1.0, 1.15])
+    sigma_q: float = 0.03            # 정규화 면적의 관측 잡음 (호흡·변형 포함) ⏳ 실측
+    process_coeff_mm: float = 0.7    # 이동 후 위치 불확실성 c·τ^1.5 (라벨 σ 와 같은 식)
+    process_tau_s: float = 1.6
+    process_floor_mm: float = 0.5
+    converge_std_mm: float = 2.0     # 사후 표준편차가 이보다 작으면 평균으로 간다
+    probe_snr: float = 2.0           # 탐침은 두 가설의 |Δh| ≥ probe_snr·σ_q 가 되게
+    min_probe_mm: float = 1.0
+    max_probe_mm: float = 8.0
+    bimodal_min_mass: float = 0.2    # 양쪽 부호에 이 이상 질량이 있으면 이봉으로 본다
+
+
+@dataclass
 class SplitConfig:
     strategy: str = "manifest"          # manifest | subject_random
     ratios: list = field(default_factory=lambda: [0.7, 0.15, 0.15])
@@ -111,13 +141,16 @@ class SplitConfig:
 @dataclass
 class ModelConfig:
     head: str = "cvae"                  # cvae | discrete  (§9-1 미결 — 설정으로 선택)
-    d_model: int = 256
+    # 2026-09-08: 첫 실데이터 런용 소형 기본값. 샘플이 구간당 하나라 표본이 적다 (§8-2).
+    # 큰 모델은 --set model.d_model=256 model.encoder_layers=4 model.decoder_layers=4 model.dim_feedforward=1024
+    d_model: int = 128
     n_heads: int = 8
-    encoder_layers: int = 4
-    decoder_layers: int = 4
-    dim_feedforward: int = 1024
+    encoder_layers: int = 2
+    decoder_layers: int = 2
+    dim_feedforward: int = 512
     dropout: float = 0.1
-    z_dim: int = 32
+    # z 용량이 곧 누설 상한이다 (§5.3g 2026-09-08). 모드 부호 + 스타일 몇 비트면 충분하다.
+    z_dim: int = 4
     frame_channels: list = field(default_factory=lambda: [32, 64, 128, 256])
     frame_input_size: list = field(default_factory=lambda: [128, 128])  # 인코더 입력 (저장본을 리사이즈)
     # 이산 헤드: 축당 bins, ±range. 🟡 §5.3(g) 축당 21빈(±20 mm, 2 mm)
@@ -136,7 +169,9 @@ class LossConfig:
     lambda_feas: float = 0.5
     lambda_risk: float = 0.2
     w_minus_over_plus: float = 5.0
-    beta_kl: float = 0.02
+    # β (§5.3g 2026-09-08): 0.02 는 누설 쪽으로 치우친다. 0.5 에서 시작해 {0.1, 0.5, 1, 5} 스윕,
+    # 선택 규칙은 train.py 의 leak_gap_mm. 워밍업은 train.beta_warmup_epochs.
+    beta_kl: float = 0.5
     w_shape: float = 0.3
     huber_delta_sigma: float = 2.0      # δ = 2σ
     B_z: float = 1000.0                 # N·s/m  (§8.1 🟡)
@@ -151,6 +186,7 @@ class TrainConfig:
     lr: float = 1.0e-4
     weight_decay: float = 1.0e-4
     warmup_epochs: int = 2
+    beta_warmup_epochs: int = 5         # KL 워밍업 (0 → beta_kl 선형)
     amp: bool = False
     device: str = "auto"
     num_workers: int = 0
@@ -170,18 +206,22 @@ class PolicyConfig:
     imu: ImuConfig = field(default_factory=ImuConfig)
     labels: LabelConfig = field(default_factory=LabelConfig)
     perception: PerceptionConfig = field(default_factory=PerceptionConfig)
+    dataset: DatasetConfig = field(default_factory=DatasetConfig)
+    offset_filter: OffsetFilterConfig = field(default_factory=OffsetFilterConfig)
     split: SplitConfig = field(default_factory=SplitConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     loss: LossConfig = field(default_factory=LossConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
 
-    SECTIONS = ("paths", "timing", "imu", "labels", "perception", "split", "model", "loss", "train")
+    SECTIONS = ("paths", "timing", "imu", "labels", "perception", "dataset", "offset_filter", "split",
+                "model", "loss", "train")
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "PolicyConfig":
         sections = {
             "paths": PathsConfig, "timing": TimingConfig, "imu": ImuConfig,
-            "labels": LabelConfig, "perception": PerceptionConfig, "split": SplitConfig,
+            "labels": LabelConfig, "perception": PerceptionConfig, "dataset": DatasetConfig,
+            "offset_filter": OffsetFilterConfig, "split": SplitConfig,
             "model": ModelConfig, "loss": LossConfig, "train": TrainConfig,
         }
         unknown = set(data) - set(sections)

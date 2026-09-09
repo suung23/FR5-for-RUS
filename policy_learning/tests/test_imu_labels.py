@@ -108,6 +108,28 @@ def test_earth_convention_detects_transposed():
     assert conv2 == "R.T"
 
 
+def test_sigma_window_is_capped_at_chunk_horizon(tmp_path):
+    """이동이 chunk 창보다 길어도 σ 는 chunk 창 (1.6 s) 으로 잰다 (2026-09-08 §5.3a)."""
+    from rus_policy.config import PolicyConfig
+    from rus_policy.imu_labels import label_session
+    from rus_policy.session import load_session
+    from rus_policy.synth import SynthConfig, generate_session
+
+    d = generate_session(tmp_path, SynthConfig(duration_s=40.0, seed=5, image_size=32, accel_noise=0.01,
+                                                move_s=(2.5, 3.5)), name="long")
+    s = load_session(d)
+    cfg = PolicyConfig()
+    labels = label_session(s.imu, cfg.timing, cfg.imu, cfg.labels)
+    assert labels.labels, "이동 구간이 검출되어야 한다"
+    horizon = cfg.timing.chunk_horizon_s
+    for lab in labels.labels:
+        assert lab.diagnostics["sigma_window_s"] <= horizon + 1e-9
+        if lab.diagnostics["integration_window_s"] > horizon:
+            assert lab.diagnostics["sigma_window_s"] == pytest.approx(horizon)
+            assert lab.sigma_net[0] == pytest.approx(cfg.labels.sigma_translation_coeff_mm * horizon ** 1.5)
+        assert lab.t_still_start_dev <= lab.t_anchor_dev
+
+
 def test_sigma_tables():
     cfg = PolicyConfig().labels
     net, shape = sigma_for("freehand", 1.6, cfg)

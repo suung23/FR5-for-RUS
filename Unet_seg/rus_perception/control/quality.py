@@ -41,6 +41,7 @@ from typing import Any, Optional
 
 __all__ = [
     "AGGREGATIONS",
+    "FORCE_SEARCH_WEIGHTS",
     "QualityConfig",
     "QualityResult",
     "compute_control_quality",
@@ -49,6 +50,25 @@ __all__ = [
 
 #: How the sub-scores are combined into one number.
 AGGREGATIONS: tuple[str, ...] = ("arithmetic", "geometric")
+
+#: ``Q_force`` -- the Stage 1b objective: the ``Q_seg`` weighting the contact-force
+#: search climbs. Only the three image-side terms carry weight. The temporal
+#: terms are zero because changing the force changes the image, so they would
+#: reward *not moving* (DESIGN_NOTES §6.3); the area term is zero because
+#: contact force compresses the bladder, so mask area is confounded with force
+#: (revised 2026-09-08, see :meth:`QualityConfig.for_force_search`).
+FORCE_SEARCH_WEIGHTS: dict[str, float] = {
+    "segmentation_confidence": 0.5,
+    "boundary_sharpness": 1.5,
+    "lumen_contrast": 1.5,
+    "lumen_centering": 0.0,
+    "mask_completeness": 0.0,
+    "border_penalty": 0.0,
+    "component_quality": 0.0,
+    "temporal_iou": 0.0,
+    "centroid_stability": 0.0,
+    "area_stability": 0.0,
+}
 
 #: Every sub-score name the quality heuristic can emit, in a fixed order.
 #: Consumers (e.g. the CSV writer) rely on this so their column set stays stable
@@ -175,6 +195,55 @@ class QualityConfig:
             base.update({k: float(v) for k, v in data["weights"].items()})
             data["weights"] = base
         return cls(**data)
+
+    @classmethod
+    def for_force_search(cls, **overrides: Any) -> "QualityConfig":
+        """The Stage 1b objective ``Q_force``: ``Q_seg`` weighted for a force search.
+
+        Stage 1b searches over contact force with the segmentation-based score
+        as its objective, but the default ``Q_seg`` weighting is a *validity*
+        weighting and would steer the search the wrong way twice over
+        (DESIGN_NOTES §6.3, revised 2026-09-08):
+
+        * The **area term is excluded** (``mask_completeness = 0``). Contact
+          force compresses the bladder, so mask area is confounded with force:
+          with the area term in, ``target_area_ratio`` -- an unvalidated
+          constant -- would effectively decide the optimal force by rewarding
+          whichever compression happens to hit it. That decision must not be
+          made by a placeholder.
+        * The **temporal terms are excluded** (``temporal_iou``,
+          ``centroid_stability``, ``area_stability`` all ``0``). Changing the
+          force changes the image, so any stability reward tells the search
+          that not moving is best. Temporal sanity stays in the
+          ``valid_for_control`` gate, where it belongs.
+
+        What remains is the image-side evidence that the lumen is *seen well*:
+        ``boundary_sharpness`` and ``lumen_contrast`` at full weight, plus
+        ``segmentation_confidence`` weighted **low** until the network has been
+        calibrated on the target domain -- an uncalibrated network is confident
+        for reasons that have nothing to do with acoustic contact.
+        ``border_penalty``, ``component_quality`` and ``lumen_centering`` are
+        in-plane concerns handled by the validity gate and Stage 2.
+
+        Args:
+            **overrides: Any :class:`QualityConfig` field. A ``weights`` mapping
+                is merged **over** :data:`FORCE_SEARCH_WEIGHTS` rather than
+                replacing it, so a profile can nudge one weight.
+
+        Returns:
+            A :class:`QualityConfig` whose ``weights`` are
+            :data:`FORCE_SEARCH_WEIGHTS` (plus any override).
+
+        Raises:
+            ValueError: On an unknown weight name or field, as ``from_dict``.
+        """
+        weights = dict(FORCE_SEARCH_WEIGHTS)
+        extra = overrides.pop("weights", None)
+        if extra is not None:
+            weights.update(dict(extra))
+        # Through from_dict so unknown fields and unknown weight names fail the
+        # same way they do for a YAML profile.
+        return cls.from_dict({**overrides, "weights": weights})
 
 
 @dataclass

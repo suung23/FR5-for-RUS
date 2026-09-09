@@ -235,6 +235,7 @@ class SegmentLabel:
     grid_t_dev: np.ndarray         # (k+1,) chunk 격자 시각 (dev)
     t_anchor_dev: float
     t_anchor_pc: float
+    t_still_start_dev: float       # 정지 A 시작 (관측 창 증강의 하한, dataset.py)
     t_end_dev: float               # 정지 B 앵커
     move_s: float
     still_before_s: float
@@ -315,12 +316,16 @@ def label_segment(t_dev: np.ndarray, t_pc: np.ndarray, acc: np.ndarray, R_SE: np
     P6[0] = 0.0
 
     tau = float(tt[-1] - tt[0])
-    s_net, s_shape = sigma_for(source, tau, lab)
+    # σ 는 라벨이 실제로 덮는 창(chunk 지평) 으로 잰다 (2026-09-08). 이동이 chunk 창보다 길면 P_k 는
+    # 1.6 s 시점의 변위이고, 그 오차는 c·(1.6)^1.5 이지 c·τ^1.5 (τ = 구간 전체) 가 아니다.
+    tau_eff = min(tau, float(timing.chunk_steps * timing.chunk_dt))
+    s_net, s_shape = sigma_for(source, tau_eff, lab)
     still_before = float(t_dev[seg.a1] - t_dev[seg.a0])
     still_after = float(t_dev[seg.b1] - t_dev[seg.b0])
     diag = {
         "zupt_v_end_raw_mm_s": float(np.linalg.norm(v_end_raw) * 1000.0),
         "integration_window_s": tau,
+        "sigma_window_s": tau_eff,
         "bias_E_norm": float(np.linalg.norm(bias_E)),
         "still_frac": float(np.mean(still[sl])),
         "net_mm": float(np.linalg.norm(p_P[-1]) * 1000.0),
@@ -328,7 +333,8 @@ def label_segment(t_dev: np.ndarray, t_pc: np.ndarray, acc: np.ndarray, R_SE: np
     }
     return SegmentLabel(
         P6=P6, sigma_net=s_net, sigma_shape=s_shape, grid_t_dev=grid,
-        t_anchor_dev=float(tt[0]), t_anchor_pc=float(t_pc[ia]), t_end_dev=float(tt[-1]),
+        t_anchor_dev=float(tt[0]), t_anchor_pc=float(t_pc[ia]), t_still_start_dev=float(t_dev[seg.a0]),
+        t_end_dev=float(tt[-1]),
         move_s=seg.move_s, still_before_s=still_before, still_after_s=still_after,
         gravity_P=gravity_in_frame(R_PE), R_PE=R_PE, net_E_m=p_E[-1].copy(),
         net_rotvec_S_rad=r_S[-1].copy(), seg=seg, diagnostics=diag,

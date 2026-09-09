@@ -24,13 +24,20 @@ and no temporal history, which is also why it is more robust in exactly the
 regime where the network is least trustworthy.
 
 Status:
-    **Skeleton.** The structure, the configuration schema and the reason codes
-    are final; every numeric default below is provisional and marked ``PROVISIONAL``.
-    They cannot be fixed until the ultrasound image geometry is known (probe
-    type, depth scale, fan ROI). None of the four sub-scores has been shown to
-    be monotone or unimodal in contact force -- that is an experiment, not an
-    assumption, and until it is run ``Q_raw`` must not be trusted as a search
-    objective.
+    **Structure final, numbers provisional.** The configuration schema, the
+    reason codes and both A-line samplers are in place: ``linear`` returns the
+    image columns, and ``sector`` (curvilinear/phased, scan-converted) is
+    implemented as bin-based sampling on the same fan geometry that
+    :mod:`rus_perception.control.roi` uses, so the two cannot drift apart. The
+    sector sampler still needs the machine's apex position, radius range and
+    sweep angle (``fan``) before it measures anything. Every numeric default
+    below is provisional and marked ``PROVISIONAL``; none can be fixed until
+    the ultrasound image geometry, gain and TGC are known. None of the four
+    sub-scores has been shown to be monotone or unimodal in contact force --
+    that is an experiment, not an assumption. Since the 2026-09-08 revision
+    ``Q_raw`` is no longer asked to be a search objective at all: Stage 1a uses
+    it as a *coupling gate* (:func:`coupling_gate`), and the force search runs
+    on ``Q_seg`` in Stage 1b (DESIGN_NOTES §7.4).
 
 Warning:
     Like ``Q_seg``, this is a transparent heuristic, not a validated measure of
@@ -41,7 +48,8 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, Literal, Optional
+from functools import lru_cache
+from typing import Any, Literal, Mapping, Optional
 
 import numpy as np
 
@@ -52,6 +60,7 @@ __all__ = [
     "RawQualityResult",
     "ScanGeometryError",
     "compute_raw_quality",
+    "coupling_gate",
     "sample_a_lines",
 ]
 
@@ -81,7 +90,60 @@ _EPS = 1e-8
 
 
 class ScanGeometryError(NotImplementedError):
-    """Raised for a scan geometry whose A-line sampling is not implemented."""
+    """Raised for a scan geometry whose A-line sampling is not implemented.
+
+    Both shipped geometries (``linear`` and ``sector``) are implemented, so
+    :func:`sample_a_lines` no longer raises this; it is kept so that callers
+    written against the earlier skeleton keep importing.
+    """
+
+
+#: The three fan parameters ``sector`` sampling needs, in the names ``roi.py``
+#: uses, so one YAML block can feed both the ROI mask and the A-line sampler.
+_FAN_KEYS: tuple[str, ...] = ("apex_xy", "radius_range", "half_angle_deg")
+
+
+def _fan_parameters(fan: Any) -> tuple[float, float, float, float, float]:
+    """Return ``(apex_x, apex_y, r_min, r_max, half_angle_deg)`` from ``fan``.
+
+    ``fan`` is a mapping with the keys in :data:`_FAN_KEYS`, or any object that
+    carries them as attributes (a :class:`~rus_perception.control.roi.RoiConfig`
+    with ``mode="fan"``). Validation mirrors ``RoiConfig.__post_init__`` so the
+    same geometry is accepted and rejected in both places.
+
+    Raises:
+        ValueError: If ``fan`` is missing, incomplete or out of range.
+    """
+    if fan is None:
+        raise ValueError(
+            "scan_geometry='sector' requires the fan geometry: a mapping with "
+            f"{list(_FAN_KEYS)} (the same values as roi.mode='fan'). After scan "
+            "conversion an A-line is a ray from the virtual apex, not an image "
+            "column, so the apex position, radius range and sweep angle must come "
+            "from the ultrasound machine and cannot be guessed."
+        )
+    if isinstance(fan, Mapping):
+        values = {key: fan.get(key) for key in _FAN_KEYS}
+    else:
+        values = {key: getattr(fan, key, None) for key in _FAN_KEYS}
+    missing = [key for key, value in values.items() if value is None]
+    if missing:
+        raise ValueError(
+            f"fan geometry is missing {missing}; scan_geometry='sector' needs all of "
+            f"{list(_FAN_KEYS)}."
+        )
+    apex = tuple(float(v) for v in values["apex_xy"])
+    if len(apex) != 2:
+        raise ValueError(f"fan.apex_xy must be (x, y) fractions, got {values['apex_xy']!r}.")
+    radii = tuple(float(v) for v in values["radius_range"])
+    if len(radii) != 2 or not 0.0 <= radii[0] < radii[1]:
+        raise ValueError(
+            f"fan.radius_range must satisfy 0 <= r_min < r_max, got {values['radius_range']!r}."
+        )
+    half_angle = float(values["half_angle_deg"])
+    if not 0.0 < half_angle <= 90.0:
+        raise ValueError(f"fan.half_angle_deg must be in (0, 90], got {half_angle}.")
+    return apex[0], apex[1], radii[0], radii[1], half_angle
 
 
 @dataclass
@@ -95,9 +157,19 @@ class RawQualityConfig:
     Attributes:
         weights: Weight per sub-score; ``0`` removes a component.
         scan_geometry: ``"linear"`` -- image columns are A-lines. ``"sector"``
-            (curvilinear/phased, scan-converted) is **not implemented**: after
-            scan conversion an A-line is a ray from the apex, not a column, and
-            treating columns as A-lines would silently mix depths.
+            (curvilinear/phased, scan-converted) -- A-lines are rays from the
+            virtual apex and are resampled by binning pixels in ``(radius,
+            angle)``; requires ``fan``. Treating a sector image's columns as
+            A-lines would silently mix depths.
+        fan: Fan geometry for ``"sector"``: a mapping with ``apex_xy`` (``x``,
+            ``y`` fractions of width and height; ``y`` may be negative),
+            ``radius_range`` (``r_min``, ``r_max`` fractions of the height
+            measured from the apex) and ``half_angle_deg`` -- the same three
+            values ``roi.mode="fan"`` takes, so one block configures both.
+        n_a_lines: Number of angular bins (A-lines) for ``"sector"``.
+        depth_bins: Number of radial bins for ``"sector"``. ``None`` uses one
+            bin per pixel of radial extent (``round((r_max - r_min) * H)``,
+            at least 8).
         near_field_fraction: Shallowest fraction of the depth range forming the
             near-field band. The probe face is at the top of the image.
         far_field_fraction: Deepest fraction of the depth range forming the
@@ -135,6 +207,11 @@ class RawQualityConfig:
             is rejected with ``low_near_field_echo``.
         no_contact_intensity: ROI mean below which the probe is considered to be
             in air entirely (``no_contact``).
+        gate_min_contact_continuity: Lowest ``contact_continuity`` at which
+            :func:`coupling_gate` still reports the probe as coupled. Stricter
+            than ``max_dark_a_line_ratio`` on purpose: the rejection reason
+            says the frame is *unusable as a measurement*, the gate says the
+            contact is *good enough to hand over to Stage 1b*.
     """
 
     weights: dict[str, float] = field(
@@ -150,6 +227,10 @@ class RawQualityConfig:
     )
 
     scan_geometry: Literal["linear", "sector"] = "linear"  # PROVISIONAL
+    # -- sector sampling (needs the machine's fan geometry; see roi.py) -------
+    fan: Optional[dict[str, Any]] = None
+    n_a_lines: int = 64
+    depth_bins: Optional[int] = None
 
     # -- band definitions (PROVISIONAL; see README "Benchmark status") --------
     near_field_fraction: float = 0.15
@@ -171,6 +252,9 @@ class RawQualityConfig:
     min_near_field_echo: float = 0.25
     no_contact_intensity: float = 0.05
 
+    # -- Stage 1a coupling gate (PROVISIONAL) --------------------------------
+    gate_min_contact_continuity: float = 0.8
+
     def __post_init__(self) -> None:
         if any(value < 0 for value in self.weights.values()):
             raise ValueError(f"Raw quality weights must be non-negative, got {self.weights}.")
@@ -179,6 +263,19 @@ class RawQualityConfig:
         if self.scan_geometry not in ("linear", "sector"):
             raise ValueError(
                 f"scan_geometry must be 'linear' or 'sector', got {self.scan_geometry!r}."
+            )
+        if self.scan_geometry == "sector":
+            # Validate now, with the same rules as roi.py, so a bad geometry
+            # fails at configuration time rather than on the first frame.
+            _fan_parameters(self.fan)
+        if self.n_a_lines < 1:
+            raise ValueError(f"n_a_lines must be >= 1, got {self.n_a_lines}.")
+        if self.depth_bins is not None and self.depth_bins < 1:
+            raise ValueError(f"depth_bins must be >= 1 or None, got {self.depth_bins}.")
+        if not 0.0 <= self.gate_min_contact_continuity <= 1.0:
+            raise ValueError(
+                "gate_min_contact_continuity must be in [0, 1], got "
+                f"{self.gate_min_contact_continuity}."
             )
         for name in ("near_field_fraction", "far_field_fraction"):
             value = getattr(self, name)
@@ -230,6 +327,18 @@ class RawQualityConfig:
                 )
             base.update({k: float(v) for k, v in data["weights"].items()})
             data["weights"] = base
+        if "fan" in data and data["fan"] is not None:
+            fan = dict(data["fan"])
+            unknown_fan = set(fan) - set(_FAN_KEYS)
+            if unknown_fan:
+                raise ValueError(
+                    f"Unknown raw quality fan key(s): {sorted(unknown_fan)}. "
+                    f"Known: {list(_FAN_KEYS)} (the roi.mode='fan' parameters)."
+                )
+            data["fan"] = {
+                key: (list(value) if isinstance(value, (list, tuple)) else value)
+                for key, value in fan.items()
+            }
         return cls(**data)
 
 
@@ -301,10 +410,113 @@ def _plateau(value: float, target: float, tolerance: float) -> float:
     return float(min(1.0, max(0.0, math.exp(-(distance - tolerance) / scale))))
 
 
+@lru_cache(maxsize=8)
+def _sector_cells(
+    shape: tuple[int, int],
+    apex_x: float,
+    apex_y: float,
+    r_min: float,
+    r_max: float,
+    half_angle_deg: float,
+    n_a_lines: int,
+    depth_bins: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Per-pixel ``(inside, cell)`` for one fan geometry on one frame shape.
+
+    ``inside`` is the fan itself -- exactly :func:`roi._fan_mask` -- and ``cell``
+    the flat ``depth_bin * n_a_lines + angle_bin`` index of every pixel. The
+    geometry depends only on the frame shape and the fan parameters, never on
+    the frame content, so it is computed once per configuration and cached:
+    the real-time path pays for one boolean index and two ``bincount`` calls
+    per frame.
+    """
+    height, width = shape
+    cx = apex_x * width
+    cy = apex_y * height
+    r_min_px = r_min * height
+    r_max_px = r_max * height
+    half_angle = math.radians(half_angle_deg)
+
+    ys, xs = np.mgrid[0:height, 0:width]
+    dx = xs.astype(np.float64) + 0.5 - cx
+    dy = ys.astype(np.float64) + 0.5 - cy
+
+    radius = np.hypot(dx, dy)
+    # atan2(dx, dy): signed angle away from the downward (depth) axis. Kept
+    # signed here, unlike the ROI mask, because the sign is the A-line index.
+    angle = np.arctan2(dx, np.maximum(dy, 1e-9))
+
+    inside = (radius >= r_min_px) & (radius <= r_max_px)
+    inside &= np.abs(angle) <= half_angle
+    # Everything at or above the apex is behind the transducer face.
+    inside &= dy > 0.0
+
+    # Equal-width bins; the closed upper edge of the last bin is folded back
+    # so a pixel exactly on r_max or +half_angle is not dropped.
+    depth_index = np.floor((radius - r_min_px) / (r_max_px - r_min_px) * depth_bins)
+    depth_index = np.clip(depth_index, 0, depth_bins - 1).astype(np.intp)
+    angle_index = np.floor((angle + half_angle) / (2.0 * half_angle) * n_a_lines)
+    angle_index = np.clip(angle_index, 0, n_a_lines - 1).astype(np.intp)
+
+    cell = depth_index * n_a_lines + angle_index
+    inside.setflags(write=False)
+    cell.setflags(write=False)
+    return inside, cell
+
+
+def _sample_sector(
+    array: np.ndarray,
+    roi_mask: Optional[np.ndarray],
+    fan: Any,
+    n_a_lines: int,
+    depth_bins: Optional[int],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Bin a scan-converted sector image into ``depth_bins x n_a_lines`` cells."""
+    apex_x, apex_y, r_min, r_max, half_angle_deg = _fan_parameters(fan)
+    if n_a_lines < 1:
+        raise ValueError(f"n_a_lines must be >= 1, got {n_a_lines}.")
+    height, width = array.shape
+    if depth_bins is None:
+        depth_bins = max(8, int(round((r_max - r_min) * height)))
+    elif depth_bins < 1:
+        raise ValueError(f"depth_bins must be >= 1 or None, got {depth_bins}.")
+
+    inside, cell = _sector_cells(
+        (int(height), int(width)),
+        apex_x,
+        apex_y,
+        r_min,
+        r_max,
+        half_angle_deg,
+        int(n_a_lines),
+        int(depth_bins),
+    )
+    keep = inside
+    if roi_mask is not None:
+        mask = np.asarray(roi_mask).astype(bool)
+        if mask.shape != array.shape:
+            raise ValueError(
+                f"roi_mask shape {mask.shape} does not match image {array.shape}."
+            )
+        keep = inside & mask
+
+    n_cells = int(depth_bins) * int(n_a_lines)
+    flat = cell[keep]
+    counts = np.bincount(flat, minlength=n_cells)
+    totals = np.bincount(flat, weights=array[keep].astype(np.float64), minlength=n_cells)
+    samples = (totals / np.maximum(counts, 1)).reshape(int(depth_bins), int(n_a_lines))
+    support = (counts > 0).reshape(int(depth_bins), int(n_a_lines))
+    return samples.astype(np.float32), support
+
+
 def sample_a_lines(
     image: np.ndarray,
     roi_mask: Optional[np.ndarray] = None,
     scan_geometry: str = "linear",
+    *,
+    fan: Any = None,
+    n_a_lines: int = 64,
+    depth_bins: Optional[int] = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return the image resampled into ``depth x a_line`` form, plus its support.
 
@@ -319,28 +531,41 @@ def sample_a_lines(
             outside it are excluded from every statistic.
         scan_geometry: ``"linear"`` -- columns are A-lines, so the image is
             already in ``depth x a_line`` form and is returned as-is.
-            ``"sector"`` raises :class:`ScanGeometryError`.
+            ``"sector"`` -- A-lines are rays from the virtual apex. Each pixel
+            is assigned a radius and a signed angle in the fan geometry of
+            :func:`rus_perception.control.roi.build_roi_mask` (``mode="fan"``),
+            the fan is cut into ``depth_bins x n_a_lines`` equal cells in
+            ``(radius, angle)``, and every cell takes the mean of its pixels. No
+            interpolation: a cell with no pixel is simply unsupported, which is
+            what happens near the transducer face where cells are sub-pixel.
+        fan: Fan geometry for ``"sector"``: a mapping (or a ``RoiConfig``) with
+            ``apex_xy`` -- ``(x, y)`` fractions of ``(W, H)``, ``y`` may be
+            negative; ``radius_range`` -- ``(r_min, r_max)`` fractions of ``H``
+            measured from the apex, ``r_min`` is the transducer face; and
+            ``half_angle_deg``. Ignored for ``"linear"``.
+        n_a_lines: Number of angular bins over ``[-half_angle, +half_angle]``
+            for ``"sector"``.
+        depth_bins: Number of radial bins over ``[r_min, r_max]`` for
+            ``"sector"``. ``None`` uses roughly one bin per pixel of radial
+            extent (``round((r_max - r_min) * H)``, at least 8).
 
     Returns:
-        ``(samples, support)``: the ``depth x a_line`` intensities, and a
-        boolean array of the same shape marking which entries are inside the ROI.
+        ``(samples, support)``: the ``depth x a_line`` intensities as
+        ``float32``, and a boolean array of the same shape marking which
+        entries carry at least one ROI pixel. Row 0 is the transducer face in
+        both geometries.
 
     Raises:
-        ValueError: If ``image`` is not 2-D or the mask shape disagrees.
-        ScanGeometryError: For ``scan_geometry="sector"``.
+        ValueError: If ``image`` is not 2-D, the mask shape disagrees, the
+            geometry name is unknown, or ``scan_geometry="sector"`` is used
+            without a complete ``fan``.
     """
     array = np.asarray(image, dtype=np.float32)
     if array.ndim != 2:
         raise ValueError(f"image must be 2-D H x W, got shape {array.shape}.")
 
     if scan_geometry == "sector":
-        raise ScanGeometryError(
-            "Sector/curvilinear A-line sampling is not implemented. After scan "
-            "conversion an A-line is a ray from the virtual apex, not an image "
-            "column, so treating columns as A-lines would average across "
-            "different depths. Implementing it needs the apex position, the "
-            "sweep angle and the depth scale from the ultrasound machine."
-        )
+        return _sample_sector(array, roi_mask, fan, n_a_lines, depth_bins)
     if scan_geometry != "linear":
         raise ValueError(f"Unknown scan_geometry {scan_geometry!r}.")
 
@@ -389,11 +614,18 @@ def compute_raw_quality(
         never ``0.0`` -- when too few A-lines had ROI support.
 
     Raises:
-        ValueError: If ``image`` is not 2-D or leaves ``[0, 1]``.
-        ScanGeometryError: For an unimplemented scan geometry.
+        ValueError: If ``image`` is not 2-D or leaves ``[0, 1]``, or the
+            configured scan geometry is unusable (``sector`` without ``fan``).
     """
     config = config or RawQualityConfig()
-    samples, support = sample_a_lines(image, roi_mask, config.scan_geometry)
+    samples, support = sample_a_lines(
+        image,
+        roi_mask,
+        config.scan_geometry,
+        fan=config.fan,
+        n_a_lines=config.n_a_lines,
+        depth_bins=config.depth_bins,
+    )
 
     if samples.size and (
         float(np.nanmin(samples)) < -1e-6 or float(np.nanmax(samples)) > 1.0 + 1e-6
@@ -499,4 +731,53 @@ def compute_raw_quality(
         far_field_mean=far_field_mean,
         roi_mean=roi_mean,
         a_line_count=a_line_count,
+    )
+
+
+def coupling_gate(
+    result: RawQualityResult, config: Optional[RawQualityConfig] = None
+) -> bool:
+    """Is the probe acoustically coupled? -- the Stage 1a verdict on one frame.
+
+    Stage 1a is a **gate**, not an optimiser. It asks a yes/no question --
+    *is the probe acoustically coupled to the tissue?* -- and the answer is
+    what lets the contact search hand over to Stage 1b, where the search over
+    force is carried out on ``Q_seg`` (DESIGN_NOTES §7.4, revised 2026-09-08).
+    Nothing here climbs ``Q_raw``: its sub-scores have not been shown to be
+    monotone or unimodal in force, and a gate does not need them to be. It
+    needs them to separate "coupled" from "not coupled", which is the property
+    they were designed around.
+
+    The frame passes when all of the following hold:
+
+    * ``result.score`` is not ``None`` -- the frame was measurable;
+    * ``result.rejection_reasons`` is empty -- no reason code fired;
+    * ``components["contact_continuity"] >= config.gate_min_contact_continuity``
+      -- few enough dead A-lines (PROVISIONAL threshold);
+    * ``components["near_field_echo"] >= config.min_near_field_echo`` -- the
+      near field actually returns an echo.
+
+    The last two repeat thresholds that also feed the reason codes; they are
+    restated here so the gate is a single readable predicate rather than a
+    property scattered over ``compute_raw_quality``.
+
+    Args:
+        result: Output of :func:`compute_raw_quality` for the frame.
+        config: The thresholds; the default configuration when ``None``.
+
+    Returns:
+        ``True`` when the frame says the probe is coupled. This is an
+        observation-quality verdict, not a command: what the controller does
+        with a ``False`` (hold, increase force, re-seat) is decided elsewhere.
+    """
+    config = config or RawQualityConfig()
+    if result.score is None or result.rejection_reasons:
+        return False
+    continuity = result.components.get("contact_continuity")
+    near_field = result.components.get("near_field_echo")
+    if continuity is None or near_field is None:
+        return False
+    return bool(
+        continuity >= config.gate_min_contact_continuity
+        and near_field >= config.min_near_field_echo
     )

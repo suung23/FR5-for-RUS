@@ -34,6 +34,8 @@ def fake_batch(cfg, B=3, with_force=False, seed=0):
         "sigma_shape": torch.tensor([[0.4, 0.4, 0.03]]).repeat(B, 1),
         "Q": torch.rand(B, k, generator=g),
         "Q_valid": torch.rand(B, k, generator=g) > 0.3,
+        "Q_area": torch.rand(B, k, generator=g),
+        "Q_area_valid": torch.rand(B, k, generator=g) > 0.3,
         "F": torch.rand(B, k, generator=g) * 3 if with_force else torch.zeros(B, k),
         "F_valid": torch.ones(B, k, dtype=torch.bool) if with_force else torch.zeros(B, k, dtype=torch.bool),
         "Fn_star": torch.full((B,), 2.0),
@@ -113,6 +115,56 @@ def test_select_action(head):
         assert sel["prob"].shape == (2, 3, cfg.model.discrete_bins)
 
 
+def test_quality_input_is_independent_of_z():
+    """2026-09-08: z 는 디코더에만 들어간다 — Q̂ 의 관측 요약은 z 와 무관해야 한다 (누설 차단)."""
+    cfg = small_config()
+    model = build_policy(cfg.model, cfg.timing).eval()
+    batch = fake_batch(cfg, B=2)
+    z1 = torch.randn(2, cfg.model.z_dim)
+    z2 = torch.randn(2, cfg.model.z_dim)
+    with torch.no_grad():
+        o1 = model(batch, z=z1, use_posterior=False)
+        o2 = model(batch, z=z2, use_posterior=False)
+    assert torch.allclose(o1.memory_pooled, o2.memory_pooled)          # 관측 요약 동일
+    assert not torch.allclose(o1.P_hat, o2.P_hat)                      # 행동은 z 에 따라 다르다
+    # 사후분포 z 로도 관측 요약은 같다 (학습시 Q̂ 가 라벨을 못 본다)
+    with torch.no_grad():
+        o3 = model(batch, use_posterior=True)
+    assert torch.allclose(o3.memory_pooled, o1.memory_pooled)
+
+
+def test_select_action_encodes_observation_once(monkeypatch):
+    cfg = small_config()
+    model = build_policy(cfg.model, cfg.timing).eval()
+    batch = fake_batch(cfg, B=2)
+    calls = {"enc": 0, "dec": 0}
+    enc, dec = model.encode_observation, model.decode
+
+    def enc_wrapped(*a, **k):
+        calls["enc"] += 1
+        return enc(*a, **k)
+
+    def dec_wrapped(*a, **k):
+        calls["dec"] += 1
+        return dec(*a, **k)
+
+    monkeypatch.setattr(model, "encode_observation", enc_wrapped)
+    monkeypatch.setattr(model, "decode", dec_wrapped)
+    model.select_action(batch, n_samples=7)
+    assert calls["enc"] == 1 and calls["dec"] == 1
+
+
+def test_beta_warmup_scales_kl():
+    cfg = small_config()
+    model = build_policy(cfg.model, cfg.timing).eval()      # dropout 을 꺼야 두 호출이 같은 Q̂ 를 낸다
+    batch = fake_batch(cfg)
+    out = model(batch, use_posterior=True)
+    _, l0 = compute_loss(model, out, batch, cfg.loss, beta_scale=0.0)
+    _, l1 = compute_loss(model, out, batch, cfg.loss, beta_scale=1.0)
+    assert l0["beta"] == 0.0 and l1["beta"] == cfg.loss.beta_kl
+    assert l1["total"] - l0["total"] == pytest.approx(cfg.loss.beta_kl * l1["kl"], rel=1e-4, abs=1e-5)
+
+
 def test_bimodal_sanity_of_discrete_head():
     """이봉 분포에서 회귀 헤드는 평균(≈0)을, 이산 헤드는 두 봉을 유지한다 (§5.3g 표의 근거)."""
     torch.manual_seed(0)
@@ -140,6 +192,9 @@ def test_trainer_runs_and_checkpoints(built_dataset, tmp_path):
     rows = [json.loads(l) for l in (tmp_path / "run" / "metrics.jsonl").read_text().splitlines()]
     assert rows[-1]["epoch"] == 2 and np.isfinite(rows[-1]["train/total"])
     assert "val/mode_collapse_vy_std" in rows[-1] and "val/mae_y_mm" in rows[-1]
+    assert "val/leak_gap_mm" in rows[-1] and "train/beta" in rows[-1]
+    # KL 워밍업: epoch 1 의 β 가 epoch 2 보다 작다 (beta_warmup_epochs=5 기본)
+    assert rows[0]["train/beta"] < rows[1]["train/beta"] <= cfg.loss.beta_kl
     model, cfg2 = load_policy(tmp_path / "run" / "best.pt", device="cpu")
     assert cfg2.model.d_model == cfg.model.d_model
     ds = PolicyH5Dataset(built_dataset, split="val")

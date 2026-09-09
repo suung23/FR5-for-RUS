@@ -26,12 +26,36 @@ from rus_perception.control.raw_quality import (  # noqa: E402
     RAW_QUALITY_COMPONENT_NAMES,
     RAW_REJECTION_REASONS,
     RawQualityConfig,
-    ScanGeometryError,
     compute_raw_quality,
+    coupling_gate,
     sample_a_lines,
 )
+from rus_perception.control.roi import RoiConfig, build_roi_mask  # noqa: E402
 
 HEIGHT, WIDTH = 96, 64
+
+# A curvilinear fan for the sector tests: virtual apex above the frame, the
+# transducer face a quarter-height below it, 70 degree sweep.
+FAN_SHAPE = (128, 160)
+FAN = {"apex_xy": [0.5, -0.2], "radius_range": [0.25, 1.1], "half_angle_deg": 35.0}
+FAN_ROI = RoiConfig(mode="fan", **FAN)
+
+
+def fan_polar(shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
+    """Per-pixel ``(radius_px, angle_deg)`` in the FAN geometry, as roi.py defines it."""
+    height, width = shape
+    ys, xs = np.mgrid[0:height, 0:width]
+    dx = xs + 0.5 - FAN["apex_xy"][0] * width
+    dy = ys + 0.5 - FAN["apex_xy"][1] * height
+    return np.hypot(dx, dy), np.degrees(np.arctan2(dx, np.maximum(dy, 1e-9)))
+
+
+def sector_frame(intensity: float = 0.6) -> tuple[np.ndarray, np.ndarray]:
+    """A uniformly bright fan on a black frame, plus the matching ROI mask."""
+    mask = build_roi_mask(FAN_SHAPE, FAN_ROI)
+    assert mask is not None
+    frame = np.where(mask, intensity, 0.0).astype(np.float32)
+    return frame, mask
 
 
 def coupled_frame() -> np.ndarray:
@@ -207,18 +231,141 @@ def test_raw_reason_codes_do_not_collide_with_segmentation_reason_codes() -> Non
 # -- scan geometry -----------------------------------------------------------
 
 
-def test_sector_geometry_raises_rather_than_mis_sampling() -> None:
-    with pytest.raises(ScanGeometryError, match="not implemented"):
-        sample_a_lines(coupled_frame(), scan_geometry="sector")
-    with pytest.raises(ScanGeometryError):
-        compute_raw_quality(coupled_frame(), config=RawQualityConfig(scan_geometry="sector"))
-
-
 def test_linear_geometry_returns_the_image_unchanged() -> None:
     frame = coupled_frame()
     samples, support = sample_a_lines(frame)
     assert np.array_equal(samples, frame)
     assert support.all()
+
+
+def test_linear_geometry_ignores_the_sector_only_arguments() -> None:
+    """The sector keywords must not change the linear path at all."""
+    frame = coupled_frame()
+    samples, support = sample_a_lines(frame, scan_geometry="linear", fan=FAN, n_a_lines=7)
+    assert np.array_equal(samples, frame)
+    assert support.shape == frame.shape and support.all()
+
+
+def test_sector_sampling_bins_the_fan_into_depth_by_a_line_cells() -> None:
+    """A uniformly bright fan must come back as a uniformly bright
+    ``depth_bins x n_a_lines`` grid, supported wherever a cell holds a pixel."""
+    frame, mask = sector_frame(0.6)
+    samples, support = sample_a_lines(frame, mask, scan_geometry="sector", fan=FAN)
+
+    expected_depth = int(round((FAN["radius_range"][1] - FAN["radius_range"][0]) * FAN_SHAPE[0]))
+    assert samples.shape == (expected_depth, 64)
+    assert support.shape == samples.shape
+    assert samples.dtype == np.float32 and support.dtype == bool
+
+    # Mid-depth cells are several pixels wide: every A-line is supported there.
+    middle = slice(expected_depth * 2 // 5, expected_depth * 3 // 5)
+    assert support[middle].all()
+    assert samples[support] == pytest.approx(0.6, abs=1e-5)
+    # Unsupported cells carry no intensity, not a stale value.
+    assert not samples[~support].any()
+
+
+def test_sector_sampling_accepts_a_roi_config_as_the_fan() -> None:
+    frame, mask = sector_frame()
+    from_mapping = sample_a_lines(frame, mask, scan_geometry="sector", fan=FAN)
+    from_config = sample_a_lines(frame, mask, scan_geometry="sector", fan=FAN_ROI)
+    assert np.array_equal(from_mapping[0], from_config[0])
+    assert np.array_equal(from_mapping[1], from_config[1])
+
+
+def test_sector_sampling_uses_the_same_fan_as_the_roi_mask() -> None:
+    """Without an explicit ROI the sampler's own fan must select exactly the
+    pixels ``build_roi_mask`` selects -- otherwise the two geometries drift."""
+    frame, mask = sector_frame()
+    outside = ~mask
+    poisoned = frame.copy()
+    poisoned[outside] = 1.0  # bright outside the fan: must not leak into any cell
+    with_mask = sample_a_lines(poisoned, mask, scan_geometry="sector", fan=FAN)
+    without_mask = sample_a_lines(poisoned, None, scan_geometry="sector", fan=FAN)
+    assert np.array_equal(with_mask[0], without_mask[0])
+    assert np.array_equal(with_mask[1], without_mask[1])
+
+
+def test_sector_dark_wedge_is_counted_in_a_lines_not_pixels() -> None:
+    """Killing the near field of every ray left of -15 degrees must read as
+    that fraction of dark A-lines -- and only that, because the far field of
+    those rays still returns echo."""
+    frame, mask = sector_frame(0.6)
+    radius, angle = fan_polar(FAN_SHAPE)
+    r_min, r_max = (v * FAN_SHAPE[0] for v in FAN["radius_range"])
+    near_field = radius < r_min + 0.30 * (r_max - r_min)
+    frame[(angle < -15.0) & near_field] = 0.0
+
+    config = RawQualityConfig(scan_geometry="sector", fan=FAN)
+    result = compute_raw_quality(frame, mask, config)
+
+    half = FAN["half_angle_deg"]
+    expected_bins = (-15.0 + half) / (2 * half) * config.n_a_lines  # ~18.3 of 64
+    assert result.score is not None
+    assert result.a_line_count == config.n_a_lines
+    assert abs(result.dark_a_line_ratio * config.n_a_lines - expected_bins) <= 2.0
+    assert result.components["contact_continuity"] == pytest.approx(1.0 - result.dark_a_line_ratio)
+    assert result.shadowed_a_line_ratio == pytest.approx(0.0)
+    # ~28% dead rays: below the rejection threshold, but not a coupled probe.
+    assert result.rejection_reasons == []
+    assert coupling_gate(result, config) is False
+
+
+def test_sector_without_a_fan_geometry_is_an_error() -> None:
+    frame, mask = sector_frame()
+    with pytest.raises(ValueError, match="requires the fan geometry"):
+        sample_a_lines(frame, mask, scan_geometry="sector")
+    with pytest.raises(ValueError, match="requires the fan geometry"):
+        RawQualityConfig(scan_geometry="sector")
+    with pytest.raises(ValueError, match="missing"):
+        sample_a_lines(frame, mask, scan_geometry="sector", fan={"apex_xy": [0.5, -0.2]})
+
+
+def test_sector_fan_geometry_is_validated_like_the_roi() -> None:
+    with pytest.raises(ValueError, match="radius_range"):
+        RawQualityConfig(scan_geometry="sector", fan={**FAN, "radius_range": [1.0, 0.5]})
+    with pytest.raises(ValueError, match="half_angle_deg"):
+        RawQualityConfig(scan_geometry="sector", fan={**FAN, "half_angle_deg": 120.0})
+
+
+def test_sector_config_round_trips_through_from_dict() -> None:
+    import dataclasses
+
+    data = {"scan_geometry": "sector", "fan": dict(FAN), "n_a_lines": 48, "depth_bins": 40}
+    config = RawQualityConfig.from_dict(data)
+    assert config.scan_geometry == "sector"
+    assert config.fan == FAN
+    assert (config.n_a_lines, config.depth_bins) == (48, 40)
+    assert RawQualityConfig.from_dict(dataclasses.asdict(config)) == config
+    with pytest.raises(ValueError, match="Unknown raw quality fan key"):
+        RawQualityConfig.from_dict({"scan_geometry": "sector", "fan": {**FAN, "mode": "fan"}})
+
+    frame, mask = sector_frame()
+    samples, _ = sample_a_lines(frame, mask, "sector", fan=config.fan, n_a_lines=48, depth_bins=40)
+    assert compute_raw_quality(frame, mask, config).a_line_count == 48
+    assert samples.shape == (40, 48)
+
+
+# -- Stage 1a coupling gate --------------------------------------------------
+
+
+def test_coupling_gate_passes_a_well_coupled_frame() -> None:
+    assert coupling_gate(compute_raw_quality(coupled_frame())) is True
+    frame, mask = sector_frame(0.6)
+    config = RawQualityConfig(scan_geometry="sector", fan=FAN)
+    assert coupling_gate(compute_raw_quality(frame, mask, config), config) is True
+
+
+def test_coupling_gate_is_closed_for_unmeasured_rejected_or_discontinuous_frames() -> None:
+    roi = np.zeros((HEIGHT, WIDTH), dtype=bool)
+    roi[:, :4] = True
+    assert coupling_gate(compute_raw_quality(coupled_frame(), roi_mask=roi)) is False  # None
+    assert coupling_gate(compute_raw_quality(np.zeros((HEIGHT, WIDTH), np.float32))) is False
+    # 25% dead A-lines: no reason code fires, but continuity 0.75 < 0.8.
+    gapped = compute_raw_quality(air_gap_frame(slice(0, WIDTH // 4)))
+    assert gapped.rejection_reasons == []
+    assert coupling_gate(gapped) is False
+    assert coupling_gate(gapped, RawQualityConfig(gate_min_contact_continuity=0.7)) is True
 
 
 # -- input and configuration validation --------------------------------------

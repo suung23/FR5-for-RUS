@@ -21,6 +21,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from rus_perception.metrics.trust import (  # noqa: E402
     FrameOutcome,
+    asymmetric_margin,
     build_trust_report,
     calibration,
     component_attribution,
@@ -34,6 +35,7 @@ from rus_perception.metrics.trust import (  # noqa: E402
     reason_code_report,
     risk_coverage,
     spearman,
+    unimodal_regression,
 )
 
 FLOOR = 0.70
@@ -422,6 +424,160 @@ def test_epsilon_sized_wobble_does_not_count_as_a_turn() -> None:
     report = force_response({f: [m] * 30 for f, m in means.items()}, epsilon=0.03)
     assert report.sign_changes == 0
     assert report.is_unimodal
+
+
+# -- Q_raw force response: 2026-09-08 revision -------------------------------
+
+
+GRID = [1.0 + 0.5 * i for i in range(13)]  # the DESIGN_NOTES 7.2 force grid
+
+
+def concave(force: float) -> float:
+    return 0.8 - (force - 4.0) ** 2 / 40.0
+
+
+def ar1(n: int, phi: float, scale: float, rng: np.random.Generator) -> np.ndarray:
+    """A strongly autocorrelated zero-mean sequence, like slow speckle drift."""
+    x = np.zeros(n)
+    noise = rng.normal(0.0, scale, n)
+    for i in range(1, n):
+        x[i] = phi * x[i - 1] + noise[i]
+    return x
+
+
+def test_asymmetric_margin_matches_the_design_values() -> None:
+    """w-/w+ = 5 puts the setpoint 0.636 sigma inside the left edge of the tie
+    set; the design ratio's neighbours are pinned too so a regression in the
+    root finder cannot hide behind one lucky value."""
+    assert asymmetric_margin(1.0, 5.0) == pytest.approx(0.636, abs=5e-4)
+    assert asymmetric_margin(1.0, 3.0) == pytest.approx(0.436, abs=5e-4)
+    assert asymmetric_margin(1.0, 10.0) == pytest.approx(0.901, abs=5e-4)
+    assert asymmetric_margin(0.5, 5.0) == pytest.approx(0.318, abs=5e-4)  # scales with sigma
+    assert asymmetric_margin(0.0, 5.0) == 0.0
+    assert asymmetric_margin(-1.0, 5.0) == 0.0
+    assert asymmetric_margin(1.0, 1.0) == 0.0  # symmetric cost: no margin
+
+
+def test_unimodal_regression_recovers_a_rise_then_fall_exactly() -> None:
+    means = np.array([0.2, 0.5, 0.9, 0.6, 0.3])
+    fit, peak, sse = unimodal_regression(means)
+    assert np.array_equal(fit, means)
+    assert peak == 2
+    assert sse == pytest.approx(0.0)
+
+    # Monotone sequences are umbrellas with the peak at an end.
+    fit, peak, sse = unimodal_regression(np.array([0.1, 0.2, 0.3, 0.4]))
+    assert peak == 3 and sse == pytest.approx(0.0)
+    fit, peak, sse = unimodal_regression(np.array([0.4, 0.3, 0.2, 0.1]))
+    assert peak == 0 and sse == pytest.approx(0.0)
+
+
+def test_unimodal_regression_pools_a_violation_and_respects_weights() -> None:
+    fit, peak, sse = unimodal_regression(np.array([0.2, 0.8, 0.2, 0.8, 0.2]))
+    assert peak in (1, 3)
+    assert sse > 0.1
+    # Rise then fall on both sides of the chosen peak.
+    assert np.all(np.diff(fit[: peak + 1]) >= -1e-12)
+    assert np.all(np.diff(fit[peak:]) <= 1e-12)
+
+    # A heavily weighted point pulls the pooled block toward itself.
+    light, _, _ = unimodal_regression(np.array([0.5, 0.4, 0.6]), np.array([1.0, 1.0, 1.0]))
+    heavy, _, _ = unimodal_regression(np.array([0.5, 0.4, 0.6]), np.array([1.0, 100.0, 1.0]))
+    assert abs(heavy[1] - 0.4) < abs(light[1] - 0.4)
+
+
+def test_f_star_is_f_left_plus_the_margin() -> None:
+    means = {1.0: 0.50, 2.0: 0.88, 3.0: 0.90, 4.0: 0.89}
+    samples = {f: [m] * 30 for f, m in means.items()}
+    legacy = force_response(samples, epsilon=0.03)
+    assert legacy.f_left == pytest.approx(2.0)
+    assert legacy.f_star == pytest.approx(legacy.f_left)  # no margin: unchanged rule
+    assert legacy.margin_n == 0.0
+
+    margin = asymmetric_margin(0.5, 5.0)
+    shifted = force_response(samples, epsilon=0.03, margin_n=margin)
+    assert shifted.f_left == pytest.approx(2.0)
+    assert shifted.f_star == pytest.approx(2.0 + margin)
+    assert shifted.margin_n == pytest.approx(margin)
+    assert shifted.to_dict()["f_star"] == pytest.approx(shifted.f_star)
+
+
+def test_autocorrelated_hold_windows_have_fewer_effective_samples() -> None:
+    """A 1 s hold window is 30 correlated frames, not 30 independent draws."""
+    rng = np.random.default_rng(23)
+    n = 500
+    iid = {f: list(concave(f) + rng.normal(0.0, 0.05, n)) for f in GRID}
+    drifting = {f: list(concave(f) + ar1(n, 0.9, 0.02, rng)) for f in GRID}
+
+    for level in force_response(iid).levels:
+        assert abs(level.rho) < 0.15
+        assert level.n_eff > 0.75 * n
+        assert level.sem == pytest.approx(level.std / math.sqrt(level.n_eff))
+    for level in force_response(drifting).levels:
+        assert level.rho > 0.7
+        assert level.n_eff < n / 2
+        assert level.sem > level.std / math.sqrt(n)
+
+    # Opting out restores n, and rho is still reported for inspection.
+    for level in force_response(drifting, autocorr_correct=False).levels:
+        assert level.n_eff == n
+        assert level.rho > 0.7
+        assert level.sem == pytest.approx(level.std / math.sqrt(n))
+
+
+def test_welch_tie_rule_admits_by_standard_error_not_by_a_fixed_epsilon() -> None:
+    rng = np.random.default_rng(29)
+    n, spread = 200, 0.06
+
+    def level(mean: float) -> list[float]:
+        noise = rng.normal(0.0, 1.0, n)
+        noise = (noise - noise.mean()) / noise.std(ddof=1) * spread  # exact mean and std
+        return list(mean + noise)
+
+    sem = spread / math.sqrt(n)
+    z = 1.64
+    close_gap = 0.8 * z * math.sqrt(2.0) * sem
+    far_gap = 4.0 * z * math.sqrt(2.0) * sem
+    samples = {2.0: level(0.90 - far_gap), 3.0: level(0.90 - close_gap), 4.0: level(0.90)}
+
+    report = force_response(samples, z_alpha=z, autocorr_correct=False)
+    assert report.tie_rule == "welch"
+    assert report.argmax_force == pytest.approx(4.0)
+    assert report.f_left == pytest.approx(3.0)  # admitted: inside z*sqrt(2)*sem
+    assert report.f_star == pytest.approx(3.0)
+
+    # The legacy rule with a generous epsilon would also admit 2.0; Welch does not.
+    legacy = force_response(samples, epsilon=far_gap + 1e-9)
+    assert legacy.tie_rule == "epsilon"
+    assert legacy.f_left == pytest.approx(2.0)
+
+
+def test_unimodality_is_judged_against_the_umbrella_fit_when_noise_is_known() -> None:
+    rng = np.random.default_rng(31)
+    n = 60
+    noisy_concave = {f: list(concave(f) + rng.normal(0.0, 0.05, n)) for f in GRID}
+    report = force_response(noisy_concave)
+    assert report.unimodal_sse_ratio is not None
+    assert report.unimodal_sse_ratio <= 2.0
+    assert report.is_unimodal is True
+    assert report.unimodal_peak_force == pytest.approx(4.0, abs=1.0)
+    assert len(report.unimodal_fit) == len(GRID)
+    assert report.to_dict()["unimodal_sse_ratio"] == report.unimodal_sse_ratio
+
+    zigzag = {
+        f: list(m + rng.normal(0.0, 0.02, 30))
+        for f, m in zip([1.0, 2.0, 3.0, 4.0, 5.0], [0.2, 0.8, 0.2, 0.8, 0.2])
+    }
+    report = force_response(zigzag)
+    assert report.unimodal_sse_ratio > 2.0
+    assert report.is_unimodal is False
+    assert report.sign_changes >= 2
+
+    # Constant samples have no sem: the ratio is undefined and the legacy
+    # sign-change rule decides, as the pre-revision tests above rely on.
+    flat = force_response({f: [m] * 30 for f, m in zip([1.0, 2.0, 3.0], [0.2, 0.5, 0.3])})
+    assert flat.unimodal_sse_ratio is None
+    assert flat.is_unimodal is True
 
 
 # -- aggregate ---------------------------------------------------------------

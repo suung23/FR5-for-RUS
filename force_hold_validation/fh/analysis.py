@@ -299,11 +299,24 @@ def hold_metrics(run: Run, settle_s: float = 3.0) -> dict:
     }
 
 
-def disturbance_events(run: Run, settle_band_s: float = 0.5) -> list:
+def disturbance_events(run: Run, settle_band_s: float = 0.5, tail_s: float = 0.8) -> list:
     """주사기 조작 하나하나의 응답.
 
     되돌아온 시점은 밴드 안에 ``settle_band_s`` 동안 **연속으로** 머문 첫 순간이다.
     한 표본만 스쳐도 복귀로 치면 진동하는 루프가 즉시 복귀한 것처럼 보인다.
+
+    ``end_error_n`` 은 다음 조작 직전 ``tail_s`` 동안의 평균 힘에서 목표를 뺀 값 —
+    **스텝 끝에 남은 편차**다. 피크는 루프가 손쓰기 전에 오므로 켬/끔이 같지만,
+    이 값은 루프가 그동안 한 일을 담는다 (:func:`rejection` 의 잔류와 같은 창).
+
+    ``return_rate_n_per_s`` 는 **피크 이후 목표 쪽으로 되돌아온 속도** —
+    (|피크 편차| − |끝 편차|) / (피크에서 창 끝까지 시간). 논문이 묻는 것은
+    "얼마나 빨리 돌아오는가" 이고, 이것이 그 답이다. 피크가 창 끝 0.3 s 안이면
+    잴 시간이 없어 NaN.
+
+    복귀(``recovered``)는 **피크 이후**에만 센다. 창이 열린 직후에는 조작자의 손이
+    아직 주사기를 밀기 전이라 힘이 밴드 안에 있는데, 그것을 복귀로 세면 교란이
+    시작되기도 전에 돌아온 것이 된다 (2026-09-07 에 3건이 그렇게 잡혔다).
     """
     out = []
     marks = [(ts, key) for ts, key in run.events if key in ("i", "w")]
@@ -318,7 +331,7 @@ def disturbance_events(run: Run, settle_band_s: float = 0.5) -> list:
 
         peak_index = int(np.argmax(np.abs(error)))
         inside = np.abs(error) <= run.band
-        settle_t = _first_sustained(t, inside, settle_band_s)
+        settle_t = _first_sustained(t[peak_index:], inside[peak_index:], settle_band_s)
 
         # 로봇 변위 — 힘 응답 옆에 두는 이유는, 힘이 돌아온 것이 로봇이 받아 낸
         # 것인지 팬텀이 스스로 누운 것인지를 이 열 없이는 못 가르기 때문이다.
@@ -333,13 +346,27 @@ def disturbance_events(run: Run, settle_band_s: float = 0.5) -> list:
             float(seg[finite][np.argmax(np.abs(seg[finite]))] * 1000.0)
             if finite.any() else None
         )
+        # 교란 직전 힘. 목표 기준 피크가 "이 사건의 응답" 인지 "이전 사건의 잔류"
+        # 인지는 이 값 없이는 못 가른다 — 창 시작에 이미 목표에서 떨어져 있으면
+        # 창의 극값이 그 잔류일 수 있다.
+        pre = float(run.force[base].mean()) if base.any() else float("nan")
+        tail = (run.t >= end - tail_s) & (run.t < end) & run.probing()
+        end_error = float(run.force[tail].mean() - run.target) if tail.any() else float("nan")
+        after_peak_s = float(end - t[peak_index])
+        return_rate = ((abs(float(error[peak_index])) - abs(end_error)) / after_peak_s
+                       if after_peak_s > 0.3 and math.isfinite(end_error) else float("nan"))
         out.append({
             "run": run.label,
             "target_n": run.target,
             "onset_s": float(onset),
             "direction": "in" if key == "i" else "withdraw",
             "step_ml": run.meta.get("step_ml"),
+            "pre_force_n": pre,
             "peak_error_n": float(error[peak_index]),
+            "max_error_n": float(error.max()),
+            "min_error_n": float(error.min()),
+            "end_error_n": end_error,
+            "return_rate_n_per_s": return_rate,
             "peak_force_n": float(force[peak_index]),
             "time_to_peak_s": float(t[peak_index] - onset),
             "settle_s": None if settle_t is None else float(settle_t - onset),

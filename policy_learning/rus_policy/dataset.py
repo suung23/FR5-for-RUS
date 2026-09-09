@@ -11,8 +11,10 @@
     label/P6         (N, k+1, 6)            6축 (진단·힘축 마스킹 확인용)
     label/sigma_net  (N, 3)                 순변위 σ (소스별, §5.3a)
     label/sigma_shape(N, 3)
-    label/Q          (N, k) float32         chunk 격자에서의 Q_seg (NaN 허용)
+    label/Q          (N, k) float32         chunk 격자에서의 Q_seg (NaN 허용) — 면내 품질
     label/Q_valid    (N, k) bool
+    label/Q_area     (N, k) float32         chunk 격자에서의 정규화 면적 (세션 최대 = 1) — elevational 관측량
+    label/Q_area_valid (N, k) bool          §3.9 필터의 y_t 와 같은 양. Q_seg 의 면적 플라토(§6.3) 를 우회한다
     label/F          (N, k) float32         법선력 (텔레오퍼레이션 전용, 지금은 NaN)
     label/F_valid    (N, k) bool
     label/Fn_star    (N,) float32
@@ -65,6 +67,8 @@ class Sample:
     sigma_shape: np.ndarray
     Q: np.ndarray            # (k,)
     Q_valid: np.ndarray
+    Q_area: np.ndarray       # (k,) 정규화 면적
+    Q_area_valid: np.ndarray
     meta: dict[str, Any]
 
 
@@ -79,18 +83,36 @@ def _resize_frames(frames: np.ndarray, size: tuple[int, int]) -> np.ndarray:
     return out
 
 
+def session_area_norm(perc: PerceptionResult) -> Optional[float]:
+    """세션 내 면적비의 정규화 상수 (has_mask 프레임의 99 백분위). 마스크가 없으면 None."""
+    has = perc.state[:, 0] > 0.5
+    if not has.any():
+        return None
+    a = perc.state[has, 4]
+    a = a[np.isfinite(a) & (a > 0)]
+    if a.size == 0:
+        return None
+    return float(np.percentile(a, 99))
+
+
 def assemble_sample(cfg: PolicyConfig, session: Session, frames_t: np.ndarray, frames_all: np.ndarray,
-                    perc: PerceptionResult, labels: SessionLabels, i: int) -> Optional[Sample]:
+                    perc: PerceptionResult, labels: SessionLabels, i: int,
+                    t_obs: Optional[float] = None, area_norm: Optional[float] = None) -> Optional[Sample]:
+    """구간 i → 샘플. t_obs (pc) 는 관측의 "지금" 이다. 기본은 앵커 t_a; 정지 A 안의 더 이른 시각을 주면
+    같은 라벨에 다른 관측이 붙는다 (관측 창 증강, DatasetConfig.obs_anchor_samples)."""
     lab: SegmentLabel = labels.labels[i]
     m, k = cfg.timing.obs_frames, cfg.timing.chunk_steps
     t_a = lab.t_anchor_pc
-    n_before = int(np.searchsorted(frames_t, t_a, side="right"))
+    t_now = t_a if t_obs is None else float(t_obs)
+    if t_now > t_a + 1e-9:
+        raise ValueError("t_obs 는 앵커보다 늦을 수 없습니다 (이동이 시작된 뒤의 관측)")
+    n_before = int(np.searchsorted(frames_t, t_now, side="right"))
     if n_before == 0:
         return None
     idx = np.arange(max(0, n_before - m), n_before)
     pad = m - idx.size
     idx_padded = np.concatenate([np.full(pad, idx[0]), idx]) if pad > 0 else idx
-    frame_dt = (frames_t[idx_padded] - t_a).astype(np.float32)
+    frame_dt = (frames_t[idx_padded] - t_now).astype(np.float32)
     valid = np.ones(m, bool)
     valid[:pad] = False
     valid &= (-frame_dt) <= cfg.timing.obs_frame_max_age_s
@@ -113,6 +135,8 @@ def assemble_sample(cfg: PolicyConfig, session: Session, frames_t: np.ndarray, f
     grid_pc = session.imu.dev_to_pc(lab.grid_t_dev[1:])
     Q = np.full(k, np.nan, np.float32)
     Q_valid = np.zeros(k, bool)
+    Q_area = np.full(k, np.nan, np.float32)
+    Q_area_valid = np.zeros(k, bool)
     if frames_t.size > 0:
         fps_dt = float(np.median(np.diff(frames_t))) if frames_t.size > 1 else 0.125
         j = np.clip(np.searchsorted(frames_t, grid_pc), 1, frames_t.size - 1)
@@ -123,18 +147,41 @@ def assemble_sample(cfg: PolicyConfig, session: Session, frames_t: np.ndarray, f
         ok = near & np.isfinite(q)
         Q[ok] = q[ok]
         Q_valid = ok
+        # 정규화 면적 (elevational 관측량, §3.9 / 2026-09-08 §5.3d-2)
+        if area_norm is not None and area_norm > 0:
+            has = perc.state[pick, 0] > 0.5
+            area = perc.state[pick, 4] / area_norm
+            oka = near & has & np.isfinite(area)
+            Q_area[oka] = np.clip(area[oka], 0.0, 2.0)
+            Q_area_valid = oka
 
     meta = {
         "t_anchor_pc": float(t_a), "t_anchor_dev": lab.t_anchor_dev, "move_s": lab.move_s,
         "still_before_s": lab.still_before_s, "still_after_s": lab.still_after_s,
         "net_mm": lab.net_mm, "segment_index": i, "n_obs_valid": int(valid.sum()),
         "token_at_anchor": int(perc.token[idx[-1]]), "Q_at_anchor": float(perc.quality[idx[-1]]),
+        "obs_offset_s": float(t_a - t_now),
         **{f"diag_{k_}": float(v) for k_, v in lab.diagnostics.items()},
     }
     return Sample(frames=frames, frame_dt=frame_dt, frame_valid=valid, state=state, vec=vec,
                   P=lab.P.astype(np.float32), P6=lab.P6.astype(np.float32),
                   sigma_net=lab.sigma_net.astype(np.float32), sigma_shape=lab.sigma_shape.astype(np.float32),
-                  Q=Q, Q_valid=Q_valid, meta=meta)
+                  Q=Q, Q_valid=Q_valid, Q_area=Q_area, Q_area_valid=Q_area_valid, meta=meta)
+
+
+def observation_times(cfg: PolicyConfig, session: Session, lab: SegmentLabel, rng: np.random.RandomState
+                      ) -> list[float]:
+    """구간 하나에 붙일 관측 시각 (pc). 첫 원소는 항상 앵커. 나머지는 정지 A 안에서 균일 추출."""
+    n = max(1, int(cfg.dataset.obs_anchor_samples))
+    t_a = lab.t_anchor_pc
+    if n == 1:
+        return [t_a]
+    lo_dev = lab.t_still_start_dev + cfg.dataset.obs_anchor_min_still_s
+    lo = float(session.imu.dev_to_pc(lo_dev))
+    if lo >= t_a:
+        return [t_a]
+    extra = sorted(rng.uniform(lo, t_a, size=n - 1).tolist())
+    return [t_a] + extra
 
 
 # --------------------------------------------------------------------------- 분할
@@ -205,6 +252,8 @@ class _H5Writer:
             "label/sigma_shape": mk("label/sigma_shape", (3,), np.float32),
             "label/Q": mk("label/Q", (k,), np.float32),
             "label/Q_valid": mk("label/Q_valid", (k,), bool),
+            "label/Q_area": mk("label/Q_area", (k,), np.float32),
+            "label/Q_area_valid": mk("label/Q_area_valid", (k,), bool),
             "label/F": mk("label/F", (k,), np.float32),
             "label/F_valid": mk("label/F_valid", (k,), bool),
             "label/Fn_star": mk("label/Fn_star", (), np.float32),
@@ -236,6 +285,8 @@ class _H5Writer:
         d["label/sigma_shape"][i] = s.sigma_shape
         d["label/Q"][i] = s.Q
         d["label/Q_valid"][i] = s.Q_valid
+        d["label/Q_area"][i] = s.Q_area
+        d["label/Q_area_valid"][i] = s.Q_area_valid
         d["label/F"][i] = np.full(s.Q.shape, np.nan, np.float32)
         d["label/F_valid"][i] = np.zeros(s.Q.shape, bool)
         d["label/Fn_star"][i] = np.nan
@@ -278,20 +329,40 @@ def build_dataset(cfg: PolicyConfig, out_path: Optional[Path] = None, compress: 
             perc = perceive_session(cfg, session, backend)
             frames_all = apply_frame_transform(np.asarray(session.frames), cfg.perception.frame_transform)
             frames_t = session.frame_t_pc - cfg.timing.us_latency_s
+            area_norm = session_area_norm(perc)
+            rng = np.random.RandomState(cfg.dataset.obs_anchor_seed + si)
             n_written = 0
+            n_segments_used = 0
+            n_truncated = 0
             for i in range(len(labels.labels)):
-                s = assemble_sample(cfg, session, frames_t, frames_all, perc, labels, i)
-                if s is None:
-                    continue
-                writer.append(s, si, rec.source, splits[rec.session_dir], rec.subject)
-                n_written += 1
+                lab = labels.labels[i]
+                covers = bool(lab.diagnostics.get("chunk_covers_move", 1.0))
+                if not covers:
+                    n_truncated += 1
+                    if cfg.dataset.require_chunk_covers_move:
+                        continue
+                wrote_any = False
+                for t_obs in observation_times(cfg, session, lab, rng):
+                    s = assemble_sample(cfg, session, frames_t, frames_all, perc, labels, i,
+                                        t_obs=t_obs, area_norm=area_norm)
+                    if s is None:
+                        continue
+                    writer.append(s, si, rec.source, splits[rec.session_dir], rec.subject)
+                    n_written += 1
+                    wrote_any = True
+                n_segments_used += int(wrote_any)
+            n_seg = max(1, len(labels.labels))
             entry = {**summary, "session_dir": rec.session_dir, "subject": rec.subject, "source": rec.source,
-                     "split": splits[rec.session_dir], "samples": n_written,
+                     "split": splits[rec.session_dir], "samples": n_written, "segments_used": n_segments_used,
+                     "chunk_truncated_fraction": n_truncated / n_seg, "area_norm": area_norm,
                      "perception": perc.backend, "checkpoint_id": perc.checkpoint_id, **labels.diagnostics}
             info.append(entry)
-            logger.info("  → %d 샘플 (정지 %d 구간, 이동 %d 구간, 규약 %s)", n_written,
-                        labels.diagnostics["n_still_segments"], labels.diagnostics["n_move_segments"],
-                        labels.convention)
+            logger.info("  → %d 샘플 / %d 구간 (정지 %d 구간, 이동 %d 구간, 규약 %s, chunk 창 초과 %.0f%%)",
+                        n_written, n_segments_used, labels.diagnostics["n_still_segments"],
+                        labels.diagnostics["n_move_segments"], labels.convention, 100.0 * n_truncated / n_seg)
+            if n_truncated / n_seg > 0.3:
+                logger.warning("  ⚠ 이동이 chunk 창(%.1f s) 을 넘는 구간이 %.0f%% — 수집 프로토콜의 이동 길이(1–1.5 s)"
+                               " 를 재교육하십시오 (§2.3)", cfg.timing.chunk_horizon_s, 100.0 * n_truncated / n_seg)
     finally:
         writer.finish(info)
     return {"path": str(out_path), "n_samples": writer.n, "sessions": info}
@@ -356,6 +427,8 @@ class PolicyH5Dataset:
             "sigma_shape": torch.from_numpy(np.asarray(fh["label/sigma_shape"][j], np.float32)),
             "Q": torch.from_numpy(np.nan_to_num(np.asarray(fh["label/Q"][j], np.float32))),
             "Q_valid": torch.from_numpy(np.asarray(fh["label/Q_valid"][j], bool)),
+            "Q_area": torch.from_numpy(np.nan_to_num(np.asarray(fh["label/Q_area"][j], np.float32))),
+            "Q_area_valid": torch.from_numpy(np.asarray(fh["label/Q_area_valid"][j], bool)),
             "F": torch.from_numpy(np.nan_to_num(np.asarray(fh["label/F"][j], np.float32))),
             "F_valid": torch.from_numpy(np.asarray(fh["label/F_valid"][j], bool)),
             "Fn_star": torch.tensor(float(np.nan_to_num(fh["label/Fn_star"][j]))),

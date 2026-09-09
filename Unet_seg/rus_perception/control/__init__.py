@@ -24,6 +24,7 @@ from .features import (
 )
 from .postprocess import PostprocessConfig, PostprocessResult, postprocess_probability
 from .quality import (
+    FORCE_SEARCH_WEIGHTS,
     QUALITY_COMPONENT_NAMES,
     QualityConfig,
     QualityResult,
@@ -37,6 +38,7 @@ from .raw_quality import (
     RawQualityResult,
     ScanGeometryError,
     compute_raw_quality,
+    coupling_gate,
     sample_a_lines,
 )
 from .state import COORDINATE_CONVENTION, BoundingBox, ControlState
@@ -62,9 +64,11 @@ __all__ = [
     "QualityResult",
     "compute_control_quality",
     "QUALITY_COMPONENT_NAMES",
+    "FORCE_SEARCH_WEIGHTS",
     "RawQualityConfig",
     "RawQualityResult",
     "compute_raw_quality",
+    "coupling_gate",
     "sample_a_lines",
     "ScanGeometryError",
     "RAW_QUALITY_COMPONENT_NAMES",

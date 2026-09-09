@@ -68,9 +68,10 @@ def main(argv=None) -> int:
                "rmse_pct_of_target", "in_band_pct", "p95_abs_error_n", "max_force_n",
                "travel_mm"])
     write_csv(os.path.join(args.output_dir, "disturbance_events.csv"), summary.events,
-              ["run", "target_n", "direction", "step_ml", "onset_s", "peak_error_n",
-               "peak_force_n", "time_to_peak_s", "settle_s", "recovered",
-               "travel_mm", "peak_travel_mm"])
+              ["run", "target_n", "direction", "step_ml", "onset_s", "pre_force_n",
+               "peak_error_n", "max_error_n", "min_error_n", "end_error_n",
+               "return_rate_n_per_s", "peak_force_n", "time_to_peak_s", "settle_s",
+               "recovered", "travel_mm", "peak_travel_mm"])
     write_csv(os.path.join(args.output_dir, "safety_margin.csv"), summary.safety,
               ["run", "run_type", "target_n", "peak_force_n", "warn_force_n",
                "max_force_n", "margin_to_limit_n", "reached_warn", "exceeded_limit",

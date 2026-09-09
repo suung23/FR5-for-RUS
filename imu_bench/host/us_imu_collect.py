@@ -52,7 +52,11 @@ import numpy as np
 # --- 두 리포의 모듈 경로 ------------------------------------------------------
 _THIS = os.path.dirname(os.path.abspath(__file__))
 _IMU_HOST = _THIS
-_FR5_VISION = os.path.abspath(os.path.join(_THIS, "..", "..", "fr5_contorl", "fr5_vision"))
+# 패키지 디렉터리 이름이 두 철자로 존재했다 (fr5_control / fr5_contorl). 있는 쪽을 쓴다.
+_FR5_VISION = next((d for d in (
+    os.path.abspath(os.path.join(_THIS, "..", "..", "fr5_control", "fr5_vision")),
+    os.path.abspath(os.path.join(_THIS, "..", "..", "fr5_contorl", "fr5_vision")),
+) if os.path.isdir(d)), os.path.abspath(os.path.join(_THIS, "..", "..", "fr5_control", "fr5_vision")))
 for _p in (_IMU_HOST, _FR5_VISION):
     if _p not in sys.path:
         sys.path.insert(0, _p)
@@ -60,9 +64,11 @@ for _p in (_IMU_HOST, _FR5_VISION):
 from imu_log import SessionLogger              # noqa: E402  imu_bench/host
 from imu_stream import ImuStream               # noqa: E402  imu_bench/host
 import mag_calib                               # noqa: E402  imu_bench/host
-from fr5_vision.us_protocol import (           # noqa: E402  fr5_contorl/fr5_vision
+from fr5_vision.us_protocol import (           # noqa: E402  fr5_control/fr5_vision
     CANDIDATE_FRAME_SHAPE,
     UsScannerSession,
+    PROFILES,
+    SL2C,
 )
 
 FRAME_BYTES = CANDIDATE_FRAME_SHAPE[0] * CANDIDATE_FRAME_SHAPE[1]
@@ -72,7 +78,7 @@ def _stamp() -> str:
     return time.strftime("%Y%m%d_%H%M%S", time.localtime())
 
 
-def collect(host, port, baud, out_dir, duration, mag_cal_path, use_mag, show):
+def collect(host, port, baud, out_dir, duration, mag_cal_path, use_mag, show, profile=SL2C, max_frames=0):
     session_dir = os.path.join(out_dir, "us_imu_" + _stamp())
     os.makedirs(session_dir, exist_ok=True)
 
@@ -88,7 +94,8 @@ def collect(host, port, baud, out_dir, duration, mag_cal_path, use_mag, show):
     imu.start()
 
     # --- US: 이 프로세스가 유일한 TCP 클라이언트 ---
-    us = UsScannerSession(host)
+    us = UsScannerSession(host, profile=profile)
+    scan_requested = False
     us_bin = open(os.path.join(session_dir, "us_frames.bin"), "wb")
     us_index = open(os.path.join(session_dir, "us_index.csv"), "w", newline="")
     us_writer = csv.writer(us_index)
@@ -141,6 +148,8 @@ def collect(host, port, baud, out_dir, duration, mag_cal_path, use_mag, show):
                     time.sleep(2.0)
                     continue
 
+            if us.can_command_scan and not scan_requested and time.monotonic() - started >= 1.6:
+                us.start_scan(); scan_requested = True          # C10UR: 클라이언트가 스캔을 시작한다
             try:
                 frames = us.poll(0.05)
             except (ConnectionError, OSError) as exc:
@@ -160,6 +169,8 @@ def collect(host, port, baud, out_dir, duration, mag_cal_path, use_mag, show):
                 last_us_stamp = pc_unix
                 if renderer is not None:
                     latest_image = frame.as_uint8_image()
+            if max_frames and us_seq >= max_frames:
+                print(f"  US {max_frames} 프레임 도달 — 종료"); break
 
             if renderer is not None:
                 cv2, render = renderer
@@ -185,6 +196,13 @@ def collect(host, port, baud, out_dir, duration, mag_cal_path, use_mag, show):
                       flush=True)
                 last_report = now
     finally:
+        if us.is_open and us.can_command_scan:
+            try:
+                us.stop_scan()
+                for _ in range(6):
+                    us.poll(0.2)                             # 정지 바이트를 ~1 s 보낸다
+            except Exception:  # noqa: BLE001
+                pass
         us.close()
         us_bin.close()
         us_index.close()
@@ -205,8 +223,8 @@ def collect(host, port, baud, out_dir, duration, mag_cal_path, use_mag, show):
                 "skew 는 dev_us 로 보정 가능하나 US 고정 엔드투엔드 지연은 미측정."
             ),
             "us": {
-                "host": host, "frames": us_seq,
-                "frame_shape": list(CANDIDATE_FRAME_SHAPE), "dtype": "uint8",
+                "host": host, "frames": us_seq, "probe": profile.name, "probe_note": profile.note,
+                "frame_shape": list(profile.frame_shape), "dtype": "uint8",
                 "bin": "us_frames.bin", "index": "us_index.csv",
                 "note": "candidate 프레임 — 방향/scan conversion 미검증. 원시 바이트 무변환 저장.",
             },
@@ -217,7 +235,7 @@ def collect(host, port, baud, out_dir, duration, mag_cal_path, use_mag, show):
                 "error": imu.error,
             },
         }
-        with open(os.path.join(session_dir, "session.meta.json"), "w") as fh:
+        with open(os.path.join(session_dir, "session.meta.json"), "w", encoding="utf-8") as fh:
             json.dump(session_meta, fh, indent=2, ensure_ascii=False)
 
         print(f"\n수집 종료: {session_dir}")
@@ -233,6 +251,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--host", default="192.168.1.1", help="프로브 AP 주소")
+    parser.add_argument("--probe", choices=sorted(PROFILES), default="sl2c", help="프로브 프로파일")
+    parser.add_argument("--max-frames", type=int, default=0, help="이 수의 US 프레임 뒤 자동 종료 (0 = 없음)")
     parser.add_argument("--port", default=os.environ.get("IMU_PORT", "/dev/ttyACM0"))
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--out-dir", default=os.path.join(_THIS, "..", "logs"))
@@ -248,6 +268,7 @@ def main() -> int:
         host=args.host, port=args.port, baud=args.baud,
         out_dir=os.path.abspath(args.out_dir), duration=args.duration,
         mag_cal_path=args.mag_cal, use_mag=not args.no_mag, show=args.show,
+        profile=PROFILES[args.probe], max_frames=args.max_frames,
     )
     return 0
 

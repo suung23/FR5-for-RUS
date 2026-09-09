@@ -14,8 +14,8 @@ timing:
   chunk_steps: 8          # k  🟡 (1.6 s)
   # ⏳ m = ceil(f_us / f_dither). f_us 는 가정하지 않는다 — scripts/inspect_session.py 가 세션에서 잰 값과
   # 함께 "m = …" 를 찍어 준다 (§1.3). 16 은 자리표시자 ("8 fps × 2 s") 다. 데이터가 오면 그 값으로 바꾼다.
-  obs_frames: 16
-  us_latency_s: 0.0       # ⏳ US 고정 엔드투엔드 지연 [s]. scripts/inspect_session.py --latency 로 실측 (§7.1)
+  obs_frames: 20          # 2026-09-09 실측: C10UR Wi-Fi 9.98 fps → ceil(10 / 0.5) = 20 (첫 세션 us_imu_20260909_153452)
+  us_latency_s: 0.0       # ⏳ US 고정 엔드투엔드 지연 [s]. scripts/inspect_session.py --latency 로 실측 (§7.1). Wi-Fi 원시 경로라 뷰어 캡처보다 훨씬 작을 것
   obs_frame_max_age_s: 4.0
 
 imu:

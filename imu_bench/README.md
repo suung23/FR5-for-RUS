@@ -261,3 +261,57 @@ logs/                           세션 로그 (gitignore)
   로 바뀐다.
 * **보드 이름** — 펌웨어가 부팅 시 USB 디스크립터를 `CAL_NAME`(`board-6-qc`)로 바꾼다.
   `lsusb` 에 아직 `XIAO nRF52840 Sense` 로 보이면 이 펌웨어가 올라가 있지 않은 것이다.
+
+## Windows 수집 — USB 프로브 (Konted C10UR) + IMU  `host/us_imu_gui_win.py`  (2026-09-09)
+
+C10UR 은 USB 로 붙으면 Cypress FX3 벤더 전용 장치(VID 04B4 / PID BC0C) 이고 벤더 뷰어 WirelessUSG 가
+CyUSB.dll 로 직접 말한다. 그 USB 프로토콜은 아직 모르고, 기존 Wi-Fi TCP 수집기(`us_imu_collect.py`) 는 다른
+프로브(SL-2C) 용이다. 그래서 Windows 에서는 **뷰어 창을 `PrintWindow` 로 렌더해 오는 화면 캡처**가 초음파
+소스다 (`host/us_screen_capture.py`). 다른 창에 가려져도 되고(이 GUI 가 위에 있어도 됨), 최소화만 안 된다.
+세션 포맷은 `us_imu_collect.py` 와 같아 `policy_learning/scripts/inspect_session.py` 가 그대로 읽는다.
+
+준비 (한 번): 드라이버 `USB_Probe_Driver\Win10x64\cyusb3.inf` (`pnputil /add-driver … /install`), 뷰어 설치,
+뷰어 폴더 쓰기 권한 (`icacls "C:\Program Files (x86)\WirelessUSG" /grant <user>:(OI)(CI)M /T` — 뷰어가
+`preference.json` 을 자기 폴더에 만들려 해서 없으면 시작 즉시 죽는다), `pip install pyserial mss`.
+
+```
+python host\us_imu_gui_win.py --select-roi          # 처음 한 번: 뷰어 스크린샷에서 영상 영역만 드래그 (Enter)
+python host\us_imu_gui_win.py                       # COM 포트 자동 (VID 2886), 뷰어 창 'WirelessUSG' 캡처
+```
+
+키: **Z** 영점(정지 3 s) → **R** 녹화 시작 → 정지-이동-정지 스캔 → **R** 정지(= 저장). S ROI 재지정, W 창 다시 찾기, Q 종료.
+상태줄 오른쪽 `cap=printwindow … mean=…` 이 캡처 백엔드와 프레임 평균이다. `mean` 이 250 근처면 뷰어가 아니라
+다른 창을 찍고 있는 것이다 (`--capture-backend printwindow` 로 고정하거나 W).
+
+알아둘 것:
+* 프레임은 ROI → 그레이 → **정방형 레터박스** → 256×256. 레터박스·스케일은 `session.meta.json` 의 `us.capture` 에 남는다.
+  비등방 축소를 피한 이유는 convex 부채꼴의 반경(hypot) 기하를 지키기 위해서다.
+* 중복 제거: 직전 저장 프레임과 다를 때만 저장한다. 표시 fps 는 **새 프레임** 기준이라 뷰어가 FREEZE 면 0.
+* 지연: 프로브 → 뷰어 → 화면 → 캡처 경로의 고정 지연이 붙는다. `inspect_session.py --latency` 로 실측해
+  `timing.us_latency_s` 에 넣는다. 캡처 자체는 PrintWindow ~50 ms (2560×1600 창) 라 ~15 fps 상한 — 뷰어 창을
+  줄이면 빨라진다.
+* 자이로가 정지 중 정확히 0.0 으로 읽히고 `cal_gyr=0` 이었다 (2026-09-09 board-6-qc). 움직이면 값이 나온다.
+  정지 판정 임계(`imu.still_gyro_sd`) 가 이 거동을 전제하지 않으므로 첫 세션에서 `inspect_session` 분위수 표를 볼 것.
+
+## Windows Wi-Fi 수집 — C10UR 을 뷰어 없이 (`host/us_imu_gui.py --probe c10ur`)  (2026-09-09, 권장 경로)
+
+동글(Realtek 8814AU, "Wi-Fi 2") 로 프로브 AP `US-1C GRCGBA010` 에 붙으면 (비밀번호 `usccgba010` — 뷰어가 만든
+Windows 프로필에서 복구, `host/probe_wifi_win.py` 가 접속·판정) 프로브 192.168.1.1 의 TCP 5002/5003 이 열린다.
+pktmon 으로 뷰어 세션을 캡처해 (`logs/pcap/`) 프로토콜을 확인했다: SL-2C 와 같은 골격, 상수만 다르고 **스캔 시작을
+클라이언트가 명령**한다 (`fr5_vision/us_protocol.py` 의 `C10UR` 프로파일). 프레임은 160 블록 = 81,920 바이트 =
+**320 라인 × 256 깊이 표본, scan conversion 이전 극좌표** (행 = A-line, 행 시작 = 근거리), 10 fps.
+
+```
+python host\probe_wifi_win.py                                   # 동글 접속 + 포트 + 프레임 판정
+python host\us_imu_gui.py --probe c10ur --host 192.168.1.1 --record-frames 1000    # IMU 포트 자동(VID 2886)
+python host\us_imu_collect.py --probe c10ur --host 192.168.1.1 --port COM3 --max-frames 1000   # 헤드리스
+```
+
+**프레임은 F 또는 R 을 눌러야 온다** (이 프로브는 클라이언트가 스캔 시작을 명령한다; GUI 창을 클릭해 포커스를 준 뒤). F 가 스캔 시작/정지, R 은 녹화(스캔이 꺼져 있으면 함께 시작). 표시는 `--display fan`(c10ur 기본) 으로 `host/us_scan_convert.py` 가 극좌표를 부채꼴로 바꾼다 (뷰어 화면 실측 R59 mm / 반각 28° / 깊이 220 mm — candidate, 라인 좌우 미검증, `--fan-flip`). 저장은 항상 극좌표 원본이고 기하는 `session.meta.json` 의 `us.fan_geometry` 에 남는다. 세션 포맷은 동일하고 `session.meta.json` 의
+`us.frame_shape` 가 [320, 256] 이므로 `inspect_session.py` 가 그대로 읽는다. 뷰어 화면 캡처 경로(`us_imu_gui_win.py`)
+보다 지연·CPU 모두 훨씬 낫다 (프레임당 수 ms).
+
+미해결: 공기 중에서 스트림이 **약 18 s 뒤 프로브 쪽에서 강제 종료(RST)** 되고 AP 가 잠시 사라진다 (USB+뷰어에서는
+42 프레임 뒤 정지). 접촉 자동 정지로 추정 — 젤/팬텀 접촉 상태에서 1000 프레임이 끊김 없이 오는지가 판정 기준.
+끊기면 뷰어 세션을 60 s 이상 pktmon 으로 다시 캡처해 우리가 안 보내는 메시지(예: 프로브의 `5bb50000`) 를 본다.
+WLAN 프로필은 자동 연결(auto) 이라 AP 가 돌아오면 Windows 가 다시 붙고, 수신기는 2 s 마다 TCP 재접속한다.

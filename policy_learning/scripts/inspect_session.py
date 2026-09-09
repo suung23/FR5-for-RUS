@@ -68,8 +68,7 @@ def main() -> int:
         est = estimate_us_latency(s.frame_t_pc, mean_i, imu.t_pc, imu.acc)
         verdict = ("신뢰" if est.peak_corr > 0.15 and est.second_ratio > 1.5 and est.n_imu_events >= 5
                    else "애매 — 사건이 적거나 피크가 약함")
-        print(f"
-US 지연 추정: {est.latency_s * 1e3:+.0f} ms (양수 = 영상이 늦다)  피크 상관 {est.peak_corr:.3f}  "
+        print(f"\nUS 지연 추정: {est.latency_s * 1e3:+.0f} ms (양수 = 영상이 늦다)  피크 상관 {est.peak_corr:.3f}  "
               f"2위 대비 {est.second_ratio:.2f}  사건 영상 {est.n_image_events} / IMU {est.n_imu_events}  → {verdict}")
         print(f"  → --set timing.us_latency_s={est.latency_s:.3f}   (설정 현재값 {cfg.timing.us_latency_s})")
 

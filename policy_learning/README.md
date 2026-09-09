@@ -5,7 +5,8 @@
 이 분리의 **이유**이므로, `label/F`·`Fn_star` 와 `loss.lambda_force/feas/risk` 는 쓰지 않는 확장점이고
 `obs/vec` 의 wrench 7 칸은 학습·추론 양쪽에서 0 이다.
 
-`imu_bench/host/us_imu_collect.py` 가 남기는 세션 디렉터리(US 프레임 + BNO085 IMU)만 있으면
+`imu_bench/host/us_imu_collect.py`(Linux, Wi-Fi 프로브) 또는 `imu_bench/host/us_imu_gui_win.py`(Windows, USB 프로브
+C10UR — 벤더 뷰어 화면 캡처, 2026-09-09) 가 남기는 세션 디렉터리(US 프레임 + BNO085 IMU)만 있으면
 데이터셋 빌드 → 학습 → 진단까지 바로 돌아가는 파이프라인이다. 설계 근거는 전부
 [`docs/POLICY_LEARNING_MATH.md`](../docs/POLICY_LEARNING_MATH.md) 이고, 코드 주석에 절 번호를 남겼다.
 

@@ -163,15 +163,25 @@ class ImuStream(threading.Thread):
 
     # -------------------------------------------------------------------- 본체
     def run(self):
-        try:
-            # timeout 은 짧아야 한다. 50 ms 면 read() 한 번이 50 ms 분량(약 500 B)을
-            # 통째로 물고 오고, 그 안의 모든 레코드가 **같은 pc_ts** 를 받는다 —
-            # 타임스탬프 해상도가 통째로 50 ms 로 뭉개진다. 5 ms 면 레코드 몇 개
-            # 수준이라 수신 시각이 실제 도착 시각을 따라간다.
-            ser = serial.Serial(self.port_name, self.baud, timeout=0.005)
-        except serial.SerialException as e:
-            with self._lock:
-                self.error = "포트를 열 수 없습니다: %s" % e
+        # 포트가 다른 프로세스에 잡혀 있거나(직전 GUI 가 아직 닫는 중, PermissionError) 보드가 잠깐
+        # 빠졌다 들어오면 열기가 실패한다. 한 번 실패로 스레드가 죽으면 GUI 를 다시 켜야 하므로,
+        # stop() 전까지 2 s 마다 다시 연다. 그동안 error 에 이유를 남겨 상태줄에 보이게 한다.
+        ser = None
+        while not self._stop.is_set():
+            try:
+                # timeout 은 짧아야 한다. 50 ms 면 read() 한 번이 50 ms 분량(약 500 B)을
+                # 통째로 물고 오고, 그 안의 모든 레코드가 **같은 pc_ts** 를 받는다 —
+                # 타임스탬프 해상도가 통째로 50 ms 로 뭉개진다. 5 ms 면 레코드 몇 개
+                # 수준이라 수신 시각이 실제 도착 시각을 따라간다.
+                ser = serial.Serial(self.port_name, self.baud, timeout=0.005)
+                with self._lock:
+                    self.error = None
+                break
+            except (serial.SerialException, OSError) as e:
+                with self._lock:
+                    self.error = "포트를 열 수 없습니다 (2 s 후 재시도): %s" % e
+                self._stop.wait(2.0)
+        if ser is None:
             return
 
         time.sleep(0.3)

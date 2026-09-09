@@ -1,0 +1,45 @@
+{
+  "created": "20260909_165428",
+  "time_axis": "pc_unix (host time.time() at reception, shared by both streams)",
+  "join_key": "pc_unix",
+  "caveat": "수신 시각 정렬. US 고정 엔드투엔드 지연은 미측정.",
+  "us": {
+    "host": "192.168.1.1",
+    "frames": 1001,
+    "frame_shape": [
+      160,
+      512
+    ],
+    "dtype": "uint8",
+    "bin": "us_frames.bin",
+    "index": "us_index.csv",
+    "display_orientation": "none",
+    "probe": "c10ur",
+    "probe_note": "2026-09-09 pktmon (Wi-Fi 동글, WirelessUSG 2.1.4 세션). 160 라인 × 512 깊이 표본, 극좌표 candidate. 10 fps 관찰.",
+    "fan_geometry": {
+      "radius_mm": 59.0,
+      "half_angle_deg": 28.0,
+      "depth_mm": 220.0,
+      "flip_lines": false,
+      "n_lines": 160,
+      "n_samples": 512,
+      "out_hw": [
+        512,
+        591
+      ],
+      "mm_per_px": 0.4431759609791471,
+      "apex_xy_px": [
+        295.5,
+        -117.54678178748934
+      ],
+      "note": "candidate: 라인 순서·각도 미검증 (2026-09-09 뷰어 화면 실측 R59/28°/220mm)"
+    },
+    "note": "candidate — 극좌표 (행 = A-line, 열 = 깊이 표본, 행 시작 = 근거리). scan conversion 전. 원시 바이트 무변환 저장",
+    "frame_shape_note": "2026-09-09 저녁 수정: 수집 당시 [320, 256] 으로 기록됐으나 실제 배치는 160 라인 × 512 깊이 표본 (블록 1 개 = A-line 1 개). 바이트는 그대로, 해석만 바뀜. 근거: 인접 라인 상관 320×256 0.2 / 160×512 0.94"
+  },
+  "imu": {
+    "port": "COM3",
+    "rows": 24102,
+    "csv": "imu_20260909_165248.csv"
+  }
+}

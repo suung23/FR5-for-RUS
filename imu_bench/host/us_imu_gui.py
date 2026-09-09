@@ -10,13 +10,21 @@
 시계로 찍으면 두 로그가 pc_unix 로 직접 조인된다.
 
 키:
-    R  녹화 시작/정지 — US 와 IMU 를 **한 세션 폴더에 동시에**. `--record-frames N` 이면 N 프레임에서 자동 정지.
+    R  녹화 시작/정지 — US 와 IMU 를 **한 세션 폴더에 동시에**. `--record-frames N` 이면 N 프레임에서 자동 정지,
+       0(기본) 이면 R 을 다시 눌러 정지 — 길이는 자유다.
+    M  (녹화 중) 발견 표시 — "지금 목표(방광)가 보인다". 시각·US 프레임 번호가 메타 events 에 남는다.
+    X  (녹화 중) 폐기 — 저장하지 않고 폴더를 discard_ 로 바꾼다 (실패한 에피소드). 에피소드 번호는 올라가지 않는다.
     F  스캔 시작/정지 — 클라이언트가 스캔을 명령하는 프로브(`--probe c10ur`)에서만. SL-2C 는 프로브 버튼.
     K  IMU 보정 안내 모드 — BNO085 의 칩 보정 상태(가속도/자이로/자력계 0~3) 를 보며 단계별 동작을 안내한다.
        세션 시작마다: K(자이로 정지 → 가속도 6방향 → 자력계 8자) → Z → R.  보정은 칩 안에서 되며, 전원을 끄면 사라진다.
     Z  영점(zero) — IMU 를 현재 자세 기준으로 잡는다 (몇 초간 정지 필요).
     C  자세 재설정 — 호스트 퓨전 프레임 정렬을 다시 잡는다.
     Q  종료.
+
+에피소드 모드 (`--task find_bladder --episodes 100`, 2026-09-10): 세션 하나 = 에피소드 하나, 길이 자유.
+    프로브를 방광이 안 보이는 곳에 대고 1 s 정지 → R → 정지-이동-정지로 탐색 (정지 ≥ 0.5 s) → 방광이 보이면 M →
+    1~2 s 정지 → R (저장). 못 찾았거나 잘못 눌렀으면 X. 메타에 task / episode{index, outcome, found_us_seq} / events 가
+    남고 번호는 out-dir 의 같은 task 세션 수에서 이어진다. 마지막 정지가 라벨 파이프라인의 "정지 B" 가 된다.
 
 프로브 (`--probe`, 2026-09-09): sl2c (기본, 256×256) | c10ur (Konted, Wi-Fi AP "US-1C …", 160 라인 × 512 깊이 표본의
 극좌표 candidate, 10 fps, 시작/정지 명령 있음). 상세는 fr5_vision/us_protocol.py 의 ProbeProfile.
@@ -253,6 +261,15 @@ class CombinedGui:
         self.frame_shape = tuple(getattr(us, "profile", SL2C).frame_shape)
         self.record_frames = int(getattr(args, "record_frames", 0) or 0)
         self.session_count = 0
+        # 에피소드 모드 (--task/--episodes): 세션 = 에피소드 하나 (길이 자유, R 로 수동 정지). 번호는 out_dir 에 이미
+        # 저장된 같은 task 의 세션 수에서 이어진다 — GUI 를 껐다 켜도 "몇 번째" 가 유지된다. 폐기(X) 는 세지 않는다.
+        self.task = getattr(args, "task", None) or None
+        self.episodes_target = int(getattr(args, "episodes", 0) or 0)
+        self.episode_done = count_task_sessions(args.out_dir, self.task) if self.task else 0
+        self.events = []                  # 녹화 중 M 으로 남기는 표시 [{name, t_pc, us_seq}] — 세션 메타에 들어간다
+        self._stop_reason = "manual"
+        self.event_msg = ""
+        self.event_msg_until = 0.0
         # 저장 완료 세션을 IMU·US 동기화 (sync.npz / sync_report.json) — 백그라운드 루프
         self.sync = SyncWorker(args.out_dir, period_s=5.0) if not getattr(args, "no_sync", False) else None
         if self.sync is not None:
@@ -334,10 +351,54 @@ class CombinedGui:
             self.calib_started = time.time() if self.calib_mode else None
             print("IMU 보정 안내 %s" % ("시작 — 안내를 따르십시오" if self.calib_mode else "종료"))
         elif k == "r":
+            self._stop_reason = "manual"
             self.toggle_record()
+        elif k == "m":
+            self.mark_event("found")
+        elif k == "x":
+            self.discard_recording()
         elif k == "f":
             res = self.us.toggle_scan() if hasattr(self.us, "toggle_scan") else None
             self.status.set_text("스캔 %s" % ("시작 요청" if res else ("정지" if res is False else "명령 불가 (프로브 버튼 사용)")))
+
+    def _recording(self):
+        return self.stream.logger is not None or self.us.recording
+
+    def mark_event(self, name):
+        """녹화 중 M: '지금 목표(방광)를 찾았다' 표시. 시각(pc_unix)과 US 프레임 번호를 세션 메타 events 에 남긴다.
+        표시 뒤 1–2 s 정지하고 R 로 정지하면 마지막 정지 구간이 라벨 파이프라인의 '정지 B' 가 된다."""
+        if not self._recording():
+            self.event_msg, self.event_msg_until = "녹화 중이 아닙니다 — M 은 녹화 중에만", time.time() + 4.0
+            return
+        ev = {"name": name, "t_pc": time.time(), "us_seq": int(self.us.snapshot().get("rec_count", 0))}
+        self.events.append(ev)
+        self.event_msg = "발견 표시 #%d (US seq %d) — 1~2 s 정지 후 R 로 저장" % (len(self.events), ev["us_seq"])
+        self.event_msg_until = time.time() + 8.0
+        print(self.event_msg)
+
+    def discard_recording(self):
+        """녹화 중 X: 이 세션을 저장하지 않고 버린다 (실패한 에피소드). 메타를 쓰지 않고 폴더를 discard_ 로 바꿔
+        동기화 루프(us_imu_* 만 본다)와 리포(.gitignore) 둘 다에서 빠진다. 에피소드 번호는 올라가지 않는다."""
+        if not self._recording():
+            self.event_msg, self.event_msg_until = "녹화 중이 아닙니다 — X 는 녹화 중에만", time.time() + 4.0
+            return
+        if self.stream.logger is not None:
+            self.stream.logger.close()
+            self.stream.logger = None
+        us_n = self.us.stop_recording()
+        d = self.session_dir
+        self.session_dir = None
+        self.session_count = max(0, self.session_count - 1)
+        target = os.path.join(os.path.dirname(d), "discard_" + os.path.basename(d))
+        try:
+            os.rename(d, target)
+        except OSError as e:                       # Windows 에서 핸들이 아직 잡혀 있으면 표시 파일로 대신한다
+            with open(os.path.join(d, "DISCARDED"), "w", encoding="utf-8") as fh:
+                fh.write("discarded %s (%s)\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), e))
+            target = d
+        self.event_msg = "폐기: %s (US %d frames) — 저장 안 함" % (os.path.basename(target), us_n)
+        self.event_msg_until = time.time() + 6.0
+        print(self.event_msg)
 
     def zero_now(self):
         self.status.set_text("영점 캘리브레이션 %.1f초 — 센서를 움직이지 마세요..." % self.args.zero)
@@ -372,14 +433,23 @@ class CombinedGui:
                 self.stream.logger = None
             us_n = self.us.stop_recording()
             self._write_session_meta(imu_path, imu_n, us_n)
-            print("녹화 정지: %s  (US %s frames, IMU %s rows) — 저장 완료. 동기화는 백그라운드에서 몇 초 뒤. "
-                  "R 로 다음 세션을 바로 시작할 수 있습니다." % (self.session_dir, us_n, imu_n))
+            ep = ""
+            if self.task:
+                self.episode_done += 1
+                ep = "  [%s 에피소드 %d%s, %s]" % (self.task, self.episode_done,
+                                                 "/%d" % self.episodes_target if self.episodes_target else "",
+                                                 "발견 표시 있음" if self.events else "발견 표시 없음 (M 안 누름)")
+            print("녹화 정지: %s  (US %s frames, IMU %s rows)%s — 저장 완료. 동기화는 백그라운드에서 몇 초 뒤. "
+                  "R 로 다음 세션을 바로 시작할 수 있습니다." % (self.session_dir, us_n, imu_n, ep))
             self.session_dir = None
+            self.events = []
         else:
             # 시작 — 한 세션 폴더에 US 와 IMU 를 동시에
             stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
             self.session_dir = os.path.join(self.args.out_dir, "us_imu_" + stamp)
             os.makedirs(self.session_dir, exist_ok=True)
+            self.events = []
+            self._stop_reason = "manual"
             self.stream.logger = self._new_imu_logger()
             self.us.start_recording(self.session_dir)
             self.session_count += 1
@@ -389,7 +459,10 @@ class CombinedGui:
                 warn += "   ⚠ 영점(zero_ref) 없음 — Z 를 먼저"
             if not calib_ready(cal):
                 warn += "   ⚠ IMU 보정 미완 (a%s g%s m%s) — K 로 보정" % (cal.get("acc"), cal.get("gyr"), cal.get("mag"))
-            print("녹화 시작 #%d: %s%s" % (self.session_count, self.session_dir, warn))
+            ep = "  (%s 에피소드 #%d%s — 방광 밖에서 시작, 찾으면 M, 1~2 s 정지 후 R)" % (
+                self.task, self.episode_done + 1, "/%d" % self.episodes_target if self.episodes_target else "") \
+                if self.task else ""
+            print("녹화 시작 #%d: %s%s%s" % (self.session_count, self.session_dir, ep, warn))
 
     def _new_imu_logger(self):
         z = self.stream.zero
@@ -420,7 +493,20 @@ class CombinedGui:
                             "candidate — 극좌표 (행 = A-line, 열 = 깊이 표본, 행 시작 = 근거리). scan conversion 전. 원시 바이트 무변환 저장")},
             "imu": {"port": self.args.port, "rows": imu_n,
                     "csv": None if imu_path is None else os.path.basename(imu_path)},
+            "record_stop": self._stop_reason if not self.record_frames else
+                           ("auto %d frames" % self.record_frames if self._stop_reason == "auto" else "manual"),
+            "events": list(self.events),
         }
+        if self.task:
+            found = next((e for e in self.events if e["name"] == "found"), None)
+            meta["task"] = self.task
+            meta["episode"] = {
+                "index": self.episode_done + 1, "target": self.episodes_target or None,
+                "outcome": "found" if found else "not_marked",
+                "found_t_pc": found["t_pc"] if found else None,
+                "found_us_seq": found["us_seq"] if found else None,
+                "protocol": "방광 밖에서 시작 → 정지-이동-정지로 탐색 → 방광이 보이면 M → 1~2 s 정지 → R 로 저장. 실패는 X 로 폐기",
+            }
         with open(os.path.join(self.session_dir, "session.meta.json"), "w", encoding="utf-8") as fh:
             json.dump(meta, fh, indent=2, ensure_ascii=False)
 
@@ -451,6 +537,7 @@ class CombinedGui:
         us_snap = self._update_us()
         if self.us.recording and self.record_frames > 0 and us_snap.get("rec_count", 0) >= self.record_frames:
             print("US %d 프레임 도달 — 자동 정지" % self.record_frames)
+            self._stop_reason = "auto"
             self.toggle_record()
 
         s = self.stream.snapshot()
@@ -475,7 +562,18 @@ class CombinedGui:
                  "%s [K] IMU 보정  a%s g%s m%s" % ("[v]" if cal_ok else "[ ]", cal.get("acc", "-"), cal.get("gyr", "-"), cal.get("mag", "-")),
                  "%s [Z] 영점 (정지 %.0f s)" % ("[v]" if zero_ok else "[ ]", self.args.zero),
                  "%s [R] 녹화 (%s)" % ("[v]" if self.session_count else "[ ]",
-                                      "%d 프레임 자동 정지" % self.record_frames if self.record_frames else "수동")]
+                                      "%d 프레임 자동 정지" % self.record_frames if self.record_frames else "수동 정지: R 다시")]
+        if self.task:
+            nxt = self.episode_done + 1
+            tgt = "/%d" % self.episodes_target if self.episodes_target else ""
+            if self._recording():
+                lines.append("▶ %s 에피소드 #%d%s 녹화 중 — 방광 보이면 M, 1~2 s 정지, R 저장 · X 폐기%s"
+                             % (self.task, nxt, tgt, "  [M %d]" % len(self.events) if self.events else ""))
+            else:
+                lines.append("%s: 에피소드 %d%s 저장됨 · 다음 #%d — 방광 밖에서 R" % (self.task, self.episode_done, tgt, nxt))
+        if self.event_msg and time.time() < self.event_msg_until:
+            lines.append("")
+            lines.append(self.event_msg)
         if self.zero_msg and time.time() < self.zero_msg_until:
             lines.append("")
             lines.append(self.zero_msg)
@@ -511,6 +609,27 @@ class CombinedGui:
         return self.artists()
 
 
+def count_task_sessions(out_dir, task):
+    """out_dir 의 저장된 세션 중 session.meta.json 의 task 가 같은 것의 수 — 에피소드 번호를 이어 붙이기 위해.
+    폐기 폴더(discard_*) 는 us_imu_* 가 아니므로 세지 않는다."""
+    n = 0
+    try:
+        names = sorted(os.listdir(out_dir))
+    except OSError:
+        return 0
+    for name in names:
+        if not name.startswith("us_imu_"):
+            continue
+        p = os.path.join(out_dir, name, "session.meta.json")
+        try:
+            with open(p, encoding="utf-8") as fh:
+                if json.load(fh).get("task") == task:
+                    n += 1
+        except (OSError, ValueError):
+            continue
+    return n
+
+
 def _wait_probe(host, timeout=5.0):
     """프로브 TCP 가 잠깐 사이에 열려 있는지만 확인 (경고용, 차단하지 않음)."""
     try:
@@ -526,6 +645,10 @@ def main():
     ap.add_argument("--host", default="192.168.1.1", help="프로브 AP 주소")
     ap.add_argument("--probe", choices=sorted(PROFILES), default="sl2c", help="프로브 프로파일 (us_protocol.PROFILES)")
     ap.add_argument("--record-frames", type=int, default=0, help="이 수의 US 프레임이 저장되면 녹화 자동 정지 (0 = 수동)")
+    ap.add_argument("--task", default=None, metavar="NAME",
+                    help="에피소드 모드 — 세션 = 에피소드 하나 (예: find_bladder). 메타에 task/episode/events 를 남기고 "
+                         "번호를 out-dir 의 같은 task 세션 수에서 잇는다. 녹화 중 M = 발견 표시, X = 폐기")
+    ap.add_argument("--episodes", type=int, default=0, metavar="N", help="에피소드 목표 수 (표시용, 예: 100)")
     ap.add_argument("--display", choices=["auto", "polar", "fan"], default="auto",
                     help="표시: polar(원본) | fan(scan conversion, 저장은 원본). auto = c10ur 이면 fan")
     ap.add_argument("--fan-radius", type=float, default=59.0, help="부채꼴 반경 mm (뷰어 실측 59, R60)")

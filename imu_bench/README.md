@@ -328,6 +328,31 @@ python host\session_to_images.py logs\us_imu_20260909_163511 --every 10    # ima
 python host\session_to_images.py logs\us_imu_20260909_163511 --every 1 --polar --out D:\dump   # 극좌표 원본 전부
 ```
 
+### 에피소드 수집 — "방광 밖에서 시작해 방광을 찾는다" (`--task find_bladder --episodes 100`, 2026-09-10)
+
+1000 프레임 고정 세션 대신 **세션 하나 = 에피소드 하나, 길이 자유**. `--record-frames 0`(수동 정지) 이 원래 있던 설정이고,
+실행 스크립트가 이제 그것을 `manual` 로 받는다:
+
+```
+imu_bench\start_collect_win.cmd manual find_bladder 100     # 수동 정지 + 에피소드 모드 (task 이름, 목표 수)
+imu_bench\start_collect_win.cmd manual                       # 수동 정지만
+imu_bench\start_collect_win.cmd 1000                         # 예전 방식 (N 프레임 자동 정지)
+```
+
+에피소드 하나의 순서 (체크리스트에 그대로 뜬다):
+
+| 단계 | 동작 | 왜 |
+|---|---|---|
+| 0 | 프로브 켠 뒤 K → Z (한 번). 에피소드마다 다시 할 필요는 없다 — 단 프로브·IMU 전원을 끄면 다시 | zero_ref·자이로 보정 없이 찍힌 첫날 15 세션의 실수를 반복하지 않기 위해 |
+| 1 | 프로브를 **방광이 안 보이는 곳**에 대고 1 s 정지 → **R** | 시작 정지 구간 (라벨의 "정지 A") |
+| 2 | 정지-이동-정지로 탐색. 정지는 ≥ 0.5 s, 이동은 ≤ 1.5 s, 5–30 mm / 5–15° 씩 | ZUPT 라벨은 정지 길이에 달려 있다 (첫날: 정지 0.2–0.5 s → 잔류 속도 수십 mm/s) |
+| 3 | 방광이 보이면 **M** (발견 표시) → 1~2 s 정지 | `events[{name: found, t_pc, us_seq}]` + 마지막 정지 = "정지 B" |
+| 4 | **R** (저장). 못 찾았거나 잘못 눌렀으면 **X** (폐기 — `discard_us_imu_*` 로 이름만 바뀌고 번호는 안 올라간다) | 폐기 폴더는 동기화 루프도 리포도 무시한다 |
+
+메타(`session.meta.json`)에 `task`, `episode{index, target, outcome: found|not_marked, found_us_seq, found_t_pc}`,
+`events`, `record_stop` 이 추가된다. 에피소드 번호는 `logs/` 의 같은 task 세션 수에서 이어지므로 GUI 를 껐다 켜도 "다음
+#k" 가 맞다. 라벨 파이프라인(`policy_learning`)은 세션 길이를 가정하지 않으므로 그대로 읽는다.
+
 미해결: 공기 중에서 스트림이 **약 18 s 뒤 프로브 쪽에서 강제 종료(RST)** 되고 AP 가 잠시 사라진다 (USB+뷰어에서는
 42 프레임 뒤 정지). 접촉 자동 정지로 추정 — 젤/팬텀 접촉 상태에서 1000 프레임이 끊김 없이 오는지가 판정 기준.
 끊기면 뷰어 세션을 60 s 이상 pktmon 으로 다시 캡처해 우리가 안 보내는 메시지(예: 프로브의 `5bb50000`) 를 본다.

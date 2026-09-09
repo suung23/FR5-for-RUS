@@ -69,7 +69,8 @@ class ImuStream(threading.Thread):
                         (REC_ACCEL, REC_GYRO, REC_MAG, REC_RV, REC_FUSED, REC_TOF, REC_HALL)}
 
         self._lock = threading.Lock()
-        self._stop = threading.Event()
+        # 이름을 _stop 으로 두면 threading.Thread._stop() 메서드를 가려 join() 이 TypeError 를 낸다 (2026-09-10 실측)
+        self._stop_evt = threading.Event()
         self._capture = None          # 영점 캘리브레이션용 임시 버퍼
         self.zero = None              # ZeroReference (있으면 상대자세를 로그에 남긴다)
         self.error = None
@@ -106,7 +107,7 @@ class ImuStream(threading.Thread):
 
     # ------------------------------------------------------------------ 제어
     def stop(self):
-        self._stop.set()
+        self._stop_evt.set()
 
     def reset_align(self):
         """정렬 오프셋과 seed 를 다시 잡는다 (GUI 의 [C] 키)."""
@@ -190,7 +191,7 @@ class ImuStream(threading.Thread):
         # 빠졌다 들어오면 열기가 실패한다. 한 번 실패로 스레드가 죽으면 GUI 를 다시 켜야 하므로,
         # stop() 전까지 2 s 마다 다시 연다. 그동안 error 에 이유를 남겨 상태줄에 보이게 한다.
         ser = None
-        while not self._stop.is_set():
+        while not self._stop_evt.is_set():
             try:
                 # timeout 은 짧아야 한다. 50 ms 면 read() 한 번이 50 ms 분량(약 500 B)을
                 # 통째로 물고 오고, 그 안의 모든 레코드가 **같은 pc_ts** 를 받는다 —
@@ -203,7 +204,7 @@ class ImuStream(threading.Thread):
             except (serial.SerialException, OSError) as e:
                 with self._lock:
                     self.error = "포트를 열 수 없습니다 (2 s 후 재시도): %s" % e
-                self._stop.wait(2.0)
+                self._stop_evt.wait(2.0)
         if ser is None:
             return
 
@@ -219,7 +220,7 @@ class ImuStream(threading.Thread):
 
         last_fuse_us = None
         try:
-            while not self._stop.is_set():
+            while not self._stop_evt.is_set():
                 try:
                     data = ser.read(ser.in_waiting or 1)
                 except serial.SerialException as e:

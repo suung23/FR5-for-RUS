@@ -362,10 +362,13 @@ git pull                                    # Windows
 python imu_bench\host\flash_win.py --uf2 imu_bench\firmware\umi_device_hardware\umi_device_hardware.uf2
 ```
 
-(b) 의 원리: XIAO nRF52840 의 UF2 부트로더는 1200 bps touch(또는 리셋 두 번)에 이동식 드라이브 `XIAO-SENSE` 를 열고,
-UF2 파일을 넣으면 스스로 쓰고 재부팅한다. `flash_win.py --uf2` 가 touch → 드라이브 대기 → 복사 → 앱 포트 복귀 →
-`'V'` 로 태그 확인까지 한다. 서명이 필요한 실행파일이 하나도 없다. GUI 가 COM 포트를 잡고 있으면 touch 가 실패하므로 먼저
-닫는다. 드라이브가 열린 채 파일이 거부되면 `INFO_UF2.TXT` 의 보드/패밀리(nRF52840 = 0xADA52840)를 확인한다.
+(b) 의 원리 (2026-09-10 실측으로 확정, 보드 COM3 에 이 경로로 올렸다): 1200 bps touch 는 Adafruit 부트로더를 **시리얼
+DFU 전용** 모드(PID 0045 COM 포트만, 드라이브 없음)로 넣는다. 그래서 `flash_win.py --uf2` 는 touch → UF2 를 HEX 로 되돌려
+DFU zip 을 만들고(sd-req 0xFFFE — 0x00B6 은 init 패킷에서 거부됐다) → `python -m nordicsemi dfu serial` 로 올린다.
+`pip install adafruit-nrfutil` 이 필요한데 순수 파이썬이라 SAC 에 안 걸린다 (`Scripts\adafruit-nrfutil.exe` 런처는 막히므로
+`-m nordicsemi` 로 부른다). 이동식 드라이브 `XIAO-SENSE` 는 **리셋 버튼을 빠르게 두 번** 눌렀을 때만 열리고, 그때는 UF2
+파일을 복사만 하면 된다 — 스크립트가 드라이브가 있으면 복사, 없으면 시리얼 DFU 를 고른다. 끝나면 앱 포트 복귀 → `'V'`
+태그 확인. GUI 가 COM 포트를 잡고 있으면 touch 가 실패하므로 먼저 닫는다.
 
 **저장 위치와 형태.** 세션마다 `logs/us_imu_YYYYMMDD_HHMMSS/` 하나: `us_frames.bin` (uint8 160×512 극좌표 프레임을
 그대로 이어 붙인 것, 1000 프레임 ≈ 82 MB) + `us_index.csv` (프레임별 `pc_unix` 시각) + `imu_*.csv` (가속도/자이로/자력계/

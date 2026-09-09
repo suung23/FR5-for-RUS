@@ -85,7 +85,10 @@ def main() -> int:
     from rus_perception.utils.config import load_config
     data = load_config(args.config).section("data")
     size = tuple(int(v) for v in data["image_size"])
-    manifest = load_manifest(str(data["manifest"]), root=str(data["root"]))
+    # data.root may be null ("paths are relative to the manifest's own directory");
+    # str(None) would resolve every path against a literal "None" directory.
+    root = data.get("root")
+    manifest = load_manifest(str(data["manifest"]), root=str(root) if root else None)
 
     by_patient: dict[str, list[str]] = defaultdict(list)
     for record in manifest:

@@ -702,6 +702,67 @@ first fine-tune; the rest of the queue is for correcting what the model gets wro
 `scripts/autolabel.py run --images data/phantom_c10ur/to_label/<session>` can propose an
 initial dark-lumen contour per frame if the phantom bladder is anechoic.
 
+### What three labelling rounds actually showed (2026-09-10)
+
+144 hand-drawn masks over three rounds, each round targeting what the previous model got
+wrong. Every number below is on frames the model in that column never trained on.
+
+| | round 1 (87) | round 2 (117) | round 3 (144) |
+|---|---|---|---|
+| full contact (A-line coupling ≥ 0.90), n=84 | 0.919 | 0.925 | **0.929** |
+| partial contact 0.70–0.90, n=36 | 0.793 | 0.816 | 0.800 |
+| partial contact < 0.70, n=24 | 0.435 | 0.594 | **0.742** |
+| frames a human marked "no bladder", n=14 | 1/14 abstained | 5/14 | **8/14** |
+
+Three findings decided where the labels went.
+
+**The label queue must be ranked by something that correlates with error.**
+`segmentation_confidence` (`mean|2p-1|`) does not: it is *maximal* on an empty prediction,
+so its top rank is the frames where the probe is in the air. Measured against the Dice of
+the hand-drawn frames: neighbour-frame mask IoU r = +0.69, `mean_boundary_entropy` r = −0.64,
+`segmentation_confidence` r = +0.51, `control_quality_score` r = +0.12. The queues for rounds
+2 and 3 were ranked by `z(boundary entropy) + z(1 − neighbour IoU)`.
+
+**Contact is an A-line property, and it explains the residual error.** The near field
+(depth samples 0–48) is transducer ring-down and is bright *in air* (measured: air 89,
+contact 89) — brightness of the scan-converted image says nothing about coupling. The
+mid-field (samples 48–160) does: air 6, contact 55. Over the 20 sessions, 70.0 % of frames
+are fully coupled, 27.1 % partially, 2.9 % not at all. Dice falls monotonically with
+coupling, and every frame a human marked "no bladder" is a partial-contact frame — that
+band holds nearly all of the remaining error, and no threshold separates "draw it" from
+"nothing here" (a human drew at coupling 0.54 and abstained at 0.78). Round 3 therefore
+sampled 32 frames stratified across coupling 0.30–0.85.
+
+**Self-training needs negatives or it forgets how to abstain.** Adding 231 high-confidence
+pseudo-labels raised Dice slightly and destroyed abstention: predictions on the 666
+no-contact frames went 160 → 315 → 631, because every added label had a mask on it. Adding
+99 empty masks from air frames brought it back to 35 with no Dice cost. Pseudo-label
+positives are now taken from fully-coupled frames only — the partial band is learned from
+human labels alone.
+
+```
+python scripts/phantom_training_sets.py contact                      # A-line coupling → contact_alines.npz
+python scripts/phantom_training_sets.py sets   --run runs/<previous> # → manifest_train.csv + pseudo_pos/ + pseudo_neg/
+python scripts/train.py --config configs/phantom_c10ur_finetune.yaml \
+    --manifest data/phantom_c10ur/manifest_train.csv \
+    --init-weights checkpoints/pfus_bladder_edit_man/best.pt --output-dir checkpoints/phantom_c10ur_r3
+python scripts/infer.py  --config configs/phantom_c10ur_finetune.yaml \
+    --checkpoint checkpoints/phantom_c10ur_r3/best.pt --output-dir runs/phantom_c10ur_r3
+python scripts/phantom_training_sets.py export --run runs/phantom_c10ur_r3   # → masks_final/ + manifest_masked.csv
+```
+
+`export` writes one mask per frame — the human's where one exists, otherwise the model's —
+and blanks a prediction when the physics says there is nothing to segment: no contact
+(540 frames), the mask sitting mostly outside the coupled A-lines (1), or an area below the
+smallest human-drawn mask (91). 902 of 19,708 frames end up empty. `manifest_masked.csv`
+carries `label_source`, `zeroed_reason`, `contact_ratio` and `valid_for_control` so
+downstream training can weight or drop the weak frames.
+
+The config also gains a measured imaged-sector ROI (`configs/roi/phantom_c10ur_sector_256.npy`,
+`scripts/derive_roi_mask.py`, 53.6 % of the frame, per-session IoU ≥ 0.96). Without it
+`segmentation_confidence` averages over the black corners the scan conversion never writes,
+where any model is trivially certain, and `border_contact_ratio` can never fire.
+
 ## Real data: the PFUS pelvic-floor dataset
 
 `scripts/prepare_pfus.py` converts the public **PFUS** dataset into this

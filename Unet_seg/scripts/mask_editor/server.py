@@ -5,6 +5,7 @@ experiments/label_review/mask_editor 는 PFUS GT 를 *덜어내는* 용도로 �
 `scripts/prepare_phantom_sessions.py` 가 만든 데이터셋(또는 같은 형식의 어떤 것)에 붙어 **처음부터 그리는** 편집기다.
 
     python scripts/mask_editor/server.py --data data/phantom_c10ur --queue     # label_queue.csv 의 프레임만
+    python scripts/mask_editor/server.py --data data/phantom_c10ur --queue --queue-file label_queue_round2.csv
     python scripts/mask_editor/server.py --data data/phantom_c10ur             # manifest 의 모든 프레임
     → http://127.0.0.1:8778
 
@@ -34,12 +35,12 @@ PROG = ""
 FRAMES: dict[str, list[dict]] = {}
 
 
-def load_frames(data: str, queue_only: bool) -> None:
+def load_frames(data: str, queue_only: bool, queue_name: str = "label_queue.csv") -> None:
     man = os.path.join(data, "manifest.csv")
     rows = list(csv.DictReader(open(man, encoding="utf-8")))
     keep = None
     if queue_only:
-        qp = os.path.join(data, "label_queue.csv")
+        qp = queue_name if os.path.isabs(queue_name) else os.path.join(data, queue_name)
         keep = {(r["patient_id"], int(r["frame_index"])) for r in csv.DictReader(open(qp, encoding="utf-8"))}
     for r in rows:
         key = (r["patient_id"], int(r["frame_index"]))
@@ -152,14 +153,16 @@ def main() -> int:
     global DATA, MASKS, PROG
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data", required=True, help="manifest.csv 가 있는 데이터셋 폴더")
-    ap.add_argument("--queue", action="store_true", help="label_queue.csv 의 프레임만")
+    ap.add_argument("--queue", action="store_true", help="라벨 큐 CSV 의 프레임만")
+    ap.add_argument("--queue-file", default="label_queue.csv",
+                    help="큐 CSV (데이터 폴더 기준 상대경로 또는 절대경로). 라운드마다 큐를 갈아끼울 때 쓴다")
     ap.add_argument("--port", type=int, default=8778)
     a = ap.parse_args()
     DATA = os.path.abspath(a.data)
     MASKS = os.path.join(DATA, "masks")
     PROG = os.path.join(MASKS, "progress.json")
     os.makedirs(MASKS, exist_ok=True)
-    load_frames(DATA, a.queue)
+    load_frames(DATA, a.queue, a.queue_file)
     if not FRAMES:
         print("프레임이 없습니다. prepare_phantom_sessions.py 를 먼저 실행하십시오.")
         return 1

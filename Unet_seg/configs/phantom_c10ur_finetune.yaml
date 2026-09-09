@@ -79,3 +79,15 @@ evaluation:
   split: test
   compute_hd95: true
   pixel_spacing: 1.0             # px; fan geometry gives ≈ 0.86 mm/px at 256² for a 220 mm depth (unverified)
+
+# The imaged sector, measured from the data by scripts/derive_roi_mask.py (2026-09-10,
+# 14 train sessions, per-session IoU vs consensus min 0.96 / median 0.998; covers 53.6 %
+# of the frame). Without it segmentation_confidence averages |2p-1| over the black
+# corners the scan conversion never writes, which any model calls background with total
+# certainty — the score then hides hedging at the lumen boundary, which is exactly what
+# the pseudo-label triage needs to see. Also fixes border_contact_ratio and mask_area_ratio.
+control:
+  roi:
+    mode: file
+    path: configs/roi/phantom_c10ur_sector_256.npy
+    erode_px: 2

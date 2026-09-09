@@ -22,3 +22,108 @@ session_dir,subject,source,split,note
 ../../imu_bench/logs/us_imu_20260909_181722,P01,freehand,train,day1 evening
 ../../imu_bench/logs/us_imu_20260909_182055,P01,freehand,train,day1 evening
 ../../imu_bench/logs/us_imu_20260909_182305,P01,freehand,test,day1 evening (673 frames, stopped early)
+# 2026-09-10 find_bladder 에피소드 100 개 (01:49–02:27, 같은 팬텀 P01). 세션 = 에피소드 (길이 6–34 s, 중앙값 11 s).
+# 규약: 방광 밖에서 R → 정지-이동-정지 탐색 → 방광이 보이면 1~2 s 정지 → R. M(발견 표시)은 안 눌러 found_marker=implicit_end.
+# 영점(Z) 없음 (전 세션, 정지 표본으로 규약 추정), 보정 a3 g3 m2 rv3, 펌웨어 2026-09-10-dcd, DCD 는 #6 부터 저장.
+# #80–#100 은 force_only — 자세 고정, 접촉 힘만 변화 (IMU 변화 없음, 힘 미기록): Q_raw 반응 관찰용, 이동 라벨에는 기여 없음.
+# split: idx%10==0 test, idx%5==0 val, 나머지 train (에피소드 단위).
+../../imu_bench/logs/us_imu_20260910_014903,P01,freehand,train,ep001 find_bladder
+../../imu_bench/logs/us_imu_20260910_014931,P01,freehand,train,ep002 find_bladder
+../../imu_bench/logs/us_imu_20260910_015000,P01,freehand,train,ep003 find_bladder
+../../imu_bench/logs/us_imu_20260910_015026,P01,freehand,train,ep004 find_bladder
+../../imu_bench/logs/us_imu_20260910_015047,P01,freehand,val,ep005 find_bladder
+../../imu_bench/logs/us_imu_20260910_015706,P01,freehand,train,ep006 find_bladder
+../../imu_bench/logs/us_imu_20260910_015728,P01,freehand,train,ep007 find_bladder
+../../imu_bench/logs/us_imu_20260910_015746,P01,freehand,train,ep008 find_bladder
+../../imu_bench/logs/us_imu_20260910_015804,P01,freehand,train,ep009 find_bladder
+../../imu_bench/logs/us_imu_20260910_015823,P01,freehand,test,ep010 find_bladder
+../../imu_bench/logs/us_imu_20260910_015844,P01,freehand,train,ep011 find_bladder
+../../imu_bench/logs/us_imu_20260910_015912,P01,freehand,train,ep012 find_bladder
+../../imu_bench/logs/us_imu_20260910_015930,P01,freehand,train,ep013 find_bladder
+../../imu_bench/logs/us_imu_20260910_015954,P01,freehand,train,ep014 find_bladder
+../../imu_bench/logs/us_imu_20260910_020011,P01,freehand,val,ep015 find_bladder
+../../imu_bench/logs/us_imu_20260910_020027,P01,freehand,train,ep016 find_bladder
+../../imu_bench/logs/us_imu_20260910_020045,P01,freehand,train,ep017 find_bladder
+../../imu_bench/logs/us_imu_20260910_020100,P01,freehand,train,ep018 find_bladder
+../../imu_bench/logs/us_imu_20260910_020118,P01,freehand,train,ep019 find_bladder
+../../imu_bench/logs/us_imu_20260910_020135,P01,freehand,test,ep020 find_bladder
+../../imu_bench/logs/us_imu_20260910_020149,P01,freehand,train,ep021 find_bladder
+../../imu_bench/logs/us_imu_20260910_020202,P01,freehand,train,ep022 find_bladder
+../../imu_bench/logs/us_imu_20260910_020218,P01,freehand,train,ep023 find_bladder
+../../imu_bench/logs/us_imu_20260910_020235,P01,freehand,train,ep024 find_bladder
+../../imu_bench/logs/us_imu_20260910_020259,P01,freehand,val,ep025 find_bladder
+../../imu_bench/logs/us_imu_20260910_020313,P01,freehand,train,ep026 find_bladder
+../../imu_bench/logs/us_imu_20260910_020331,P01,freehand,train,ep027 find_bladder
+../../imu_bench/logs/us_imu_20260910_020349,P01,freehand,train,ep028 find_bladder
+../../imu_bench/logs/us_imu_20260910_020405,P01,freehand,train,ep029 find_bladder
+../../imu_bench/logs/us_imu_20260910_020420,P01,freehand,test,ep030 find_bladder
+../../imu_bench/logs/us_imu_20260910_020435,P01,freehand,train,ep031 find_bladder
+../../imu_bench/logs/us_imu_20260910_020450,P01,freehand,train,ep032 find_bladder
+../../imu_bench/logs/us_imu_20260910_020505,P01,freehand,train,ep033 find_bladder
+../../imu_bench/logs/us_imu_20260910_020521,P01,freehand,train,ep034 find_bladder
+../../imu_bench/logs/us_imu_20260910_020535,P01,freehand,val,ep035 find_bladder
+../../imu_bench/logs/us_imu_20260910_020551,P01,freehand,train,ep036 find_bladder
+../../imu_bench/logs/us_imu_20260910_020607,P01,freehand,train,ep037 find_bladder
+../../imu_bench/logs/us_imu_20260910_020622,P01,freehand,train,ep038 find_bladder
+../../imu_bench/logs/us_imu_20260910_020641,P01,freehand,train,ep039 find_bladder
+../../imu_bench/logs/us_imu_20260910_020656,P01,freehand,test,ep040 find_bladder
+../../imu_bench/logs/us_imu_20260910_020711,P01,freehand,train,ep041 find_bladder
+../../imu_bench/logs/us_imu_20260910_020728,P01,freehand,train,ep042 find_bladder
+../../imu_bench/logs/us_imu_20260910_020748,P01,freehand,train,ep043 find_bladder
+../../imu_bench/logs/us_imu_20260910_020809,P01,freehand,train,ep044 find_bladder
+../../imu_bench/logs/us_imu_20260910_020828,P01,freehand,val,ep045 find_bladder
+../../imu_bench/logs/us_imu_20260910_020847,P01,freehand,train,ep046 find_bladder
+../../imu_bench/logs/us_imu_20260910_020907,P01,freehand,train,ep047 find_bladder
+../../imu_bench/logs/us_imu_20260910_020927,P01,freehand,train,ep048 find_bladder
+../../imu_bench/logs/us_imu_20260910_020945,P01,freehand,train,ep049 find_bladder
+../../imu_bench/logs/us_imu_20260910_021001,P01,freehand,test,ep050 find_bladder
+../../imu_bench/logs/us_imu_20260910_021016,P01,freehand,train,ep051 find_bladder
+../../imu_bench/logs/us_imu_20260910_021033,P01,freehand,train,ep052 find_bladder
+../../imu_bench/logs/us_imu_20260910_021048,P01,freehand,train,ep053 find_bladder
+../../imu_bench/logs/us_imu_20260910_021105,P01,freehand,train,ep054 find_bladder
+../../imu_bench/logs/us_imu_20260910_021123,P01,freehand,val,ep055 find_bladder
+../../imu_bench/logs/us_imu_20260910_021139,P01,freehand,train,ep056 find_bladder
+../../imu_bench/logs/us_imu_20260910_021202,P01,freehand,train,ep057 find_bladder
+../../imu_bench/logs/us_imu_20260910_021227,P01,freehand,train,ep058 find_bladder
+../../imu_bench/logs/us_imu_20260910_021250,P01,freehand,train,ep059 find_bladder; us_stalled 11 frames
+../../imu_bench/logs/us_imu_20260910_021322,P01,freehand,test,ep060 find_bladder
+../../imu_bench/logs/us_imu_20260910_021402,P01,freehand,train,ep061 find_bladder
+../../imu_bench/logs/us_imu_20260910_021430,P01,freehand,train,ep062 find_bladder
+../../imu_bench/logs/us_imu_20260910_021455,P01,freehand,train,ep063 find_bladder
+../../imu_bench/logs/us_imu_20260910_021516,P01,freehand,train,ep064 find_bladder
+../../imu_bench/logs/us_imu_20260910_021538,P01,freehand,val,ep065 find_bladder
+../../imu_bench/logs/us_imu_20260910_021552,P01,freehand,train,ep066 find_bladder
+../../imu_bench/logs/us_imu_20260910_021605,P01,freehand,train,ep067 find_bladder
+../../imu_bench/logs/us_imu_20260910_021632,P01,freehand,train,ep068 find_bladder
+../../imu_bench/logs/us_imu_20260910_021653,P01,freehand,train,ep069 find_bladder
+../../imu_bench/logs/us_imu_20260910_021714,P01,freehand,test,ep070 find_bladder
+../../imu_bench/logs/us_imu_20260910_021743,P01,freehand,train,ep071 find_bladder
+../../imu_bench/logs/us_imu_20260910_021804,P01,freehand,train,ep072 find_bladder
+../../imu_bench/logs/us_imu_20260910_021828,P01,freehand,train,ep073 find_bladder
+../../imu_bench/logs/us_imu_20260910_021853,P01,freehand,train,ep074 find_bladder
+../../imu_bench/logs/us_imu_20260910_021915,P01,freehand,val,ep075 find_bladder
+../../imu_bench/logs/us_imu_20260910_021946,P01,freehand,train,ep076 find_bladder
+../../imu_bench/logs/us_imu_20260910_022011,P01,freehand,train,ep077 find_bladder
+../../imu_bench/logs/us_imu_20260910_022036,P01,freehand,train,ep078 find_bladder
+../../imu_bench/logs/us_imu_20260910_022102,P01,freehand,train,ep079 find_bladder
+../../imu_bench/logs/us_imu_20260910_022211,P01,freehand,train,ep080 find_bladder; force_only (rotation fixed, pressure varied; IMU unchanged; for Q_raw)
+../../imu_bench/logs/us_imu_20260910_022230,P01,freehand,train,ep081 find_bladder; force_only (rotation fixed, pressure varied; IMU unchanged; for Q_raw)
+../../imu_bench/logs/us_imu_20260910_022248,P01,freehand,train,ep082 find_bladder; force_only (rotation fixed, pressure varied; IMU unchanged; for Q_raw)
+../../imu_bench/logs/us_imu_20260910_022305,P01,freehand,train,ep083 find_bladder; force_only (rotation fixed, pressure varied; IMU unchanged; for Q_raw)
+../../imu_bench/logs/us_imu_20260910_022325,P01,freehand,train,ep084 find_bladder; force_only (rotation fixed, pressure varied; IMU unchanged; for Q_raw)
+../../imu_bench/logs/us_imu_20260910_022347,P01,freehand,train,ep085 find_bladder; force_only (rotation fixed, pressure varied; IMU unchanged; for Q_raw)
+../../imu_bench/logs/us_imu_20260910_022406,P01,freehand,train,ep086 find_bladder; force_only (rotation fixed, pressure varied; IMU unchanged; for Q_raw)
+../../imu_bench/logs/us_imu_20260910_022420,P01,freehand,train,ep087 find_bladder; force_only (rotation fixed, pressure varied; IMU unchanged; for Q_raw)
+../../imu_bench/logs/us_imu_20260910_022434,P01,freehand,train,ep088 find_bladder; force_only (rotation fixed, pressure varied; IMU unchanged; for Q_raw)
+../../imu_bench/logs/us_imu_20260910_022453,P01,freehand,train,ep089 find_bladder; force_only (rotation fixed, pressure varied; IMU unchanged; for Q_raw)
+../../imu_bench/logs/us_imu_20260910_022505,P01,freehand,train,ep090 find_bladder; force_only (rotation fixed, pressure varied; IMU unchanged; for Q_raw)
+../../imu_bench/logs/us_imu_20260910_022520,P01,freehand,train,ep091 find_bladder; force_only (rotation fixed, pressure varied; IMU unchanged; for Q_raw)
+../../imu_bench/logs/us_imu_20260910_022534,P01,freehand,train,ep092 find_bladder; force_only (rotation fixed, pressure varied; IMU unchanged; for Q_raw)
+../../imu_bench/logs/us_imu_20260910_022546,P01,freehand,train,ep093 find_bladder; force_only (rotation fixed, pressure varied; IMU unchanged; for Q_raw)
+../../imu_bench/logs/us_imu_20260910_022559,P01,freehand,train,ep094 find_bladder; force_only (rotation fixed, pressure varied; IMU unchanged; for Q_raw)
+../../imu_bench/logs/us_imu_20260910_022611,P01,freehand,train,ep095 find_bladder; force_only (rotation fixed, pressure varied; IMU unchanged; for Q_raw)
+../../imu_bench/logs/us_imu_20260910_022625,P01,freehand,train,ep096 find_bladder; force_only (rotation fixed, pressure varied; IMU unchanged; for Q_raw)
+../../imu_bench/logs/us_imu_20260910_022636,P01,freehand,train,ep097 find_bladder; force_only (rotation fixed, pressure varied; IMU unchanged; for Q_raw)
+../../imu_bench/logs/us_imu_20260910_022649,P01,freehand,train,ep098 find_bladder; force_only (rotation fixed, pressure varied; IMU unchanged; for Q_raw)
+../../imu_bench/logs/us_imu_20260910_022703,P01,freehand,train,ep099 find_bladder; force_only (rotation fixed, pressure varied; IMU unchanged; for Q_raw)
+../../imu_bench/logs/us_imu_20260910_022714,P01,freehand,train,ep100 find_bladder; force_only (rotation fixed, pressure varied; IMU unchanged; for Q_raw)

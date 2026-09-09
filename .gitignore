@@ -26,17 +26,9 @@ imu_bench/mag_cal.json
 # 수집 세션 원시 로그. 세션당 수백 MB 라 리포에 담지 않는다 — qc_track/.gitignore 와
 # 같은 정책이다 (보존은 archive 로 따로). 2026-08-21 에 152 MB / 101 MB CSV 두 개가
 # GitHub 하드 리밋(100 MB)에 걸려 push 가 거부되면서 규칙이 한쪽에만 있었음을 알았다.
-imu_bench/logs/*
-# 2026-09-09 예외: C10UR 팬텀 세션 (각 ~90 MB, us_frames.bin 82 MB < 100 MB 하드 리밋) 은 리눅스 학습 머신에서
-# 라벨링·파인튜닝을 잇기 위해 담는다 (15 세션 ≈ 1.37 GB). 빈/깨진 시험 세션과 내보낸 PNG 는 제외.
-!imu_bench/logs/us_imu_2026*/
-imu_bench/logs/us_imu_*/images/
-imu_bench/logs/us_imu_20260909_151006/
-imu_bench/logs/us_imu_20260909_151033/
-imu_bench/logs/us_imu_20260909_151517/
-imu_bench/logs/us_imu_20260909_154847/
-imu_bench/logs/us_imu_20260909_155517/
-imu_bench/logs/us_imu_20260909_155722/
+imu_bench/logs/
+# 2026-09-09 의 첫날 21 세션(1.9 GB) 만 예외로 담겼고 그대로 남는다(추적 중인 파일은 이 규칙과 무관).
+# 2026-09-10 부터 세션은 git 에 넣지 않는다 — 랜선으로 리눅스 PC 에 보낸다: imu_bench/push_sessions_win.cmd
 
 # Electron/npm 의존성. package-lock.json 으로 재현되므로 리포에 담지 않는다.
 # 2026-08-29 에 teleop_gui/node_modules 12,552 개가 4ca145d 에 통째로 커밋되면서

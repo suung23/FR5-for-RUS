@@ -16,7 +16,7 @@
     type %USERPROFILE%\\.ssh\\id_ed25519.pub | ssh rosotauser@192.168.77.1 "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys"
 키가 없으면 이 스크립트는 바로 멈춘다 (BatchMode). 위 두 줄은 비밀번호를 한 번만 묻는다.
 
-보내는 것: us_imu_* 중 프레임 ≥100 인 세션 폴더 전체 (images/ 제외). 이미 리눅스에 같은 크기의 us_frames.bin 이 있으면 건너뛴다.
+보내는 것: us_imu_* 중 프레임 ≥10 인 세션 폴더 전체 (에피소드 포함, images/ 제외). 이미 리눅스에 같은 크기의 us_frames.bin 이 있으면 건너뛴다.
 """
 
 from __future__ import annotations
@@ -47,7 +47,8 @@ def reachable(host: str, user: str) -> bool:
         return False
 
 
-def local_sessions(min_frames: int = 100) -> list[Path]:
+def local_sessions(min_frames: int = 10) -> list[Path]:
+    """session.meta.json 이 있고 프레임이 min_frames 이상인 세션 (에피소드 모드의 60–300 프레임 세션 포함)."""
     out = []
     for d in sorted(LOGS.glob("us_imu_*")):
         fb = d / "us_frames.bin"

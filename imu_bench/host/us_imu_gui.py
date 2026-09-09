@@ -90,6 +90,32 @@ def calib_ready(cal: dict) -> bool:
     return all((cal.get(k) or 0) >= v for k, v in CAL_MIN.items() if k != "mag")
 
 
+def _display_units(s: str) -> int:
+    """한글·CJK 는 2, 나머지는 1 — 패널 폭 계산용 (글꼴 폭의 대략값)."""
+    import unicodedata
+    return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in s)
+
+
+def wrap_panel_lines(lines, max_units: int = 84):
+    """안내 패널 폭을 넘는 줄을 공백에서 접는다 (이어지는 줄은 두 칸 들여쓰기). 영상 옆 IMU 그래프를 덮지 않기 위해."""
+    out = []
+    for line in lines:
+        if _display_units(line) <= max_units:
+            out.append(line)
+            continue
+        words, cur = line.split(" "), ""
+        for w in words:
+            cand = (cur + " " + w) if cur else w
+            if cur and _display_units(cand) > max_units:
+                out.append(cur)
+                cur = "  " + w
+            else:
+                cur = cand
+        if cur:
+            out.append(cur)
+    return out
+
+
 def calib_step(cal: dict, dcd_saved: bool = False) -> str:
     """현재 칩 보정 상태에서 다음에 할 동작 (BNO085 동적 보정 절차)."""
     g, a, m, rv = (cal.get("gyr") or 0), (cal.get("acc") or 0), (cal.get("mag") or 0), (cal.get("rv") or 0)
@@ -305,8 +331,10 @@ class CombinedGui:
                                    hspace=0.45, wspace=0.28,
                                    left=0.03, right=0.98, top=0.90, bottom=0.07)
 
-        # 왼쪽: 초음파 영상 (세로 전체)
-        self.us_ax = self.fig.add_subplot(gs[:, 0])
+        # 왼쪽: 초음파 영상 (위) + 안내 패널 (아래). 체크리스트·보정 안내·메시지는 전부 아래 패널에 그린다 —
+        # 영상 위에 겹치면 방광을 찾는 동안 화면을 가린다 (2026-09-10).
+        left = gs[:, 0].subgridspec(2, 1, height_ratios=(2.3, 1.0), hspace=0.05)
+        self.us_ax = self.fig.add_subplot(left[0])
         self.us_ax.set_title("초음파 candidate [%s %s%s] — 표시 방향 %s"
                              % (getattr(us, "profile", SL2C).name, "x".join(map(str, self.frame_shape)),
                                 " → 부채꼴 R%.0f/%.0f°/%.0fmm" % (args.fan_radius, args.fan_angle, args.fan_depth)
@@ -320,10 +348,12 @@ class CombinedGui:
         self.us_text = self.us_ax.text(
             0.5, 0.5, "US 프레임 대기...", color="#8ab4ff", ha="center", va="center",
             transform=self.us_ax.transAxes, fontsize=12)
-        # 세션 시작 체크리스트 (보정 → 영점 → 녹화). 셋 다 끝나면 작게 남는다.
-        self.checklist = self.us_ax.text(
-            0.02, 0.98, "", color="#ffd27a", ha="left", va="top", transform=self.us_ax.transAxes, fontsize=10,
-            bbox=dict(boxstyle="round,pad=0.35", fc="black", ec="#ffd27a", alpha=0.75))
+        # 세션 시작 체크리스트 (펌웨어 → 보정 → DCD → 영점 → 녹화) 와 안내·메시지 — 영상 아래 전용 패널
+        self.panel_ax = self.fig.add_subplot(left[1])
+        self.panel_ax.set_axis_off()
+        self.checklist = self.panel_ax.text(
+            0.0, 1.0, "", color="#ffd27a", ha="left", va="top", transform=self.panel_ax.transAxes, fontsize=9,
+            linespacing=1.22, bbox=dict(boxstyle="round,pad=0.4", fc="#141414", ec="#ffd27a", alpha=0.95))
         self.calib_mode = False
         self.calib_started = None
         self.zero_msg = ""
@@ -349,9 +379,10 @@ class CombinedGui:
                                colors=("#8a5cf6",), labels=("Δ",), min_span=2.0)
 
         self.status = self.fig.text(0.03, 0.965, "", fontsize=9, va="top")
-        self.fig.text(0.98, 0.965,
-                      "[K] IMU 보정 안내   [Z] 영점   [R] 녹화 시작/정지 (US+IMU 동시)   [F] 스캔 시작/정지   [C] 자세 재설정   [Q] 종료",
-                      fontsize=9, ha="right", va="top", alpha=0.75)
+        # 키 안내는 아래 여백에 — 위쪽 상태줄과 겹치지 않게 (2026-09-10)
+        self.fig.text(0.98, 0.012,
+                      "[K] 보정 안내  [S] DCD 저장  [Z] 영점  [R] 녹화 시작/정지  [M] 발견 표시  [X] 폐기  [F] 스캔  [C] 자세 재설정  [Q] 종료",
+                      fontsize=9, ha="right", va="bottom", alpha=0.75)
         self.fig.canvas.mpl_connect("key_press_event", self.on_key)
 
     # -------------------------------------------------------------- 입력
@@ -653,26 +684,21 @@ class CombinedGui:
             else:
                 lines.append("%s: 에피소드 %d%s 저장됨 · 다음 #%d — 방광 밖에서 R" % (self.task, self.episode_done, tgt, nxt))
         if self.event_msg and time.time() < self.event_msg_until:
-            lines.append("")
             lines.append(self.event_msg)
         if self.zero_msg and time.time() < self.zero_msg_until:
-            lines.append("")
             lines.append(self.zero_msg)
         info = s.get("last_info")
         if info and time.time() - info[1] < 6.0 and info[0].startswith(("DCD,", "CAL,")):
-            lines.append("")
             lines.append({"DCD,OK": "✔ DCD 저장 완료 — 칩 플래시에 기록됨 (전원 재인가 후에도 유지)",
                           "DCD,FAIL": "✘ DCD 저장 실패 — 칩이 거부. 보정을 다시 하고 S",
                           "CAL,OK": "동적 보정 재적용 OK", "CAL,FAIL": "동적 보정 재적용 실패"}.get(info[0], info[0]))
         if self.calib_mode:
-            lines.append("")
             lines.append("보정 안내: " + calib_step(cal, dcd_ok))
             if cal_ok and (cal.get("acc") or 0) >= 3 and dcd_ok:
                 lines.append("(K 로 안내 닫기)")
         elif not cal_ok:
-            lines.append("")
             lines.append("K 를 눌러 보정 안내를 여십시오")
-        self.checklist.set_text("\n".join(lines))
+        self.checklist.set_text("\n".join(wrap_panel_lines(lines)))
         rec = "● 녹화중 #%d" % self.session_count if (self.stream.logger or self.us.recording) else \
             ("○ 대기 (세션 %d 저장됨)" % self.session_count if self.session_count else "○ 대기")
         rec_detail = ""

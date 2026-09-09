@@ -18,7 +18,7 @@
     C  자세 재설정 — 호스트 퓨전 프레임 정렬을 다시 잡는다.
     Q  종료.
 
-프로브 (`--probe`, 2026-09-09): sl2c (기본, 256×256) | c10ur (Konted, Wi-Fi AP "US-1C …", 320 라인 × 256 깊이 표본의
+프로브 (`--probe`, 2026-09-09): sl2c (기본, 256×256) | c10ur (Konted, Wi-Fi AP "US-1C …", 160 라인 × 512 깊이 표본의
 극좌표 candidate, 10 fps, 시작/정지 명령 있음). 상세는 fr5_vision/us_protocol.py 의 ProbeProfile.
 Windows 에서는 IMU 포트를 비우면 VID 2886 의 COM 포트를 자동으로 잡는다.
 

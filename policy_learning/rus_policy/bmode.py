@@ -2,7 +2,8 @@
 
 두 종류의 세션이 있다:
   * SL-2C (Wi-Fi, 256×256): 뷰어가 이미 scan conversion 한 B-mode candidate. 방향만 미검증 → `frame_transform` 만 적용.
-  * C10UR (Wi-Fi 원시, 320×256): **극좌표** (행 = A-line, 열 = 깊이 표본). U-Net·Q_seg 는 부채꼴 B-mode 를 기대하므로
+  * C10UR (Wi-Fi 원시, 160×512): **극좌표** (행 = A-line, 열 = 깊이 표본).
+    (2026-09-09 저녁까지 320×256 으로 적혀 있었다 — 같은 바이트 수라 읽히지만 라인이 두 행으로 쪼개진 잘못된 배치다.) U-Net·Q_seg 는 부채꼴 B-mode 를 기대하므로
     `imu_bench/host/us_scan_convert.py` 로 부채꼴을 만든 뒤 정방형 레터박스로 `perception.frame_size` 에 맞춘다.
     기하는 `session.meta.json` 의 `us.fan_geometry` (GUI 가 기록) 를 쓰고, 없으면 기본값 (R 59 mm / 28° / 220 mm).
     비등방 리사이즈는 하지 않는다 — 부채꼴의 원 기하(Q_raw fan 반경) 를 지키기 위해.
@@ -28,7 +29,7 @@ def is_polar_session(meta: dict[str, Any], frame_shape: tuple[int, int]) -> bool
     us = meta.get("us") or {}
     if us.get("fan_geometry"):
         return True
-    return str(us.get("probe", "")).lower() == "c10ur" or tuple(frame_shape) == (320, 256)
+    return str(us.get("probe", "")).lower() == "c10ur" or tuple(frame_shape) in ((160, 512), (320, 256))
 
 
 def fan_geometry_from_meta(meta: dict[str, Any]):
@@ -71,7 +72,7 @@ class BmodeConverter:
 
             self.geometry = fan_geometry_from_meta(meta)
             # 부채꼴을 supersample × out_size 높이로 만든 뒤 (폭 ≈ 1.16 × 높이) 면적 평균으로 정방형 레터박스.
-            # out_size 로 바로 만들면 근거리에서 320 라인이 픽셀보다 촘촘해 모아레가 생긴다 (2026-09-09 실측: 256 직접
+            # out_size 로 바로 만들면 근거리에서 512 깊이 표본·160 라인이 픽셀보다 촘촘해 모아레가 생긴다 (2026-09-09 실측: 256 직접
             # 변환은 줄무늬가 심하고 512→256 면적 평균은 깨끗하다).
             self._conv = ScanConverter(self.geometry, frame_shape[0], frame_shape[1],
                                        out_h=self.supersample * self.out_size)

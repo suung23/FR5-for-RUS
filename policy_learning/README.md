@@ -97,7 +97,7 @@ python -m pytest            # 45 tests, CPU 1–2 분
 | `imu.still_gyro_sd / still_gyro_mean / still_accel_sd` | 프리핸드 정지 판정 임계 | `inspect_session.py` 의 분위수 표. qc_common 값은 로봇용이라 손에는 너무 빡빡하다 |
 | `perception.frame_transform` | candidate 프레임 방향 (scan conversion 검증 전) | `us_protocol.py` ⏳ |
 | `split.allow_subject_overlap` | 피험자 1 명 파일럿(첫날 15 세션, `data/sessions.csv`) 은 세션 단위 split — 누수 검사를 경고로 낮춘다. val/test 는 같은 사람 안의 재현성만 잰다 | `--set split.allow_subject_overlap=true` |
-| (자동) C10UR 극좌표 → B-mode | 320×256 극좌표 세션은 `rus_policy/bmode.py` 가 `us.fan_geometry` 로 부채꼴을 만들고 정방형 레터박스 → `frame_size`. 라인 좌우(`flip_lines`) 는 팬텀으로 검증 ⏳ | `build_dataset` / `perceive_session` 이 자동 적용, 캐시 키에 포함 |
+| (자동) C10UR 극좌표 → B-mode | 160×512 극좌표 세션은 (2026-09-09 저녁까지 메타에 320×256 으로 잘못 적혀 있었다 — 같은 바이트 수, 라인이 두 행으로 쪼개진 배치) `rus_policy/bmode.py` 가 `us.fan_geometry` 로 부채꼴을 만들고 정방형 레터박스 → `frame_size`. 라인 좌우(`flip_lines`) 는 팬텀으로 검증 ⏳ | `build_dataset` / `perceive_session` 이 자동 적용, 캐시 키에 포함 |
 | `paths.unet_checkpoint` | Q_seg 를 만드는 U-Net | 학습 머신 |
 | `offset_filter.sigma_q` | 정규화 면적의 프레임간 잡음 (호흡·변형 포함). 필터의 사각지대를 정한다 | 정지 구간에서 `Q_area` 의 표준편차 (`inspect_session` 항목 예정) |
 

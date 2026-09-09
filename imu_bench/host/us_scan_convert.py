@@ -1,6 +1,6 @@
 """극좌표 candidate (라인 × 깊이 표본) → 부채꼴 B-mode (scan conversion). 표시·후처리용.
 
-C10UR 의 Wi-Fi 프레임은 320 라인 × 256 깊이 표본이다 (`us_protocol.C10UR`). 행 = A-line, 행 시작 = 근거리.
+C10UR 의 Wi-Fi 프레임은 160 라인 × 512 깊이 표본이다 (`us_protocol.C10UR`; 블록 1 개 = A-line 1 개). 행 = A-line, 행 시작 = 근거리.
 부채꼴 기하는 2026-09-09 뷰어(WirelessUSG) 화면에서 실측했다 — apex·옆변 직선 적합:
 
     반경 R ≈ 59 mm (뷰어 프로브 종류 "凸阵R60" 과 일치), 반각 ≈ 28°, 깊이 220 mm (뷰어 D:220mm)

@@ -5,9 +5,14 @@
     python imu_bench\\host\\session_to_images.py <session_dir> --every 10       # 10 프레임마다 PNG 로 (fan)
     python imu_bench\\host\\session_to_images.py <session_dir> --every 1 --polar --out D:\\dump
     python imu_bench\\host\\session_to_images.py <session_dir> --frame 512      # 프레임 하나만
+    python imu_bench\\host\\session_to_images.py <session_dir> --frame 512 --shape 320 256   # 배치 재해석 (검증용)
 
 기본 출력 폴더: <session_dir>\\images\\  (fan_000123.png, polar_000123.png, sheet.png)
 부채꼴 변환은 세션 메타의 us.fan_geometry (GUI 가 기록) 를 쓴다. 저장 원본은 건드리지 않는다.
+
+--shape 는 저장 바이트를 다른 (라인, 깊이 표본) 으로 읽는다 (바이트 수 동일) — 배치 검증용. C10UR 은 160 라인 × 512 표본이
+맞다 (2026-09-09 저녁 수정). 320×256 으로 읽으면 라인 하나가 두 행(얕은/깊은 절반)으로 쪼개져 홀짝 줄무늬가 난다 —
+인접 라인 상관 0.2 vs 0.94 (16 세션).
 """
 
 from __future__ import annotations

@@ -13,11 +13,12 @@ def test_identity_for_sl2c():
 
 def test_polar_detect_and_convert():
     meta = {"us": {"probe": "c10ur", "fan_geometry": {"radius_mm": 59, "half_angle_deg": 28, "depth_mm": 220}}}
-    assert is_polar_session(meta, (320, 256))
-    assert is_polar_session({"us": {}}, (320, 256))
-    conv = BmodeConverter(meta, (320, 256), 128)
-    polar = np.zeros((320, 256), np.uint8)
-    polar[:, 100:110] = 255            # 모든 A-line 의 같은 깊이 → 부채꼴에서는 원호
+    assert is_polar_session(meta, (160, 512))
+    assert is_polar_session({"us": {}}, (160, 512))
+    assert is_polar_session({"us": {}}, (320, 256))     # 2026-09-09 이전 메타 (잘못된 배치) 도 극좌표로 본다
+    conv = BmodeConverter(meta, (160, 512), 128)
+    polar = np.zeros((160, 512), np.uint8)
+    polar[:, 200:220] = 255            # 모든 A-line 의 같은 깊이 → 부채꼴에서는 원호
     out = conv(polar)
     assert out.shape == (128, 128) and out.dtype == np.uint8
     assert out.max() > 200 and (out > 0).mean() < 0.5

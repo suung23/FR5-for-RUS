@@ -59,8 +59,10 @@ SETUP_68_DELAY_SECONDS = 1.8
 # 5aa5ff005aa5ff00 + [frame_id][block_index] + 512 payload. 다른 것은 상수와 두 가지 거동뿐이다:
 #   * C10UR 은 스캔 시작을 **클라이언트가 명령**한다: 5aa58250 을 보내면 프로브가 5aa58250 으로 답하고,
 #     그 뒤 5aa5a250 keepalive 로 유지한다. 정지는 5aa50250. (SL-2C 는 프로브 버튼으로 시작 → 5aa58773 수신.)
-#   * 프레임이 160 블록 = 81,920 바이트 = 320 라인 × 256 깊이 표본 — scan conversion **이전**의 극좌표 데이터다
-#     (행 = A-line, 행 시작 = 근거리). 뷰어가 부채꼴로 바꾼다. 여기서는 candidate 로 그대로 저장한다.
+#   * 프레임이 160 블록 = 81,920 바이트 = **160 라인 × 512 깊이 표본** — scan conversion **이전**의 극좌표 데이터다
+#     (행 = A-line = 블록 하나의 512 페이로드, 행 시작 = 근거리). 뷰어가 부채꼴로 바꾼다. 여기서는 candidate 로 그대로 저장한다.
+#     2026-09-09 저녁까지 320 × 256 으로 적혀 있었다 — 바이트 수는 같아 에러 없이 읽히지만 진짜 라인 하나가 두 행(얕은/깊은
+#     절반)으로 쪼개져 홀짝 줄무늬가 났다. 16 세션 실측: 인접 라인 상관 320×256 은 0.1–0.3, 160×512 는 0.93–0.96.
 # SL-2C 블록의 prefix 앞 3바이트(00 00 00) 는 C10UR 에서 0/1/3 으로 변한다 → 동기는 8바이트 core 로 잡는다.
 
 BLOCK_CORE = b"\x5a\xa5\xff\x00\x5a\xa5\xff\x00"
@@ -100,7 +102,7 @@ SL2C = ProbeProfile(
 )
 
 C10UR = ProbeProfile(
-    name="c10ur", frame_shape=(320, 256), blocks_per_frame=160,
+    name="c10ur", frame_shape=(160, 512), blocks_per_frame=160,
     control_initial=bytes.fromhex("5aa512d0"), control_ready=bytes.fromhex("5aa52250"),
     control_active=bytes.fromhex("5aa5a250"),
     scanner_active=bytes.fromhex("5aa58250"), scanner_idle=bytes.fromhex("5aa50250"),
@@ -109,7 +111,7 @@ C10UR = ProbeProfile(
         "5aa512d05ee500007f7f7f7f7f7f7f7f00000000588500002840030000500005326e00c359950000500019ff2802500000000030"),
     setup_a_delay_s=0.2, setup_b_delay_s=0.5, ready_after_s=1.1,
     control_start=bytes.fromhex("5aa58250"), control_stop=bytes.fromhex("5aa50250"),
-    note="2026-09-09 pktmon (Wi-Fi 동글, WirelessUSG 2.1.4 세션). 320 라인 × 256 깊이 표본, 극좌표 candidate. 10 fps 관찰.",
+    note="2026-09-09 pktmon (Wi-Fi 동글, WirelessUSG 2.1.4 세션). 160 라인 × 512 깊이 표본 (블록 1 개 = A-line 1 개), 극좌표 candidate. 10 fps 관찰.",
 )
 
 PROFILES = {SL2C.name: SL2C, C10UR.name: C10UR}
@@ -133,7 +135,7 @@ class Tcp5002Block:
 
 @dataclass(frozen=True)
 class CandidateFrame:
-    """완성된 candidate 프레임 (SL-2C 65,536 바이트 256×256, C10UR 81,920 바이트 320×256)."""
+    """완성된 candidate 프레임 (SL-2C 65,536 바이트 256×256, C10UR 81,920 바이트 160×512)."""
 
     frame_id: int
     raw_pixels: bytes

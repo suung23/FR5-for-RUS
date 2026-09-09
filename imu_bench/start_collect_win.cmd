@@ -19,8 +19,8 @@ rem         2) connect the dongle (Wi-Fi 2) to the probe AP, ping only
 rem            (never open the probe ports here - the GUI opens them)
 rem         3) run the GUI: click window -> K (IMU calibration guide: gyro rest, accel 6 poses,
 rem            magnetometer figure-8 warm-up until rv = 3) -> S (save DCD to the BNO085 flash, survives
-rem            power cycles) -> Z (zero, hold still 3 s) -> R (scan + record). R is refused once when the
-rem            firmware/rv 3/zero are missing; press R again within 3 s to force (logged as cal_override).
+rem            power cycles) -> Z (zero, hold still 3 s; adopted even if the still check fails) -> R (scan +
+rem            record, starts right away - missing firmware/rv 3/zero are only warnings, logged in the meta).
 rem            -> auto stop at N frames, or R again in manual mode -> R again for the next session.
 rem            Episode protocol (find_bladder): start OFF the bladder, hold 1 s, R, search with
 rem            stop-move-stop (stops >= 0.5 s), press M when the bladder is in view, hold 1-2 s, R.
@@ -46,7 +46,7 @@ rem  No parentheses inside this block: cmd.exe would take a ")" in an echo as th
 echo.
 echo     ***** OLD IMU FIRMWARE - gyro calibration is OFF, every session would log cal_gyr 0 / cal_rv 1 *****
 echo     ***** flash first:  python imu_bench\host\flash_win.py --uf2 imu_bench\firmware\umi_device_hardware\umi_device_hardware.uf2 *****
-echo     ***** the GUI will refuse R once - press R twice within 3 s to force                              *****
+echo     ***** R still works - the warning is logged in the session meta                                 *****
 echo.
 :fw_ok
 

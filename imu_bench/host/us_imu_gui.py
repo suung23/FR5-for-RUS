@@ -19,8 +19,9 @@
        전원 인가 뒤: K(자이로 정지 → 가속도 6방향 → 자력계 8자 워밍업, rv 3 확인) → S → Z → R.
     S  DCD 저장 — 칩의 동적 보정 데이터를 BNO085 플래시에 쓴다 (2026-09-10 펌웨어). 전원을 껐다 켜도 보정이 살아 있어
        첫 세션을 버리지 않는다. rv 3 이 아니면 미완 상태를 굳히지 않도록 보류한다. 응답(DCD,OK/FAIL)이 체크리스트에 뜬다.
-       R 은 펌웨어 태그·rv 3·영점이 안 됐으면 한 번 막고, 3 s 안에 다시 누르면 강행한다 (메타 imu_calibration.cal_override).
-    Z  영점(zero) — IMU 를 현재 자세 기준으로 잡는다 (몇 초간 정지 필요).
+       R 은 조건이 안 돼도 바로 시작한다 — 문제는 경고로 보여 주고 메타 imu_calibration.warnings / cal_override 에 남긴다.
+    Z  영점(zero) — IMU 를 현재 자세 기준으로 잡는다 (몇 초간 정지). 정지 판정에 미달해도 채택한다 (quality.forced=True,
+       still=False 로 메타에 남음). 표본이 아예 없을 때만 실패.
     C  자세 재설정 — 호스트 퓨전 프레임 정렬을 다시 잡는다.
     Q  종료.
 
@@ -142,7 +143,7 @@ class UsReceiver(threading.Thread):
         self.profile = profile
         self._session = UsScannerSession(host, profile=profile)
         self._lock = threading.Lock()
-        self._stop = threading.Event()
+        self._stop_evt = threading.Event()   # _stop 은 Thread._stop() 을 가려 join() 이 깨진다
 
         self.latest = None            # 최신 256x256 uint8 (표시용, 항상 갱신)
         self.frame_count = 0          # 세션 시작 이후 총 프레임
@@ -222,14 +223,14 @@ class UsReceiver(threading.Thread):
         return len(self._fps_stamps) / 2.0
 
     def stop(self):
-        self._stop.set()
+        self._stop_evt.set()
 
     def run(self):
         last_connect = 0.0
-        while not self._stop.is_set():
+        while not self._stop_evt.is_set():
             if not self._session.is_open:
                 if time.monotonic() - last_connect < 2.0:
-                    self._stop.wait(0.05)
+                    self._stop_evt.wait(0.05)
                     continue
                 last_connect = time.monotonic()
                 try:
@@ -323,7 +324,6 @@ class CombinedGui:
             key = "keymap." + km
             if key in plt.rcParams:
                 plt.rcParams[key] = []
-        self._r_armed_until = 0.0         # 보정 미완 상태에서 R: 3 s 안에 한 번 더 누르면 강행 (메타에 cal_override)
 
         self.fig = plt.figure(figsize=(16, 9))
         self.fig.canvas.manager.set_window_title("US + IMU 통합 뷰어")
@@ -475,13 +475,20 @@ class CombinedGui:
             self.zero_msg = "영점 OK (%s: gyro sd %.3f, acc sd %.2f)" % (
                 self.args.zero_profile, ref.quality["gyro_sd"], ref.quality["accel_sd"])
         else:
+            # 정지 판정에 실패해도 영점은 **채택한다** (2026-09-10): Z 를 눌렀다는 것은 지금 자세를 기준으로 삼겠다는 뜻이고,
+            # 파이프라인이 zero_ref 에서 주로 쓰는 것은 쿼터니언 규약과 기준 자세다. 판정 수치는 quality 에 그대로 남겨
+            # (still=False, forced=True) 나중에 걸러낼 수 있게 한다. 샘플 자체가 부족했을 때만 실패.
             last = getattr(run_zero_calibration, "last", None)
-            q = last.quality if last is not None else {}
-            th = q.get("thresholds", {})
-            self.zero_msg = "영점 실패 — 움직임 감지 (gyro sd %.3f/%.3f, mean %.3f/%.3f, acc sd %.2f/%.2f). 정지 후 Z 다시" % (
-                q.get("gyro_sd", float("nan")), th.get("gyro_sd", float("nan")),
-                q.get("gyro_mean_abs", float("nan")), th.get("gyro_mean_abs", float("nan")),
-                q.get("accel_sd", float("nan")), th.get("accel_sd", float("nan")))
+            if last is not None:
+                last.quality["forced"] = True
+                self.stream.zero = last
+                q, th = last.quality, last.quality.get("thresholds", {})
+                self.zero_msg = "영점 채택 (정지 판정 미달 — gyro sd %.3f/%.3f, mean %.3f/%.3f, acc sd %.2f/%.2f). 메타에 forced 로 남김" % (
+                    q.get("gyro_sd", float("nan")), th.get("gyro_sd", float("nan")),
+                    q.get("gyro_mean_abs", float("nan")), th.get("gyro_mean_abs", float("nan")),
+                    q.get("accel_sd", float("nan")), th.get("accel_sd", float("nan")))
+            else:
+                self.zero_msg = "영점 실패 — IMU 표본이 없음 (포트·스트림 확인). Z 다시"
         self.zero_msg_until = time.time() + 8.0
         print(self.zero_msg)
 
@@ -489,30 +496,29 @@ class CombinedGui:
         # 스캔 명령이 가능한 프로브인데 아직 스캔 중이 아니면 녹화 시작과 함께 스캔을 시작한다
         starting = not (self.stream.logger is not None or self.us.recording)
         self._cal_override = False
+        self._start_warnings = []
         if starting:
-            # 시작 게이트 (2026-09-10): 보정(rv 3)·영점이 안 된 채 R 을 누르면 한 번 막는다. 3 s 안에 R 을 다시 누르면
-            # 강행하되 메타에 cal_override 를 남긴다. 첫날 15 세션이 전부 보정 없이 찍힌 일을 되풀이하지 않기 위해.
+            # R 은 막지 않는다 (2026-09-10 저녁 — 사용자 결정: 조건 미달이어도 바로 시작). 대신 시작 시점의 문제를
+            # 경고로 보여 주고 메타 imu_calibration.warnings / cal_override 에 남겨 나중에 걸러낼 수 있게 한다.
             snap = self.stream.snapshot()
             cal = snap.get("cal_status") or {}
             problems = []
             if snap.get("fw_tag") is None:
                 problems.append("구 펌웨어 (자이로 보정 꺼짐 — flash_win.py)")
             if not calib_ready(cal):
-                problems.append("보정 미완 a%s g%s m%s rv%s (rv 3 필요 — 8 자 워밍업)" % (
+                problems.append("보정 미완 a%s g%s m%s rv%s (rv 3 권장 — 8 자 워밍업)" % (
                     cal.get("acc"), cal.get("gyr"), cal.get("mag"), cal.get("rv")))
-            if not self.stream.zero:
+            z = self.stream.zero
+            if not z:
                 problems.append("영점 없음 (Z)")
+            elif not z.quality.get("still"):
+                problems.append("영점 정지 판정 미달 (forced)")
             if problems:
-                now = time.time()
-                if now > self._r_armed_until:
-                    self._r_armed_until = now + 3.0
-                    self.event_msg = "녹화 보류: " + " / ".join(problems) + "  — 그래도 시작하려면 3 s 안에 R 다시"
-                    self.event_msg_until = now + 6.0
-                    print(self.event_msg)
-                    return
                 self._cal_override = True
-                self._r_armed_until = 0.0
-                print("⚠ 게이트 강행: " + " / ".join(problems))
+                self._start_warnings = problems
+                self.event_msg = "⚠ 녹화 시작 (경고: " + " / ".join(problems) + ")"
+                self.event_msg_until = time.time() + 6.0
+                print(self.event_msg)
         if starting and hasattr(self.us, "toggle_scan") and self.us.snapshot().get("can_command") \
                 and not self.us.snapshot().get("active"):
             self.us.toggle_scan()
@@ -545,6 +551,7 @@ class CombinedGui:
             snap0 = self.stream.snapshot()
             self._start_state = {"cal_status_at_start": dict(snap0.get("cal_status") or {}),
                                  "cal_override": bool(self._cal_override),
+                                 "warnings": list(getattr(self, "_start_warnings", []) or []),
                                  "firmware": snap0.get("fw_tag"),
                                  "dcd_saved_at": snap0.get("dcd_saved_at")}
             self.stream.logger = self._new_imu_logger()
@@ -655,7 +662,8 @@ class CombinedGui:
         r = s["rates"]
         cal = s.get("cal_status") or {}
         z = s.get("zero")
-        zero_ok = bool(z and z.quality.get("still"))
+        zero_ok = bool(z)
+        zero_forced = bool(z and not z.quality.get("still"))
         cal_ok = calib_ready(cal)
         fw = s.get("fw_tag")
         dcd_at = s.get("dcd_saved_at")
@@ -672,7 +680,7 @@ class CombinedGui:
                      "[v]" if cal_ok else "[ ]", cal.get("acc", "-"), cal.get("gyr", "-"), cal.get("mag", "-"), cal.get("rv", "-")),
                  "%s [S] DCD 저장%s" % ("[v]" if dcd_ok else "[ ]",
                                         " (%s)" % time.strftime("%H:%M:%S", time.localtime(dcd_at)) if dcd_ok else " — 보정 뒤 한 번, 전원 재인가 후에도 유지"),
-                 "%s [Z] 영점 (정지 %.0f s)" % ("[v]" if zero_ok else "[ ]", self.args.zero),
+                 "%s [Z] 영점 (정지 %.0f s)%s" % ("[v]" if zero_ok else "[ ]", self.args.zero, " — 정지 판정 미달, 강제 채택" if zero_forced else ""),
                  "%s [R] 녹화 (%s)" % ("[v]" if self.session_count else "[ ]",
                                       "%d 프레임 자동 정지" % self.record_frames if self.record_frames else "수동 정지: R 다시")]
         if self.task:
@@ -708,7 +716,7 @@ class CombinedGui:
         if self.sync is not None and self.sync.last_message:
             rec_detail += "   |   " + self.sync.last_message[:90]
         z = s.get("zero")
-        zero_state = "영점 OK" if (z and z.quality.get("still")) else ("영점 불량" if z else "영점 없음")
+        zero_state = "영점 OK" if (z and z.quality.get("still")) else ("영점 (강제)" if z else "영점 없음")
         us_state = ("active" if us_snap["active"] else "idle")
         if not us_snap["connected"]:
             us_state = "연결 안 됨"

@@ -15,8 +15,11 @@
     M  (녹화 중) 발견 표시 — "지금 목표(방광)가 보인다". 시각·US 프레임 번호가 메타 events 에 남는다.
     X  (녹화 중) 폐기 — 저장하지 않고 폴더를 discard_ 로 바꾼다 (실패한 에피소드). 에피소드 번호는 올라가지 않는다.
     F  스캔 시작/정지 — 클라이언트가 스캔을 명령하는 프로브(`--probe c10ur`)에서만. SL-2C 는 프로브 버튼.
-    K  IMU 보정 안내 모드 — BNO085 의 칩 보정 상태(가속도/자이로/자력계 0~3) 를 보며 단계별 동작을 안내한다.
-       세션 시작마다: K(자이로 정지 → 가속도 6방향 → 자력계 8자) → Z → R.  보정은 칩 안에서 되며, 전원을 끄면 사라진다.
+    K  IMU 보정 안내 모드 — BNO085 의 칩 보정 상태(가속도/자이로/자력계/회전벡터 0~3) 를 보며 단계별 동작을 안내한다.
+       전원 인가 뒤: K(자이로 정지 → 가속도 6방향 → 자력계 8자 워밍업, rv 3 확인) → S → Z → R.
+    S  DCD 저장 — 칩의 동적 보정 데이터를 BNO085 플래시에 쓴다 (2026-09-10 펌웨어). 전원을 껐다 켜도 보정이 살아 있어
+       첫 세션을 버리지 않는다. rv 3 이 아니면 미완 상태를 굳히지 않도록 보류한다. 응답(DCD,OK/FAIL)이 체크리스트에 뜬다.
+       R 은 펌웨어 태그·rv 3·영점이 안 됐으면 한 번 막고, 3 s 안에 다시 누르면 강행한다 (메타 imu_calibration.cal_override).
     Z  영점(zero) — IMU 를 현재 자세 기준으로 잡는다 (몇 초간 정지 필요).
     C  자세 재설정 — 호스트 퓨전 프레임 정렬을 다시 잡는다.
     Q  종료.
@@ -77,23 +80,28 @@ from us_imu_sync import SyncWorker                                      # noqa: 
 ORIENTATIONS = {"none": 0, "rot90_ccw": 1, "rot180": 2, "rot90_cw": -1}
 
 # BNO085 보정 상태 (SH-2 accuracy): 0 unreliable, 1 low, 2 medium, 3 high.  세션 시작 기준 🟡
-CAL_MIN = {"gyr": 2, "acc": 2, "mag": 1}
+# 2026-09-10: 회전벡터(rv) 3 을 시작 조건에 넣었다 — rv 는 자이로·가속도·자력계 보정을 합친 값이라, 자력계 워밍업(8 자)
+# 을 빼먹으면 3 이 안 된다. 첫날 15 세션이 전부 cal_gyr 0 / rv 1 로 찍힌 것(구 펌웨어 + 워밍업 생략)을 막기 위한 게이트.
+CAL_MIN = {"gyr": 2, "acc": 2, "mag": 1, "rv": 3}
+FW_TAG_EXPECTED = "2026-09-10-dcd"       # firmware/umi_device_hardware FW_TAG — 'V' 에 답하지 않으면 구 펌웨어
 
 
 def calib_ready(cal: dict) -> bool:
     return all((cal.get(k) or 0) >= v for k, v in CAL_MIN.items() if k != "mag")
 
 
-def calib_step(cal: dict) -> str:
+def calib_step(cal: dict, dcd_saved: bool = False) -> str:
     """현재 칩 보정 상태에서 다음에 할 동작 (BNO085 동적 보정 절차)."""
-    g, a, m = (cal.get("gyr") or 0), (cal.get("acc") or 0), (cal.get("mag") or 0)
+    g, a, m, rv = (cal.get("gyr") or 0), (cal.get("acc") or 0), (cal.get("mag") or 0), (cal.get("rv") or 0)
     if g < CAL_MIN["gyr"]:
         return "1) 자이로 %d/3 — 프로브를 탁자에 내려놓고 5 초 이상 완전히 정지" % g
     if a < 3:
         return "2) 가속도 %d/3 — 프로브를 천천히 6 방향(위·아래·좌·우·앞·뒤)으로 돌려 각 자세에서 2 초 정지" % a
-    if m < CAL_MIN["mag"]:
-        return "3) 자력계 %d/3 — 8 자로 천천히 흔들기 (선택: 6축 퓨전이면 생략 가능)" % m
-    return "보정 완료 (a%d g%d m%d) — Z 로 영점을 잡으십시오" % (a, g, m)
+    if m < CAL_MIN["mag"] or rv < CAL_MIN["rv"]:
+        return "3) 자력계 워밍업 — 8 자로 천천히 20~30 초 (m %d/3, rv %d/3 → rv 3 이 될 때까지)" % (m, rv)
+    if not dcd_saved:
+        return "4) 보정 완료 (a%d g%d m%d rv%d) — S 로 DCD 를 칩 플래시에 저장 (전원 재인가 후에도 유지) → Z" % (a, g, m, rv)
+    return "보정 완료·DCD 저장됨 (a%d g%d m%d rv%d) — Z 로 영점을 잡으십시오" % (a, g, m, rv)
 
 
 class UsReceiver(threading.Thread):
@@ -282,6 +290,15 @@ class CombinedGui:
             self.converter = ScanConverter(geo, self.frame_shape[0], self.frame_shape[1], out_h=512)
         self.display_shape = (self.converter.out_h, self.converter.out_w) if self.converter else self.frame_shape
 
+        # matplotlib 기본 단축키가 우리 키와 겹친다 — 특히 's' 는 "그림 저장" 대화상자를 띄워 GUI 를 막는다.
+        # (f 전체화면, k 로그 x축, r 홈, c 뒤로, g 격자, l 로그 y축, o 줌, p 팬 도 마찬가지.)
+        for km in ("save", "fullscreen", "xscale", "yscale", "home", "back", "forward", "grid", "grid_minor",
+                   "zoom", "pan"):
+            key = "keymap." + km
+            if key in plt.rcParams:
+                plt.rcParams[key] = []
+        self._r_armed_until = 0.0         # 보정 미완 상태에서 R: 3 s 안에 한 번 더 누르면 강행 (메타에 cal_override)
+
         self.fig = plt.figure(figsize=(16, 9))
         self.fig.canvas.manager.set_window_title("US + IMU 통합 뷰어")
         gs = self.fig.add_gridspec(3, 3, width_ratios=(1.5, 1.0, 1.0),
@@ -353,6 +370,8 @@ class CombinedGui:
         elif k == "r":
             self._stop_reason = "manual"
             self.toggle_record()
+        elif k == "s":
+            self.save_dcd()
         elif k == "m":
             self.mark_event("found")
         elif k == "x":
@@ -363,6 +382,23 @@ class CombinedGui:
 
     def _recording(self):
         return self.stream.logger is not None or self.us.recording
+
+    def save_dcd(self):
+        """S: BNO085 의 동적 보정 데이터(DCD) 를 칩 플래시에 저장 — 전원을 껐다 켜도 보정이 유지된다.
+        보정이 다 되지 않은 상태로 저장하면 나쁜 값이 고정되므로 rv 3 이 아닐 때는 막는다."""
+        s = self.stream.snapshot()
+        cal = s.get("cal_status") or {}
+        if s.get("fw_tag") is None:
+            self.event_msg = "S 불가 — 구 펌웨어 ('V' 응답 없음). host/flash_win.py 로 먼저 플래시"
+        elif (cal.get("rv") or 0) < CAL_MIN["rv"]:
+            self.event_msg = "S 보류 — rv %s/3. 8 자 워밍업으로 rv 3 을 만든 뒤 저장 (미완 상태를 굳히지 않기 위해)" % cal.get("rv")
+        elif not self.stream.send(b"S"):
+            self.event_msg = "S 실패 — IMU 포트가 열려 있지 않음"
+        else:
+            self._dcd_req_at = time.time()
+            self.event_msg = "DCD 저장 요청 보냄 — 칩 응답 대기"
+        self.event_msg_until = time.time() + 6.0
+        print(self.event_msg)
 
     def mark_event(self, name):
         """녹화 중 M: '지금 목표(방광)를 찾았다' 표시. 시각(pc_unix)과 US 프레임 번호를 세션 메타 events 에 남긴다.
@@ -421,6 +457,31 @@ class CombinedGui:
     def toggle_record(self):
         # 스캔 명령이 가능한 프로브인데 아직 스캔 중이 아니면 녹화 시작과 함께 스캔을 시작한다
         starting = not (self.stream.logger is not None or self.us.recording)
+        self._cal_override = False
+        if starting:
+            # 시작 게이트 (2026-09-10): 보정(rv 3)·영점이 안 된 채 R 을 누르면 한 번 막는다. 3 s 안에 R 을 다시 누르면
+            # 강행하되 메타에 cal_override 를 남긴다. 첫날 15 세션이 전부 보정 없이 찍힌 일을 되풀이하지 않기 위해.
+            snap = self.stream.snapshot()
+            cal = snap.get("cal_status") or {}
+            problems = []
+            if snap.get("fw_tag") is None:
+                problems.append("구 펌웨어 (자이로 보정 꺼짐 — flash_win.py)")
+            if not calib_ready(cal):
+                problems.append("보정 미완 a%s g%s m%s rv%s (rv 3 필요 — 8 자 워밍업)" % (
+                    cal.get("acc"), cal.get("gyr"), cal.get("mag"), cal.get("rv")))
+            if not self.stream.zero:
+                problems.append("영점 없음 (Z)")
+            if problems:
+                now = time.time()
+                if now > self._r_armed_until:
+                    self._r_armed_until = now + 3.0
+                    self.event_msg = "녹화 보류: " + " / ".join(problems) + "  — 그래도 시작하려면 3 s 안에 R 다시"
+                    self.event_msg_until = now + 6.0
+                    print(self.event_msg)
+                    return
+                self._cal_override = True
+                self._r_armed_until = 0.0
+                print("⚠ 게이트 강행: " + " / ".join(problems))
         if starting and hasattr(self.us, "toggle_scan") and self.us.snapshot().get("can_command") \
                 and not self.us.snapshot().get("active"):
             self.us.toggle_scan()
@@ -450,10 +511,15 @@ class CombinedGui:
             os.makedirs(self.session_dir, exist_ok=True)
             self.events = []
             self._stop_reason = "manual"
+            snap0 = self.stream.snapshot()
+            self._start_state = {"cal_status_at_start": dict(snap0.get("cal_status") or {}),
+                                 "cal_override": bool(self._cal_override),
+                                 "firmware": snap0.get("fw_tag"),
+                                 "dcd_saved_at": snap0.get("dcd_saved_at")}
             self.stream.logger = self._new_imu_logger()
             self.us.start_recording(self.session_dir)
             self.session_count += 1
-            cal = self.stream.snapshot().get("cal_status") or {}
+            cal = snap0.get("cal_status") or {}
             warn = ""
             if not self.stream.zero:
                 warn += "   ⚠ 영점(zero_ref) 없음 — Z 를 먼저"
@@ -496,6 +562,8 @@ class CombinedGui:
             "record_stop": self._stop_reason if not self.record_frames else
                            ("auto %d frames" % self.record_frames if self._stop_reason == "auto" else "manual"),
             "events": list(self.events),
+            # 시작 시점의 칩 보정 상태·펌웨어·DCD 저장 여부 — 세션을 나중에 걸러낼 때의 근거 (2026-09-10)
+            "imu_calibration": dict(getattr(self, "_start_state", {}) or {}),
         }
         if self.task:
             found = next((e for e in self.events if e["name"] == "found"), None)
@@ -558,8 +626,21 @@ class CombinedGui:
         z = s.get("zero")
         zero_ok = bool(z and z.quality.get("still"))
         cal_ok = calib_ready(cal)
+        fw = s.get("fw_tag")
+        dcd_at = s.get("dcd_saved_at")
+        dcd_ok = dcd_at is not None
+        if fw is None:
+            fw_line = "[ ] 펌웨어: 구버전 ('V' 응답 없음 — 자이로 보정 꺼짐) → host\\flash_win.py 로 플래시"
+        elif fw != FW_TAG_EXPECTED:
+            fw_line = "[?] 펌웨어 %s (기대 %s)" % (fw, FW_TAG_EXPECTED)
+        else:
+            fw_line = "[v] 펌웨어 %s" % fw
         lines = ["세션 시작 체크리스트",
-                 "%s [K] IMU 보정  a%s g%s m%s" % ("[v]" if cal_ok else "[ ]", cal.get("acc", "-"), cal.get("gyr", "-"), cal.get("mag", "-")),
+                 fw_line,
+                 "%s [K] IMU 보정  a%s g%s m%s rv%s  (rv 3 = 자력계 8 자 워밍업 완료)" % (
+                     "[v]" if cal_ok else "[ ]", cal.get("acc", "-"), cal.get("gyr", "-"), cal.get("mag", "-"), cal.get("rv", "-")),
+                 "%s [S] DCD 저장%s" % ("[v]" if dcd_ok else "[ ]",
+                                        " (%s)" % time.strftime("%H:%M:%S", time.localtime(dcd_at)) if dcd_ok else " — 보정 뒤 한 번, 전원 재인가 후에도 유지"),
                  "%s [Z] 영점 (정지 %.0f s)" % ("[v]" if zero_ok else "[ ]", self.args.zero),
                  "%s [R] 녹화 (%s)" % ("[v]" if self.session_count else "[ ]",
                                       "%d 프레임 자동 정지" % self.record_frames if self.record_frames else "수동 정지: R 다시")]
@@ -577,10 +658,16 @@ class CombinedGui:
         if self.zero_msg and time.time() < self.zero_msg_until:
             lines.append("")
             lines.append(self.zero_msg)
+        info = s.get("last_info")
+        if info and time.time() - info[1] < 6.0 and info[0].startswith(("DCD,", "CAL,")):
+            lines.append("")
+            lines.append({"DCD,OK": "✔ DCD 저장 완료 — 칩 플래시에 기록됨 (전원 재인가 후에도 유지)",
+                          "DCD,FAIL": "✘ DCD 저장 실패 — 칩이 거부. 보정을 다시 하고 S",
+                          "CAL,OK": "동적 보정 재적용 OK", "CAL,FAIL": "동적 보정 재적용 실패"}.get(info[0], info[0]))
         if self.calib_mode:
             lines.append("")
-            lines.append("보정 안내: " + calib_step(cal))
-            if cal_ok and (cal.get("acc") or 0) >= 3:
+            lines.append("보정 안내: " + calib_step(cal, dcd_ok))
+            if cal_ok and (cal.get("acc") or 0) >= 3 and dcd_ok:
                 lines.append("(K 로 안내 닫기)")
         elif not cal_ok:
             lines.append("")

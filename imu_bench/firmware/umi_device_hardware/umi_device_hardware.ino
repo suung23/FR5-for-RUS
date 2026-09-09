@@ -61,7 +61,12 @@ const uint8_t REC_TOF      = 0x20;  //  50Hz raw ToF range
 const uint8_t REC_HALL     = 0x21;  // 200Hz raw hall ADC
 const uint8_t REC_TIMESYNC = 0x30;  //   1Hz chip<->MCU timebase sample
 const uint8_t REC_STATS    = 0x31;  //   1Hz health counters
-const uint8_t REC_INFO     = 0x7F;  // CAL_NAME string (handshake reply)
+const uint8_t REC_INFO     = 0x7F;  // ASCII string: '?' -> CAL_NAME, 'V' -> "FW,<tag>", 'S' -> "DCD,OK|FAIL", 'C' -> "CAL,OK|FAIL"
+
+// Firmware tag, reported on 'V'. The host checks it after flashing (host/flash_win.py) and
+// records it in every session meta, so a board still running the old build (gyro calibration
+// off -> cal_gyr 0 / cal_rv 1 forever) is caught before a session, not after.
+#define FW_TAG "2026-09-10-dcd"
 
 // Dense per-type index for seq counters / generation counters.
 enum RecIdx {
@@ -683,8 +688,10 @@ void loop() {
     nextOneHzUs   = now + ONE_HZ_PERIOD_US;
   }
 
-  // --- Host commands: '?' -> board name (INFO record / legacy ASCII),
-  //                    'C' -> re-enable dynamic calibration, 'S' -> save DCD ---
+  // --- Host commands: '?' -> board name (INFO record / legacy ASCII), 'V' -> firmware tag,
+  //                    'C' -> re-enable dynamic calibration, 'S' -> save DCD to BNO085 flash.
+  //     'C'/'S' answer with an INFO record ("CAL,OK" / "DCD,OK" or ...,FAIL) so the host can
+  //     show whether the save actually happened instead of guessing. ---
   while (Serial.available()) {
     int c = Serial.read();
     if (c == '?') {
@@ -694,10 +701,27 @@ void loop() {
 #else
       sendRecord(REC_INFO, CAL_NAME, (uint8_t)strlen(CAL_NAME));
 #endif
+    } else if (c == 'V') {
+      static const char fwMsg[] = "FW," FW_TAG;
+#if LEGACY_CSV
+      Serial.println(fwMsg);
+#else
+      sendRecord(REC_INFO, fwMsg, (uint8_t)(sizeof(fwMsg) - 1));
+#endif
     } else if (c == 'C') {
-      enableImuCalibration();
+      const char *msg = enableImuCalibration() ? "CAL,OK" : "CAL,FAIL";
+#if LEGACY_CSV
+      Serial.println(msg);
+#else
+      sendRecord(REC_INFO, msg, (uint8_t)strlen(msg));
+#endif
     } else if (c == 'S') {
-      saveImuCalibration();
+      const char *msg = saveImuCalibration() ? "DCD,OK" : "DCD,FAIL";
+#if LEGACY_CSV
+      Serial.println(msg);
+#else
+      sendRecord(REC_INFO, msg, (uint8_t)strlen(msg));
+#endif
     }
   }
 

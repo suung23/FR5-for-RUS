@@ -166,3 +166,31 @@ def read_board_name(ser, timeout=1.0):
     except Exception:
         pass
     return None
+
+
+def read_fw_tag(ser, timeout=1.0):
+    """'V' 를 보내 펌웨어 태그를 얻는다 (INFO "FW,<tag>" 또는 구 CSV 의 "FW,<tag>" 행). 2026-09-10 이전 펌웨어는
+    'V' 에 답하지 않으므로 None — 그 빌드는 자이로 동적 보정이 꺼져 있어 cal_gyr 0 / cal_rv 1 에 머문다."""
+    import time
+    try:
+        ser.reset_input_buffer()
+        ser.write(b"V")
+        parser = FrameParser()
+        text = b""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            data = ser.read(ser.in_waiting or 1)
+            if not data:
+                continue
+            for _, rec_type, _, payload in parser.feed(data, 0.0):
+                if rec_type == REC_INFO:
+                    msg = payload.decode("ascii", "replace")
+                    if msg.startswith("FW,"):
+                        return msg[3:]
+            text += data
+            for line in text.split(b"\n"):
+                if line.startswith(b"FW,"):
+                    return line[3:].strip().decode("ascii", "replace")
+    except Exception:
+        pass
+    return None

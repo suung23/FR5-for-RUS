@@ -22,8 +22,8 @@ from fusion import (
     Madgwick, quat_angle_deg, quat_conj, quat_mul, quat_to_euler_deg, seed_quat,
 )
 from umi_protocol import (
-    FrameParser, U32Unwrapper, decode_payload, read_board_name,
-    REC_ACCEL, REC_GYRO, REC_MAG, REC_RV, REC_FUSED, REC_TOF, REC_HALL,
+    FrameParser, U32Unwrapper, decode_payload, read_board_name, read_fw_tag,
+    REC_ACCEL, REC_GYRO, REC_MAG, REC_RV, REC_FUSED, REC_TOF, REC_HALL, REC_INFO,
 )
 
 
@@ -74,6 +74,13 @@ class ImuStream(threading.Thread):
         self.zero = None              # ZeroReference (있으면 상대자세를 로그에 남긴다)
         self.error = None
         self.board_name = None
+        # 펌웨어 태그 ('V' 응답 "FW,<tag>"). None 이면 구 펌웨어 — 자이로 보정이 꺼져 있어 cal_gyr 0 / cal_rv 1 에 머문다.
+        self.fw_tag = None
+        # 호스트 명령 ('S' DCD 저장, 'C' 보정 재적용) 에 대한 마지막 INFO 응답: (문자열, 수신 시각)
+        self.last_info = None
+        self.dcd_saved_at = None
+        self._ser = None
+        self._wlock = threading.Lock()
 
         # 최신 값
         self.acc = self.gyr = self.mag = self.mag_raw = None
@@ -107,6 +114,19 @@ class ImuStream(threading.Thread):
             self.align = None
             self.seeded = not self.do_seed
             self.t_start = time.time()
+
+    def send(self, data: bytes) -> bool:
+        """펌웨어에 명령 바이트를 보낸다 ('S' = DCD 를 BNO085 플래시에 저장, 'C' = 동적 보정 재적용, 'V' = 태그).
+        응답은 INFO 레코드로 돌아와 last_info 에 남는다. 포트가 아직 안 열렸으면 False."""
+        with self._wlock:
+            ser = self._ser
+            if ser is None:
+                return False
+            try:
+                ser.write(data)
+                return True
+            except (serial.SerialException, OSError):
+                return False
 
     def start_capture(self):
         """영점 캘리브레이션용 raw 샘플 수집을 시작한다."""
@@ -146,6 +166,9 @@ class ImuStream(threading.Thread):
                 "gaps": sum(self.parser.seq_gaps.values()),
                 "error": self.error,
                 "board": self.board_name,
+                "fw_tag": self.fw_tag,
+                "last_info": self.last_info,
+                "dcd_saved_at": self.dcd_saved_at,
                 "hist": {k: np.asarray(v) for k, v in self.hist.items()},
                 "log_n": 0 if self.logger is None else self.logger.n,
                 "log_path": None if self.logger is None else self.logger.path,
@@ -186,9 +209,13 @@ class ImuStream(threading.Thread):
 
         time.sleep(0.3)
         name = read_board_name(ser)
+        fw = read_fw_tag(ser)
         with self._lock:
             self.board_name = name
+            self.fw_tag = fw
             self.t_start = time.time()
+        with self._wlock:
+            self._ser = ser
 
         last_fuse_us = None
         try:
@@ -216,10 +243,22 @@ class ImuStream(threading.Thread):
                     self.rate.tick(rtype, ts)
                     last_fuse_us = self._on_record(rtype, rec, ts, last_fuse_us)
         finally:
+            with self._wlock:
+                self._ser = None
             ser.close()
 
     def _on_record(self, rtype, rec, now, last_fuse_us):
         with self._lock:
+            if rtype == REC_INFO:
+                text = str(rec)
+                if text.startswith("DBG"):
+                    return last_fuse_us
+                self.last_info = (text, now)
+                if text == "DCD,OK":
+                    self.dcd_saved_at = now
+                elif text.startswith("FW,"):
+                    self.fw_tag = text[3:]
+                return last_fuse_us
             if rtype == REC_GYRO:
                 self.gyr = np.array([rec.x, rec.y, rec.z])
                 self.cal_status["gyr"] = rec.status

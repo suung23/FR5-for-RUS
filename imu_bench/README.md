@@ -293,6 +293,32 @@ python host\us_imu_gui_win.py                       # COM 포트 자동 (VID 288
 * 자이로가 정지 중 정확히 0.0 으로 읽히고 `cal_gyr=0` 이었다 (2026-09-09 board-6-qc). 움직이면 값이 나온다.
   정지 판정 임계(`imu.still_gyro_sd`) 가 이 거동을 전제하지 않으므로 첫 세션에서 `inspect_session` 분위수 표를 볼 것.
 
+## 리눅스 학습 PC 로 세션 보내기 — git 대신 LAN (`host/push_sessions.py`, 2026-09-10)
+
+세션 하나가 90 MB 라 GitHub 로 나르면 저장소가 영구히 불어난다 (첫날 21 세션 1.9 GB 는 예외로 담았다 — `.gitignore`).
+다음부터는 노트북 ↔ 리눅스 PC 직결로 보낸다. 리눅스 PC(Ubuntu 24.04, `rosotauser`) 는 두 주소로 닿고 호스트 키가 같다:
+
+| 경로 | 주소 | 링크 |
+|---|---|---|
+| USB 이더넷 직결 (기본) | `192.168.77.1` | Realtek FE 100 Mbps ≈ 11 MB/s, 세션당 ≈ 8 s |
+| 공유기 Wi-Fi | `192.168.0.197` | 노트북 AX201 576 Mbps 링크, 공유기 속도에 달림 |
+
+프로브 AP(동글, 192.168.1.x) 와는 별개라 수집 중에도 보낼 수 있다. Windows 내장 OpenSSH(`scp`) 를 쓰고 rsync 는 없다.
+
+```
+:: 한 번만 — 키를 리눅스에 넣는다 (비밀번호 한 번)
+ssh-keygen -t ed25519 -N "" -f %USERPROFILE%\.ssh\id_ed25519
+type %USERPROFILE%\.ssh\id_ed25519.pub | ssh rosotauser@192.168.77.1 "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys"
+
+:: 그 뒤 수집 때마다
+imu_bench\push_sessions_win.cmd                 :: 새 세션만 → ~/FR5-for-RUS/imu_bench/logs/
+imu_bench\push_sessions_win.cmd --dry-run       :: 보낼 목록만
+imu_bench\push_sessions_win.cmd --pull-masks    :: 리눅스에서 그린 마스크 가져오기
+```
+
+리눅스 쪽에서는 `python scripts/prepare_phantom_sessions.py --per-session 15` (Unet_seg) 로 새 세션의 부채꼴 PNG 와
+manifest 를 다시 만들면 된다. 키 인증만 쓰므로(BatchMode) 키가 없으면 바로 멈추고 위 명령을 안내한다.
+
 ## Windows Wi-Fi 수집 — C10UR 을 뷰어 없이 (`host/us_imu_gui.py --probe c10ur`)  (2026-09-09, 권장 경로)
 
 동글(Realtek 8814AU, "Wi-Fi 2") 로 프로브 AP `US-1C GRCGBA010` 에 붙으면 (비밀번호 `usccgba010` — 뷰어가 만든
@@ -311,9 +337,35 @@ python host\us_imu_gui.py --probe c10ur --host 192.168.1.1 --record-frames 1000 
 python host\us_imu_collect.py --probe c10ur --host 192.168.1.1 --port COM3 --max-frames 1000   # 헤드리스
 ```
 
-**세션 시작마다 K → Z → R.** K 는 BNO085 칩 보정 안내(자이로: 탁자에 5 s 정지 → 가속도: 6 방향 각 2 s → 자력계: 8 자). Z 의 정지 판정은 `--zero-profile freehand`(기본) — 손으로 몸에 대고 정지한 떨림(자이로 sd ≈ 0.015 rad/s)이 통과한다. 예전 bench 임계(0.005)로는 첫날 15 세션 전부 Z 가 조용히 실패해 `zero_ref` 가 비었다 (파이프라인이 정지 표본으로 규약을 추정하므로 그 세션들도 쓸 수는 있다). 이제 결과(성공/실패 이유)가 체크리스트에 8 초간 뜬다. 초음파 패널 왼쪽 위 체크리스트가 보정 상태(a/g/m 0–3)와 영점을 표시하고, 상태줄에도 `cal a3/g2/m2` 로 보인다. 보정은 칩 안에서만 살아 있어 프로브 전원을 끄면 다시 한다. **프레임은 F 또는 R 을 눌러야 온다** (이 프로브는 클라이언트가 스캔 시작을 명령한다; GUI 창을 클릭해 포커스를 준 뒤). F 가 스캔 시작/정지, R 은 녹화(스캔이 꺼져 있으면 함께 시작). 표시는 `--display fan`(c10ur 기본) 으로 `host/us_scan_convert.py` 가 극좌표를 부채꼴로 바꾼다 (뷰어 화면 실측 R59 mm / 반각 28° / 깊이 220 mm — candidate, 라인 좌우 미검증, `--fan-flip`). 저장은 항상 극좌표 원본이고 기하는 `session.meta.json` 의 `us.fan_geometry` 에 남는다. 세션 포맷은 동일하고 `session.meta.json` 의
+**전원 인가 뒤 K → (8 자 워밍업, rv 3) → S → Z, 세션마다 R.** (2026-09-10 개정) K 는 BNO085 칩 보정 안내(자이로: 탁자에 5 s 정지 → 가속도: 6 방향 각 2 s → 자력계: 8 자로 20~30 s, **회전벡터 rv 가 3 이 될 때까지**). rv 는 세 센서 보정을 합친 값이라 자력계 워밍업을 빼먹으면 3 이 안 된다. 그 다음 **S** 로 DCD(동적 보정 데이터)를 BNO085 플래시에 저장하면 전원을 껐다 켜도 보정이 살아 있어 첫 세션을 버리지 않는다 (2026-09-10 펌웨어 필요 — 아래 "펌웨어 플래시"; 응답 `DCD,OK` 가 체크리스트에 뜬다. rv 3 이 아니면 미완 상태를 굳히지 않도록 S 가 보류된다). **R 은 펌웨어 태그·rv 3·영점이 없으면 한 번 거부**하고, 3 s 안에 다시 누르면 강행하되 메타 `imu_calibration.cal_override` 에 남긴다 — 첫날 15 세션이 전부 cal_gyr 0 / rv 1 로 찍힌 일(구 펌웨어의 자이로 보정 꺼짐 + 워밍업 생략)을 되풀이하지 않기 위한 게이트다. 세션 메타 `imu_calibration` 에 시작 시점 a/g/m/rv, 펌웨어 태그, DCD 저장 시각이 들어간다. Z 의 정지 판정은 `--zero-profile freehand`(기본) — 손으로 몸에 대고 정지한 떨림(자이로 sd ≈ 0.015 rad/s)이 통과한다. 예전 bench 임계(0.005)로는 첫날 15 세션 전부 Z 가 조용히 실패해 `zero_ref` 가 비었다 (파이프라인이 정지 표본으로 규약을 추정하므로 그 세션들도 쓸 수는 있다). 이제 결과(성공/실패 이유)가 체크리스트에 8 초간 뜬다. 초음파 패널 왼쪽 위 체크리스트가 보정 상태(a/g/m 0–3)와 영점을 표시하고, 상태줄에도 `cal a3/g2/m2` 로 보인다. 보정은 칩 안에서만 살아 있어 프로브 전원을 끄면 다시 한다. **프레임은 F 또는 R 을 눌러야 온다** (이 프로브는 클라이언트가 스캔 시작을 명령한다; GUI 창을 클릭해 포커스를 준 뒤). F 가 스캔 시작/정지, R 은 녹화(스캔이 꺼져 있으면 함께 시작). 표시는 `--display fan`(c10ur 기본) 으로 `host/us_scan_convert.py` 가 극좌표를 부채꼴로 바꾼다 (뷰어 화면 실측 R59 mm / 반각 28° / 깊이 220 mm — candidate, 라인 좌우 미검증, `--fan-flip`). 저장은 항상 극좌표 원본이고 기하는 `session.meta.json` 의 `us.fan_geometry` 에 남는다. 세션 포맷은 동일하고 `session.meta.json` 의
 `us.frame_shape` 가 [160, 512] 이므로 `inspect_session.py` 가 그대로 읽는다. 뷰어 화면 캡처 경로(`us_imu_gui_win.py`)
 보다 지연·CPU 모두 훨씬 낫다 (프레임당 수 ms).
+
+### IMU 펌웨어 플래시 — Windows 노트북에서 (2026-09-10)
+
+`firmware/umi_device_hardware` 의 2026-09-10 빌드(`FW_TAG "2026-09-10-dcd"`)는 자이로 동적 보정을 켜고, 호스트 명령
+`'V'`(태그) / `'S'`(DCD 저장) / `'C'`(보정 재적용) 에 INFO 레코드로 답한다. 구 펌웨어는 자이로 보정이 꺼져 있어
+cal_gyr 이 영원히 0, rv 가 1 에 머문다 — 첫날 21 세션이 그렇게 찍혔다. `python host\flash_win.py --check` 가 보드의 태그를
+읽어 알려 주고, `start_collect_win.cmd` 가 [0/3] 단계에서 같은 검사를 한다.
+
+**이 노트북에서는 빌드가 안 된다.** Windows Smart App Control 이 켜져 있어 서명 없는 실행파일(arduino-cli, arm gcc,
+adafruit-nrfutil)이 전부 "애플리케이션 제어 정책" (WinError 4551) 에 막히고, WSL 도 없다. 그래서 두 갈래:
+
+```
+# (a) 보드를 리눅스 PC 에 꽂고 거기서 (가장 짧다)
+./scripts/flash.sh
+
+# (b) 보드가 Windows 에 꽂혀 있을 때: 리눅스에서 UF2 를 만들어 git 으로 나르고, Windows 에서는 파일 복사만
+./scripts/build_uf2.sh                      # 리눅스: 빌드 → host/hex2uf2.py → firmware/umi_device_hardware/umi_device_hardware.uf2
+git add imu_bench/firmware/umi_device_hardware/umi_device_hardware.uf2 && git commit -m "fw: uf2 2026-09-10-dcd" && git push
+git pull                                    # Windows
+python imu_bench\host\flash_win.py --uf2 imu_bench\firmware\umi_device_hardware\umi_device_hardware.uf2
+```
+
+(b) 의 원리: XIAO nRF52840 의 UF2 부트로더는 1200 bps touch(또는 리셋 두 번)에 이동식 드라이브 `XIAO-SENSE` 를 열고,
+UF2 파일을 넣으면 스스로 쓰고 재부팅한다. `flash_win.py --uf2` 가 touch → 드라이브 대기 → 복사 → 앱 포트 복귀 →
+`'V'` 로 태그 확인까지 한다. 서명이 필요한 실행파일이 하나도 없다. GUI 가 COM 포트를 잡고 있으면 touch 가 실패하므로 먼저
+닫는다. 드라이브가 열린 채 파일이 거부되면 `INFO_UF2.TXT` 의 보드/패밀리(nRF52840 = 0xADA52840)를 확인한다.
 
 **저장 위치와 형태.** 세션마다 `logs/us_imu_YYYYMMDD_HHMMSS/` 하나: `us_frames.bin` (uint8 160×512 극좌표 프레임을
 그대로 이어 붙인 것, 1000 프레임 ≈ 82 MB) + `us_index.csv` (프레임별 `pc_unix` 시각) + `imu_*.csv` (가속도/자이로/자력계/

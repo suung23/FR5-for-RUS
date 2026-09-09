@@ -306,9 +306,8 @@ python host\us_imu_gui_win.py                       # COM 포트 자동 (VID 288
 프로브 AP(동글, 192.168.1.x) 와는 별개라 수집 중에도 보낼 수 있다. Windows 내장 OpenSSH(`scp`) 를 쓰고 rsync 는 없다.
 
 ```
-:: 한 번만 — 키를 리눅스에 넣는다 (비밀번호 한 번)
-ssh-keygen -t ed25519 -N "" -f %USERPROFILE%\.ssh\id_ed25519
-type %USERPROFILE%\.ssh\id_ed25519.pub | ssh rosotauser@192.168.77.1 "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys"
+:: 한 번만 — 키를 리눅스에 넣고 바로 전체 세션을 보낸다 (리눅스 비밀번호 한 번)
+imu_bench\setup_linux_key.cmd                    :: = ssh-keygen + authorized_keys 등록 + push_sessions.py
 
 :: 그 뒤 수집 때마다
 imu_bench\push_sessions_win.cmd                 :: 새 세션만 → ~/FR5-for-RUS/imu_bench/logs/

@@ -16,3 +16,9 @@ session_dir,subject,source,split,note
 ../../imu_bench/logs/us_imu_20260909_164936,P01,freehand,train,day1
 ../../imu_bench/logs/us_imu_20260909_165248,P01,freehand,val,day1
 ../../imu_bench/logs/us_imu_20260909_165434,P01,freehand,test,day1
+../../imu_bench/logs/us_imu_20260909_181041,P01,freehand,train,day1 evening
+../../imu_bench/logs/us_imu_20260909_181310,P01,freehand,train,day1 evening
+../../imu_bench/logs/us_imu_20260909_181532,P01,freehand,val,day1 evening
+../../imu_bench/logs/us_imu_20260909_181722,P01,freehand,train,day1 evening
+../../imu_bench/logs/us_imu_20260909_182055,P01,freehand,train,day1 evening
+../../imu_bench/logs/us_imu_20260909_182305,P01,freehand,test,day1 evening (673 frames, stopped early)

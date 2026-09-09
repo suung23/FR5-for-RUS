@@ -6,7 +6,13 @@ __pycache__/
 
 # Datasets and generated artefacts.
 # Leading slash matters: a bare "data/" would also exclude the rus_perception/data/ package.
-/data/
+/data/*
+# 2026-09-10: 팬텀 라벨링 데이터셋 중 작은 것만 담는다 — manifest, 라벨 큐, 큐 프레임 PNG(to_label/), 사람이 그린 masks/.
+# images/ (전체 프레임 PNG, ~500 MB) 는 원시 세션(imu_bench/logs) 에서 1 분이면 재생성:
+#   python scripts/prepare_phantom_sessions.py --per-session 15
+!/data/phantom_c10ur/
+/data/phantom_c10ur/images/
+/data/phantom_c10ur/masks/progress.json
 /checkpoints/
 /runs/
 

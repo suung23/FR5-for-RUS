@@ -305,6 +305,19 @@ class CombinedGui:
         self._stop_reason = "manual"
         self.event_msg = ""
         self.event_msg_until = 0.0
+        # 수집 계획 (--plan JSON): 움직임 종류별 목표 수·규약·bin 순서. 패널이 "지금 무엇을, 몇 번째로" 를 보여 주고 저장된
+        # 세션 메타(episode.motion) 를 세어 GUI 를 껐다 켜도 진행 수가 이어진다. N 다음 종류, 숫자 키로 종류 선택.
+        self.plan = load_plan(getattr(args, "plan", None)) if getattr(args, "plan", None) else None
+        self.plan_counts = {}
+        self.plan_idx = None
+        self.plan_manual = False          # 사용자가 숫자/N 으로 직접 고른 상태 — 목표를 채워도 자동으로 넘기지 않는다
+        if self.plan:
+            self.plan_counts = count_plan_sessions(args.out_dir, self.task, [it["key"] for it in self.plan["items"]])
+            self.plan_idx = self._next_plan_item()
+            if not self.episodes_target:
+                # 전체 목표 = 계획 밖에서 이미 찍은 에피소드 (1차 100 개 등) + 계획 합계. 재시작해도 같은 값이 나온다.
+                base = self.episode_done - sum(self.plan_counts.values())
+                self.episodes_target = base + sum(int(it["target"]) for it in self.plan["items"])
         # 저장 완료 세션을 IMU·US 동기화 (sync.npz / sync_report.json) — 백그라운드 루프
         self.sync = SyncWorker(args.out_dir, period_s=5.0) if not getattr(args, "no_sync", False) else None
         if self.sync is not None:
@@ -403,6 +416,10 @@ class CombinedGui:
             self.toggle_record()
         elif k == "s":
             self.save_dcd()
+        elif k == "n":
+            self.plan_next()
+        elif k.isdigit() and k != "0":
+            self.plan_select(int(k) - 1)
         elif k == "m":
             self.mark_event("found")
         elif k == "x":
@@ -413,6 +430,49 @@ class CombinedGui:
 
     def _recording(self):
         return self.stream.logger is not None or self.us.recording
+
+    # -------------------------------------------------------------- 수집 계획
+    def _next_plan_item(self):
+        """아직 목표를 못 채운 첫 종류의 인덱스 (계획 순서대로 블록 진행). 전부 채웠으면 None."""
+        for i, it in enumerate(self.plan["items"]):
+            if self.plan_counts.get(it["key"], 0) < it["target"]:
+                return i
+        return None
+
+    def plan_current(self):
+        if not self.plan or self.plan_idx is None:
+            return None
+        it = self.plan["items"][self.plan_idx]
+        n = self.plan_counts.get(it["key"], 0)
+        hint = it["bins"][n % len(it["bins"])] if it["bins"] else ""
+        return {"i": self.plan_idx, "item": it, "count": n, "hint": hint}
+
+    def plan_select(self, i):
+        if not self.plan or not (0 <= i < len(self.plan["items"])):
+            return
+        self.plan_idx, self.plan_manual = i, True
+        it = self.plan["items"][i]
+        self.event_msg = "종류 선택: [%d] %s (%d/%d)" % (i + 1, it["label"], self.plan_counts.get(it["key"], 0), it["target"])
+        self.event_msg_until = time.time() + 4.0
+        print(self.event_msg)
+
+    def plan_next(self):
+        if not self.plan:
+            return
+        n = len(self.plan["items"])
+        self.plan_select(((self.plan_idx if self.plan_idx is not None else -1) + 1) % n)
+
+    def _plan_after_save(self, key):
+        """저장 뒤: 종류 수 +1, 목표를 채웠고 사용자가 직접 고른 상태가 아니면 다음 미완 종류로."""
+        if not self.plan or key is None:
+            return
+        self.plan_counts[key] = self.plan_counts.get(key, 0) + 1
+        it = self.plan["items"][self.plan_idx] if self.plan_idx is not None else None
+        if it is not None and self.plan_counts[key] >= it["target"]:
+            self.plan_manual = False
+            self.plan_idx = self._next_plan_item()
+            print("종류 '%s' 목표 달성 → %s" % (it["label"], "다음: " + self.plan["items"][self.plan_idx]["label"]
+                                             if self.plan_idx is not None else "계획 완료"))
 
     def save_dcd(self):
         """S: BNO085 의 동적 보정 데이터(DCD) 를 칩 플래시에 저장 — 전원을 껐다 켜도 보정이 유지된다.
@@ -539,6 +599,7 @@ class CombinedGui:
                                                  "발견 표시 있음" if self.events else "발견 표시 없음 (M 안 누름)")
             print("녹화 정지: %s  (US %s frames, IMU %s rows)%s — 저장 완료. 동기화는 백그라운드에서 몇 초 뒤. "
                   "R 로 다음 세션을 바로 시작할 수 있습니다." % (self.session_dir, us_n, imu_n, ep))
+            self._plan_after_save((getattr(self, "_plan_at_start", None) or {}).get("key"))
             self.session_dir = None
             self.events = []
         else:
@@ -554,6 +615,10 @@ class CombinedGui:
                                  "warnings": list(getattr(self, "_start_warnings", []) or []),
                                  "firmware": snap0.get("fw_tag"),
                                  "dcd_saved_at": snap0.get("dcd_saved_at")}
+            cur = self.plan_current()
+            self._plan_at_start = ({"key": cur["item"]["key"], "label": cur["item"]["label"], "bin_hint": cur["hint"],
+                                    "index_in_kind": cur["count"] + 1, "target": cur["item"]["target"],
+                                    "plan_file": os.path.basename(self.plan["path"])} if cur else None)
             self.stream.logger = self._new_imu_logger()
             self.us.start_recording(self.session_dir)
             self.session_count += 1
@@ -611,8 +676,16 @@ class CombinedGui:
                 "outcome": "found" if found else "not_marked",
                 "found_t_pc": found["t_pc"] if found else None,
                 "found_us_seq": found["us_seq"] if found else None,
-                "protocol": "방광 밖에서 시작 → 정지-이동-정지로 탐색 → 방광이 보이면 M → 1~2 s 정지 → R 로 저장. 실패는 X 로 폐기",
+                "found_marker": "found" if found else "implicit_end",
+                "protocol": "방광 밖에서 시작 → 정지-이동-정지로 탐색 → 방광이 보이면 (M 또는) 1~2 s 정지 → R 로 저장. 실패는 X 로 폐기",
             }
+            ps = getattr(self, "_plan_at_start", None)
+            if ps:
+                # 수집 계획의 종류 (episode.motion) — 매니페스트·라벨 분류의 근거. bin_hint 는 GUI 가 제안한 부호/크기이고
+                # 실제 움직임은 라벨러가 IMU 로 잰다.
+                meta["episode"].update({"motion": ps["key"], "motion_label": ps["label"], "bin_hint": ps["bin_hint"],
+                                        "index_in_kind": ps["index_in_kind"], "kind_target": ps["target"],
+                                        "plan_file": ps["plan_file"]})
         with open(os.path.join(self.session_dir, "session.meta.json"), "w", encoding="utf-8") as fh:
             json.dump(meta, fh, indent=2, ensure_ascii=False)
 
@@ -687,10 +760,31 @@ class CombinedGui:
             nxt = self.episode_done + 1
             tgt = "/%d" % self.episodes_target if self.episodes_target else ""
             if self._recording():
-                lines.append("▶ %s 에피소드 #%d%s 녹화 중 — 방광 보이면 M, 1~2 s 정지, R 저장 · X 폐기%s"
+                lines.append("▶ %s 에피소드 #%d%s 녹화 중 — 방광 중앙에서 1~2 s 정지 후 R 저장 · X 폐기%s"
                              % (self.task, nxt, tgt, "  [M %d]" % len(self.events) if self.events else ""))
             else:
-                lines.append("%s: 에피소드 %d%s 저장됨 · 다음 #%d — 방광 밖에서 R" % (self.task, self.episode_done, tgt, nxt))
+                lines.append("%s: 에피소드 %d%s 저장됨 · 다음 #%d" % (self.task, self.episode_done, tgt, nxt))
+        if self.plan:
+            items = self.plan["items"]
+            done_total = sum(min(self.plan_counts.get(it["key"], 0), it["target"]) for it in items)
+            total = sum(it["target"] for it in items)
+            prog = " · ".join("%s %d/%d" % (it["label"], self.plan_counts.get(it["key"], 0), it["target"]) for it in items)
+            lines.append("수집 계획 %d/%d — %s" % (done_total, total, prog))
+            cur = (self._plan_at_start if self._recording() else None) or None
+            pc = self.plan_current()
+            if self._recording() and cur:
+                lines.append("▶ 지금: [%d] %s %d/%d회%s" % (
+                    next(i for i, it in enumerate(items) if it["key"] == cur["key"]) + 1, cur["label"], cur["index_in_kind"],
+                    cur["target"], " — " + cur["bin_hint"] if cur["bin_hint"] else ""))
+            elif pc:
+                it = pc["item"]
+                lines.append("▶ 다음: [%d] %s — %d/%d 완료, 이번은 %d번째%s" % (
+                    pc["i"] + 1, it["label"], pc["count"], it["target"], pc["count"] + 1,
+                    " · " + pc["hint"] if pc["hint"] else ""))
+                lines.append("  규약: " + it["protocol"])
+                lines.append("  (N 다음 종류 · 숫자 키로 종류 선택)")
+            else:
+                lines.append("✔ 수집 계획 완료 — 이후 세션은 종류 없이 저장됨 (숫자 키로 종류를 고르면 계속 셈)")
         if self.event_msg and time.time() < self.event_msg_until:
             lines.append(self.event_msg)
         if self.zero_msg and time.time() < self.zero_msg_until:
@@ -751,6 +845,45 @@ def count_task_sessions(out_dir, task):
     return n
 
 
+def load_plan(path):
+    """수집 계획 JSON (imu_bench/collect_plan_<task>.json):
+    {"task", "note", "common", "items": [{"key", "label", "target", "protocol", "bins": [...]}, ...]}"""
+    with open(path, encoding="utf-8") as fh:
+        plan = json.load(fh)
+    items = plan.get("items") or []
+    if not items:
+        raise ValueError("계획에 items 가 없습니다: %s" % path)
+    for it in items:
+        it.setdefault("bins", [])
+        it["target"] = int(it.get("target", 0))
+    plan["path"] = os.path.abspath(path)
+    return plan
+
+
+def count_plan_sessions(out_dir, task, keys):
+    """out_dir 의 저장된 세션 중 task 가 같고 episode.motion 이 각 key 인 것의 수 — 계획 진행률의 근거."""
+    counts = {k: 0 for k in keys}
+    try:
+        names = sorted(os.listdir(out_dir))
+    except OSError:
+        return counts
+    for name in names:
+        if not name.startswith("us_imu_"):
+            continue
+        p = os.path.join(out_dir, name, "session.meta.json")
+        try:
+            with open(p, encoding="utf-8") as fh:
+                m = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if m.get("task") != task:
+            continue
+        k = (m.get("episode") or {}).get("motion")
+        if k in counts:
+            counts[k] += 1
+    return counts
+
+
 def _wait_probe(host, timeout=5.0):
     """프로브 TCP 가 잠깐 사이에 열려 있는지만 확인 (경고용, 차단하지 않음)."""
     try:
@@ -769,7 +902,10 @@ def main():
     ap.add_argument("--task", default=None, metavar="NAME",
                     help="에피소드 모드 — 세션 = 에피소드 하나 (예: find_bladder). 메타에 task/episode/events 를 남기고 "
                          "번호를 out-dir 의 같은 task 세션 수에서 잇는다. 녹화 중 M = 발견 표시, X = 폐기")
-    ap.add_argument("--episodes", type=int, default=0, metavar="N", help="에피소드 목표 수 (표시용, 예: 100)")
+    ap.add_argument("--episodes", type=int, default=0, metavar="N", help="에피소드 목표 수 (표시용, 예: 100; --plan 이 있으면 계획 합계)")
+    ap.add_argument("--plan", default=None, metavar="JSON",
+                    help="수집 계획 (imu_bench/collect_plan_<task>.json): 움직임 종류별 목표·규약·bin. 패널이 '지금 무엇을 몇 번째로' "
+                         "를 안내하고 메타 episode.motion 에 종류를 남긴다. N 다음 종류, 숫자 키 선택")
     ap.add_argument("--display", choices=["auto", "polar", "fan"], default="auto",
                     help="표시: polar(원본) | fan(scan conversion, 저장은 원본). auto = c10ur 이면 fan")
     ap.add_argument("--fan-radius", type=float, default=59.0, help="부채꼴 반경 mm (뷰어 실측 59, R60)")

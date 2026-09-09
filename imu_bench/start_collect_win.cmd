@@ -7,9 +7,11 @@ rem
 rem    imu_bench\start_collect_win.cmd                         stop after 1000 frames (default)
 rem    imu_bench\start_collect_win.cmd 500                     custom frame count
 rem    imu_bench\start_collect_win.cmd manual                  no auto stop: R starts, R stops (any length)
-rem    imu_bench\start_collect_win.cmd manual find_bladder 100 episode mode: one session = one episode,
-rem                                                            task name + target count shown in the GUI,
-rem                                                            M = "target found" mark, X = discard episode
+rem    imu_bench\start_collect_win.cmd manual find_bladder     episode mode: one session = one episode,
+rem                                                            collect_plan_find_bladder.json (if present) tells the
+rem                                                            GUI which motion kind to collect, how many, and the
+rem                                                            current count; N = next kind, digits = pick a kind,
+rem                                                            X = discard episode
 rem
 rem  Steps: 0) check the IMU firmware tag (host\flash_win.py --check). Old firmware = gyro calibration
 rem            off = cal_gyr 0 / cal_rv 1 forever. Flash with: flash_win.py --uf2 <file> (UF2 built on
@@ -36,6 +38,8 @@ if /I "%FRAMES%"=="0" set FRAMES=0
 set TASKARGS=
 if not "%2"=="" set TASKARGS=--task %2
 if not "%3"=="" set TASKARGS=%TASKARGS% --episodes %3
+rem  collection plan: imu_bench\collect_plan_<task>.json (motion kinds, targets, protocol) - picked up automatically
+if not "%2"=="" if exist "%HERE%collect_plan_%2.json" set TASKARGS=%TASKARGS% --plan "%HERE%collect_plan_%2.json"
 set PYTHONIOENCODING=utf-8
 set PYTHONUNBUFFERED=1
 

@@ -669,6 +669,39 @@ accuracy claim.
 
 ---
 
+## Phantom data: C10UR sessions → manual masks → fine-tune → pseudo-labels (2026-09-09)
+
+The 2026-09-09 collection (`imu_bench/logs/us_imu_*`, one phantom, ~1000 frames per
+session at 10 fps, IMU-synchronised) carries **no segmentation labels**: IMU gives the
+policy its action labels, but nothing says where the bladder is in the image. The PFUS
+checkpoints (Linux training box, `checkpoints/exp_seed43/best.pt` is the one the policy
+config names; `pfus_bladder_edit_man` is the hand-corrected Standard U-Net) are not in
+the repository and not on the Windows PC — copy one over before step 3.
+
+```
+# 1. sessions → dataset (fan-converted 256² PNGs, same BmodeConverter as policy_learning),
+#    manifest.csv (patient_id = session, split from policy_learning/data/sessions.csv),
+#    label_queue.csv (15 frames/session, evenly in time, still frames preferred)
+python scripts\prepare_phantom_sessions.py --per-session 15
+
+# 2. draw masks in the browser (P polygon + Enter, D/E brush, N = no bladder, Tab = next unlabeled)
+python scripts\mask_editor\server.py --data data\phantom_c10ur --queue        # http://127.0.0.1:8778
+python scripts\prepare_phantom_sessions.py --refresh                             # fills mask_path in manifest
+
+# 3. fine-tune from the PFUS weights (CPU: ~1.5 min/epoch for 200 masks)
+python scripts\train.py --config configs\phantom_c10ur_finetune.yaml --init-weights checkpoints\exp_seed43\best.pt
+
+# 4. pseudo-label every frame, look at the overlays, fix the bad ones in the editor, repeat 3
+python scripts\infer.py --config configs\phantom_c10ur_finetune.yaml --checkpoint checkpoints\phantom_c10ur_finetune\best.pt --input data\phantom_c10ur\images --output-dir runs\phantom_c10ur_pseudo --save-overlay
+```
+
+`--init-weights` loads the model tensors only (fresh optimizer/schedule); `--resume` is for
+continuing an interrupted run. Splits are per session, so val/test measure reproducibility
+on the same phantom, not generalisation. Label 100–150 frames from ≥8 sessions before the
+first fine-tune; the rest of the queue is for correcting what the model gets wrong.
+`scripts/autolabel.py run --images data/phantom_c10ur/to_label/<session>` can propose an
+initial dark-lumen contour per frame if the phantom bladder is anechoic.
+
 ## Real data: the PFUS pelvic-floor dataset
 
 `scripts/prepare_pfus.py` converts the public **PFUS** dataset into this

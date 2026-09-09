@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>마스크 편집기 — 팬텀 방광</title>
+<style>
+:root{--ink:#1b1b1b;--mut:#6b6b6b;--hair:#d9d9d9;--card:#fafafa;--acc:#2f6fdb;--ok:#2e9e5b}
+*{box-sizing:border-box} body{margin:0;font:14px/1.45 system-ui,sans-serif;color:var(--ink);display:flex;height:100vh}
+aside{width:270px;flex:none;border-right:1px solid var(--hair);padding:14px;overflow:auto;background:var(--card)}
+main{flex:1;display:flex;flex-direction:column;min-width:0}
+#bar{padding:10px 14px;border-bottom:1px solid var(--hair);display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:var(--card)}
+#wrap{flex:1;overflow:auto;display:grid;place-items:center;padding:14px;background:#111}
+canvas{image-rendering:pixelated;cursor:crosshair;touch-action:none}
+h1{font-size:1.05rem;margin:0 0 6px} h2{font-size:.85rem;color:var(--mut);margin:16px 0 6px;text-transform:uppercase;letter-spacing:.04em}
+button{font:inherit;padding:5px 11px;border:1px solid var(--hair);background:var(--card);color:var(--ink);border-radius:4px;cursor:pointer}
+button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.plist button{display:block;width:100%;text-align:left;margin:3px 0;font-family:ui-monospace,monospace;font-size:.8rem}
+kbd{font:inherit;font-family:ui-monospace,monospace;font-size:.82em;border:1px solid var(--hair);border-bottom-width:2px;border-radius:3px;padding:0 4px}
+.k{color:var(--mut);font-size:.82rem;line-height:1.9}
+#nav{font-family:ui-monospace,monospace}
+#prog{height:5px;background:var(--hair);border-radius:3px;overflow:hidden;margin-top:8px}
+#prog>div{height:100%;background:var(--ok);width:0}
+label{display:flex;gap:6px;align-items:center} input[type=range]{width:100px}
+.hint{color:var(--mut);font-size:.8rem}
+#strip{display:flex;gap:2px;padding:6px 14px;border-top:1px solid var(--hair);overflow-x:auto;background:var(--card)}
+#strip span{width:14px;height:14px;flex:none;border-radius:2px;background:#ddd;cursor:pointer}
+#strip span.done{background:var(--ok)} #strip span.cur{outline:2px solid var(--acc)}
+</style></head><body>
+<aside>
+  <h1>마스크 편집기</h1>
+  <div class="hint">방광 내강을 그립니다. <code>masks/</code> 에 저장.</div>
+  <h2>세션</h2><div class="plist" id="plist"></div>
+  <div id="prog"><div></div></div>
+  <div class="hint" id="pstat"></div>
+  <h2>단축키</h2>
+  <div class="k">
+    <kbd>P</kbd> 다각형: 클릭으로 꼭짓점, <kbd>Enter</kbd> 채움, <kbd>Esc</kbd> 취소<br>
+    <kbd>D</kbd> 브러시 그리기 / <kbd>E</kbd> 지우개, <kbd>[</kbd><kbd>]</kbd> 크기<br>
+    <kbd>←</kbd><kbd>→</kbd> 프레임 이동 (자동 저장)<br>
+    <kbd>Tab</kbd> 다음 미완성 프레임<br>
+    <kbd>C</kbd> 이전 프레임 마스크 복사<br>
+    <kbd>N</kbd> 방광 없음 (빈 마스크 저장)<br>
+    <kbd>X</kbd> 지우고 다시 / <kbd>Z</kbd> 되돌리기<br>
+    <kbd>Space</kbd> 마스크 잠깐 숨기기<br>
+    <kbd>+</kbd><kbd>-</kbd> 확대
+  </div>
+  <h2>요령</h2>
+  <div class="k">방광 = 어둡고(무에코) 매끈한 경계 안쪽만. 벽·후방 증강은 제외.<br>
+  경계가 흐리면 안쪽으로 보수적으로.<br>같은 자세의 다음 프레임은 <kbd>C</kbd> 뒤 손보기.</div>
+</aside>
+<main>
+  <div id="bar">
+    <span id="nav">—</span>
+    <button id="bp">다각형</button><button id="bd">브러시</button><button id="be">지우개</button>
+    <label>크기 <input type="range" id="sz" min="3" max="60" value="14"><span id="szv">14</span></label>
+    <label>불투명 <input type="range" id="op" min="10" max="90" value="45"></label>
+    <button id="bc">이전 복사</button><button id="bn">방광 없음</button><button id="bx">비우기</button><button id="bz">되돌리기</button>
+    <span class="hint" id="stat"></span>
+  </div>
+  <div id="wrap"><canvas id="cv"></canvas></div>
+  <div id="strip"></div>
+</main>
+<script>
+const $=s=>document.querySelector(s);
+let P=null,N=0,i=0,img=new Image(),mask=null,mctx=null,undo=[],tool='poly',size=14,down=false,hide=false,dirty=false,prevMask=null,poly=[],zoom=3,labeled=[],frames=[],times=[];
+const cv=$('#cv'),ctx=cv.getContext('2d');
+
+async function boot(){
+  const ps=await (await fetch('/api/patients')).json();
+  $('#plist').innerHTML=Object.entries(ps).map(([p,s])=>`<button data-p="${p}">${p.replace('us_imu_','')} <span class="hint">${s.done}/${s.n}</span></button>`).join('');
+  $('#plist').onclick=e=>{const b=e.target.closest('button'); if(b) pick(b.dataset.p);};
+  pick(Object.keys(ps)[0]); setTool('poly');
+}
+async function pick(p){
+  await flush(); P=p; i=0; prevMask=null;
+  document.querySelectorAll('.plist button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));
+  const s=await (await fetch('/api/state/'+p)).json(); N=s.n; labeled=s.labeled; frames=s.frames; times=s.t;
+  const r=await (await fetch('/api/resume/'+p)).json(); i=Math.min(r.index,N-1);
+  load();
+}
+async function refreshProg(){
+  const s=await (await fetch('/api/state/'+P)).json(); labeled=s.labeled;
+  $('#prog>div').style.width=(100*s.edited/s.n)+'%';
+  $('#pstat').textContent=`${s.edited} / ${s.n} 라벨됨`;
+  $('#strip').innerHTML=labeled.map((d,k)=>`<span class="${d?'done':''}${k===i?' cur':''}" data-k="${k}" title="#${frames[k]} t=${times[k]}s"></span>`).join('');
+  const b=document.querySelector('.plist button.on'); if(b) b.querySelector('.hint').textContent=`${s.edited}/${s.n}`;
+}
+$('#strip').onclick=async e=>{const s=e.target.closest('span'); if(s){await flush(); i=+s.dataset.k; load();}};
+function load(){
+  poly=[]; img=new Image();
+  img.onload=()=>{
+    cv.width=img.width; cv.height=img.height; applyZoom();
+    const m=new Image();
+    m.onload=()=>{
+      mask=document.createElement('canvas'); mask.width=img.width; mask.height=img.height;
+      mctx=mask.getContext('2d',{willReadFrequently:true}); mctx.drawImage(m,0,0);
+      undo=[]; dirty=false; draw(); refreshProg();
+    };
+    m.src=`/api/mask/${P}/${i}?t=`+Date.now();
+  };
+  img.src=`/api/image/${P}/${i}`;
+  $('#nav').textContent=`${P.replace('us_imu_','')}  ${i+1} / ${N}  (frame #${frames[i]??'?'}, t=${times[i]??'?'} s)`;
+}
+function applyZoom(){ cv.style.width=(cv.width*zoom)+'px'; cv.style.height=(cv.height*zoom)+'px'; }
+function draw(){
+  ctx.clearRect(0,0,cv.width,cv.height); ctx.drawImage(img,0,0);
+  if(!hide&&mask){
+    ctx.save(); ctx.globalAlpha=$('#op').value/100;
+    const t=document.createElement('canvas'); t.width=cv.width; t.height=cv.height;
+    const tc=t.getContext('2d'); tc.drawImage(mask,0,0);
+    const d=tc.getImageData(0,0,t.width,t.height);
+    for(let k=0;k<d.data.length;k+=4){const v=d.data[k]>127; d.data[k]=0; d.data[k+1]=v?255:0; d.data[k+2]=v?90:0; d.data[k+3]=v?255:0;}
+    tc.putImageData(d,0,0); ctx.drawImage(t,0,0); ctx.restore();
+  }
+  if(poly.length){
+    ctx.save(); ctx.strokeStyle='#ffd23f'; ctx.fillStyle='#ffd23f'; ctx.lineWidth=1/zoom*1.5;
+    ctx.beginPath(); poly.forEach((p,k)=>k?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1])); ctx.stroke();
+    poly.forEach(p=>{ctx.beginPath();ctx.arc(p[0],p[1],1.6,0,7);ctx.fill();}); ctx.restore();
+  }
+}
+function pos(e){const r=cv.getBoundingClientRect(); return [(e.clientX-r.left)*cv.width/r.width,(e.clientY-r.top)*cv.height/r.height];}
+function pushUndo(){undo.push(mctx.getImageData(0,0,mask.width,mask.height)); if(undo.length>30)undo.shift();}
+function paint(e){
+  const [x,y]=pos(e);
+  mctx.globalCompositeOperation='source-over'; mctx.fillStyle=tool==='erase'?'#000':'#fff';
+  mctx.beginPath(); mctx.arc(x,y,size/2,0,7); mctx.fill(); dirty=true; draw();
+}
+function fillPoly(){
+  if(poly.length<3){poly=[];draw();return;}
+  pushUndo(); mctx.globalCompositeOperation='source-over'; mctx.fillStyle='#fff';
+  mctx.beginPath(); poly.forEach((p,k)=>k?mctx.lineTo(p[0],p[1]):mctx.moveTo(p[0],p[1])); mctx.closePath(); mctx.fill();
+  poly=[]; dirty=true; draw(); flush();
+}
+async function flush(){
+  if(!dirty||!mask||P===null) return;
+  const blob=await new Promise(r=>mask.toBlob(r,'image/png'));
+  await fetch(`/api/save/${P}/${i}`,{method:'POST',body:blob});
+  dirty=false; $('#stat').textContent='저장됨'; setTimeout(()=>$('#stat').textContent='',900); refreshProg();
+}
+async function go(d){ prevMask=mask; await flush(); i=Math.max(0,Math.min(N-1,i+d)); load(); }
+async function nextUnlabeled(){ prevMask=mask; await flush(); for(let k=1;k<=N;k++){const j=(i+k)%N; if(!labeled[j]){i=j;break;}} load(); }
+function setTool(t){tool=t; ['bp','bd','be'].forEach(id=>$('#'+id).classList.remove('on')); $('#'+{poly:'bp',draw:'bd',erase:'be'}[t]).classList.add('on'); if(t!=='poly'){poly=[];draw();}}
+
+cv.addEventListener('pointerdown',e=>{
+  if(tool==='poly'){ poly.push(pos(e)); draw(); return; }
+  down=true; pushUndo(); paint(e); cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener('pointermove',e=>{ if(down) paint(e); });
+cv.addEventListener('pointerup',()=>{ if(down){down=false; flush();} });
+cv.addEventListener('dblclick',e=>{ if(tool==='poly'){e.preventDefault(); fillPoly();} });
+$('#bp').onclick=()=>setTool('poly'); $('#bd').onclick=()=>setTool('draw'); $('#be').onclick=()=>setTool('erase');
+$('#sz').oninput=e=>{size=+e.target.value;$('#szv').textContent=size;};
+$('#op').oninput=draw;
+$('#bz').onclick=()=>{const u=undo.pop(); if(u){mctx.putImageData(u,0,0);dirty=true;draw();flush();}};
+$('#bx').onclick=()=>{pushUndo(); mctx.clearRect(0,0,mask.width,mask.height); poly=[]; dirty=true; draw();};
+$('#bn').onclick=async()=>{pushUndo(); mctx.clearRect(0,0,mask.width,mask.height); poly=[]; dirty=true; draw(); await flush(); nextUnlabeled();};
+$('#bc').onclick=()=>{ if(prevMask){pushUndo(); mctx.clearRect(0,0,mask.width,mask.height); mctx.drawImage(prevMask,0,0); dirty=true; draw(); flush();} };
+addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT') return;
+  if(e.key==='ArrowRight')go(1); else if(e.key==='ArrowLeft')go(-1);
+  else if(e.key==='Tab'){e.preventDefault(); nextUnlabeled();}
+  else if(e.key==='Enter'){ if(tool==='poly') fillPoly(); }
+  else if(e.key==='Escape'){ poly=[]; draw(); }
+  else if(e.key==='p'||e.key==='P')setTool('poly');
+  else if(e.key==='d'||e.key==='D')setTool('draw'); else if(e.key==='e'||e.key==='E')setTool('erase');
+  else if(e.key==='[')$('#sz').value=size=Math.max(3,size-2),$('#szv').textContent=size;
+  else if(e.key===']')$('#sz').value=size=Math.min(60,size+2),$('#szv').textContent=size;
+  else if(e.key==='z'||e.key==='Z')$('#bz').click();
+  else if(e.key==='c'||e.key==='C')$('#bc').click();
+  else if(e.key==='n'||e.key==='N')$('#bn').click();
+  else if(e.key==='x'||e.key==='X')$('#bx').click();
+  else if(e.key==='+'||e.key==='='){zoom=Math.min(6,zoom+0.5);applyZoom();}
+  else if(e.key==='-'){zoom=Math.max(1,zoom-0.5);applyZoom();}
+  else if(e.code==='Space'){hide=true;draw();e.preventDefault();}
+});
+addEventListener('keyup',e=>{ if(e.code==='Space'){hide=false;draw();} });
+addEventListener('beforeunload',flush);
+boot();
+</script></body></html>

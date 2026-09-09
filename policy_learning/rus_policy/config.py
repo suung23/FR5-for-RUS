@@ -136,6 +136,7 @@ class SplitConfig:
     strategy: str = "manifest"          # manifest | subject_random
     ratios: list = field(default_factory=lambda: [0.7, 0.15, 0.15])
     seed: int = 42
+    allow_subject_overlap: bool = False  # True: same subject may span splits (session-level split; single-subject pilot data). Warns.
 
 
 @dataclass

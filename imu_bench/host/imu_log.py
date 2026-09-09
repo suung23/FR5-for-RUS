@@ -73,8 +73,13 @@ class SessionLogger:
         self._write_meta(final=False)
 
     def append(self, row):
+        if getattr(self, "_closed", False):
+            return                      # 스트림 스레드가 close() 직후에 한 줄 더 밀어 넣는 경합 — 조용히 버린다
         if self.fmt == "csv":
-            self._w.writerow(["" if v is None else v for v in row])
+            try:
+                self._w.writerow(["" if v is None else v for v in row])
+            except ValueError:          # 플래그 검사와 writerow 사이에 close() 가 끼어든 경우
+                return
         else:
             self._buf.append([np.nan if v is None else v for v in row])
             if len(self._buf) >= 1024:
@@ -113,6 +118,7 @@ class SessionLogger:
         os.replace(tmp, path)
 
     def close(self):
+        self._closed = True
         meta = self._meta_dict(final=True)
         if self.fmt == "csv":
             self._fh.close()

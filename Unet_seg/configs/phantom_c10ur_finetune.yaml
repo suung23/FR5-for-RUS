@@ -1,0 +1,81 @@
+# Fine-tune the PFUS Standard U-Net on the C10UR phantom (2026-09-09 sessions).
+#
+# Data: data/phantom_c10ur/ built by scripts/prepare_phantom_sessions.py — fan-converted
+# 256×256 B-mode identical to what policy_learning feeds the network at run time.
+# Only frames with a mask (masks/<name>.png, drawn in scripts/mask_editor) are used for
+# training/validation (require_labeled_current); the other ~14,800 frames stay in the
+# manifest unlabeled and are what the fine-tuned model pseudo-labels afterwards.
+#
+# Splits are per SESSION (patient_id = session) — one phantom, so val/test measure
+# reproducibility across sessions/positions, not generalisation across subjects.
+#
+# Start from the PFUS weights, not from scratch: the phantom set is a few hundred masks.
+#
+#   python scripts/train.py --config configs/phantom_c10ur_finetune.yaml \
+#       --init-weights checkpoints/pfus_bladder_edit_man/best.pt        # copied from the Linux box
+#
+# Then pseudo-label everything and inspect overlays:
+#
+#   python scripts/infer.py --config configs/phantom_c10ur_finetune.yaml \
+#       --checkpoint checkpoints/phantom_c10ur_finetune/best.pt \
+#       --input data/phantom_c10ur/images --output-dir runs/phantom_c10ur_pseudo --save-overlay
+#
+# and point policy_learning at the checkpoint: paths.unet_checkpoint / paths.unet_config.
+
+defaults: pfus_bladder.yaml
+
+experiment:
+  name: phantom_c10ur_finetune
+  output_dir: runs/phantom_c10ur_finetune
+  seed: 42
+
+data:
+  manifest: data/phantom_c10ur/manifest.csv
+  root: null
+  image_size: [256, 256]
+  intensity_normalization: per_image
+  require_labeled_current: true
+
+model:
+  input_size: [256, 256]
+
+split:
+  strategy: manifest             # split column written by prepare_phantom_sessions.py (from sessions.csv)
+
+augmentation:
+  enabled: true
+  horizontal_flip: 0.0           # fan line order (left/right) is still unverified; keep orientation fixed
+  vertical_flip: 0.0
+  rotation_degrees: 5.0
+  scale_range: [0.92, 1.08]
+  translate_ratio: 0.04
+  brightness: 0.15
+  contrast: 0.15
+  gamma_range: [0.8, 1.25]
+  gaussian_noise_std: 0.01
+  speckle_noise_std: 0.02
+
+train:
+  epochs: 30
+  batch_size: 8
+  num_workers: 0                 # Windows: no fork; raise on Linux
+  device: auto                   # CPU is fine for a few hundred 256² frames (≈1–2 min/epoch)
+  amp: false
+  checkpoint_dir: checkpoints/phantom_c10ur_finetune
+  optimizer:
+    name: adamw
+    lr: 2.0e-4                   # 5× below the from-scratch LR: keep the PFUS features
+    weight_decay: 1.0e-4
+  scheduler:
+    name: cosine
+    eta_min: 1.0e-6
+
+postprocess:
+  threshold: 0.5
+  largest_component: true
+  fill_holes: true
+
+evaluation:
+  split: test
+  compute_hd95: true
+  pixel_spacing: 1.0             # px; fan geometry gives ≈ 0.86 mm/px at 256² for a 220 mm depth (unverified)

@@ -25,10 +25,18 @@ from fusion import quat_conj, quat_mul, quat_to_euler_deg, quat_to_matrix
 
 G0 = 9.80665
 
-# 정지 판정 임계 — 손으로 들고 있어도 통과하지 않을 만큼 빡빡하게.
+# 정지 판정 임계 — 손으로 들고 있어도 통과하지 않을 만큼 빡빡하게 (탁자/로봇 마운트용 = "bench").
 STILL_GYRO_SD = 0.005      # rad/s
 STILL_GYRO_MEAN = 0.005    # rad/s
 STILL_ACCEL_SD = 0.15      # m/s^2
+
+# 프로파일. "freehand" 는 프로브를 손으로 몸에 대고 정지한 상태 (2026-09-09 실측: 자이로 sd 0.013–0.018 rad/s,
+# 평균 0.004–0.009, 가속도 sd 0.07–0.11 m/s²) 가 통과하도록 — policy_learning 의 프리핸드 정지 판정과 같은 값.
+# bench 임계로는 손 수집 세션 15 개 전부가 Z 를 눌렀는데도 조용히 실패해 zero_ref 가 비어 있었다.
+THRESHOLD_PROFILES = {
+    "bench": {"gyro_sd": STILL_GYRO_SD, "gyro_mean_abs": STILL_GYRO_MEAN, "accel_sd": STILL_ACCEL_SD},
+    "freehand": {"gyro_sd": 0.02, "gyro_mean_abs": 0.03, "accel_sd": 0.25},
+}
 
 
 class ZeroReference:
@@ -111,12 +119,15 @@ def _earth_convention(quat, acc):
     return ("R", fwd) if score(fwd) <= score(inv) else ("R.T", inv)
 
 
-def measure(samples):
+def measure(samples, profile="bench"):
     """capture 로 모은 샘플에서 영점을 계산한다.
 
     samples: [(t, acc(3), gyr(3), quat(4)), ...]  — quat 은 칩 RV
+    profile: THRESHOLD_PROFILES 의 키 또는 {"gyro_sd", "gyro_mean_abs", "accel_sd"} dict
     반환: ZeroReference (정지 판정 실패해도 값은 채워서 돌려준다. 쓸지는 호출자가 정한다)
     """
+    th = dict(THRESHOLD_PROFILES[profile]) if isinstance(profile, str) else dict(profile)
+    profile_name = profile if isinstance(profile, str) else "custom"
     if len(samples) < 20:
         raise ValueError("영점 계산에 샘플이 부족합니다 (%d 개)" % len(samples))
 
@@ -130,8 +141,8 @@ def measure(samples):
     gyro_sd = float(np.linalg.norm(G.std(0)))
     gyro_mean_abs = float(np.linalg.norm(G.mean(0)))
     accel_sd = float(np.linalg.norm(A.std(0)))
-    still = (gyro_sd < STILL_GYRO_SD and gyro_mean_abs < STILL_GYRO_MEAN
-             and accel_sd < STILL_ACCEL_SD)
+    still = (gyro_sd < th["gyro_sd"] and gyro_mean_abs < th["gyro_mean_abs"]
+             and accel_sd < th["accel_sd"])
 
     # 기준 자세는 평균 쿼터니언 대신 중앙 샘플을 쓴다 — 쿼터니언 산술평균은
     # 정지 상태에서도 부호 뒤집힘에 취약하고, 이득이 없다.
@@ -145,7 +156,7 @@ def measure(samples):
         "accel_sd": accel_sd,
         "n": int(len(samples)),
         "duration": float(t[-1] - t[0]),
-        "thresholds": {"gyro_sd": STILL_GYRO_SD, "gyro_mean_abs": STILL_GYRO_MEAN,
-                       "accel_sd": STILL_ACCEL_SD},
+        "thresholds": th,
+        "profile": profile_name,
     }
     return ZeroReference(q0, f_E.mean(0), G.mean(0), quality, conv)

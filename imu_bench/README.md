@@ -307,9 +307,22 @@ python host\us_imu_gui.py --probe c10ur --host 192.168.1.1 --record-frames 1000 
 python host\us_imu_collect.py --probe c10ur --host 192.168.1.1 --port COM3 --max-frames 1000   # 헤드리스
 ```
 
-**프레임은 F 또는 R 을 눌러야 온다** (이 프로브는 클라이언트가 스캔 시작을 명령한다; GUI 창을 클릭해 포커스를 준 뒤). F 가 스캔 시작/정지, R 은 녹화(스캔이 꺼져 있으면 함께 시작). 표시는 `--display fan`(c10ur 기본) 으로 `host/us_scan_convert.py` 가 극좌표를 부채꼴로 바꾼다 (뷰어 화면 실측 R59 mm / 반각 28° / 깊이 220 mm — candidate, 라인 좌우 미검증, `--fan-flip`). 저장은 항상 극좌표 원본이고 기하는 `session.meta.json` 의 `us.fan_geometry` 에 남는다. 세션 포맷은 동일하고 `session.meta.json` 의
+**세션 시작마다 K → Z → R.** K 는 BNO085 칩 보정 안내(자이로: 탁자에 5 s 정지 → 가속도: 6 방향 각 2 s → 자력계: 8 자). Z 의 정지 판정은 `--zero-profile freehand`(기본) — 손으로 몸에 대고 정지한 떨림(자이로 sd ≈ 0.015 rad/s)이 통과한다. 예전 bench 임계(0.005)로는 첫날 15 세션 전부 Z 가 조용히 실패해 `zero_ref` 가 비었다 (파이프라인이 정지 표본으로 규약을 추정하므로 그 세션들도 쓸 수는 있다). 이제 결과(성공/실패 이유)가 체크리스트에 8 초간 뜬다. 초음파 패널 왼쪽 위 체크리스트가 보정 상태(a/g/m 0–3)와 영점을 표시하고, 상태줄에도 `cal a3/g2/m2` 로 보인다. 보정은 칩 안에서만 살아 있어 프로브 전원을 끄면 다시 한다. **프레임은 F 또는 R 을 눌러야 온다** (이 프로브는 클라이언트가 스캔 시작을 명령한다; GUI 창을 클릭해 포커스를 준 뒤). F 가 스캔 시작/정지, R 은 녹화(스캔이 꺼져 있으면 함께 시작). 표시는 `--display fan`(c10ur 기본) 으로 `host/us_scan_convert.py` 가 극좌표를 부채꼴로 바꾼다 (뷰어 화면 실측 R59 mm / 반각 28° / 깊이 220 mm — candidate, 라인 좌우 미검증, `--fan-flip`). 저장은 항상 극좌표 원본이고 기하는 `session.meta.json` 의 `us.fan_geometry` 에 남는다. 세션 포맷은 동일하고 `session.meta.json` 의
 `us.frame_shape` 가 [320, 256] 이므로 `inspect_session.py` 가 그대로 읽는다. 뷰어 화면 캡처 경로(`us_imu_gui_win.py`)
 보다 지연·CPU 모두 훨씬 낫다 (프레임당 수 ms).
+
+**저장 위치와 형태.** 세션마다 `logs/us_imu_YYYYMMDD_HHMMSS/` 하나: `us_frames.bin` (uint8 320×256 극좌표 프레임을
+그대로 이어 붙인 것, 1000 프레임 ≈ 82 MB) + `us_index.csv` (프레임별 `pc_unix` 시각) + `imu_*.csv` (가속도/자이로/자력계/
+회전벡터, 같은 `pc_unix` 시계) + `session.meta.json` + 동기화 루프가 만드는 `sync.npz` / `sync_report.json` / `sync_check.png`.
+극좌표 원본은 그대로는 U-Net 입력이 아니다 — 학습 파이프라인(`policy_learning/rus_policy/bmode.py` 의 `BmodeConverter`)
+이 `us.fan_geometry` 로 부채꼴 B-mode 를 만들고 정방형 레터박스로 `perception.frame_size` 에 맞춘다 (SL-2C 세션은 항등).
+눈으로 보려면 언제든:
+
+```
+python host\session_to_images.py logs\us_imu_20260909_163511               # images\sheet.png (프레임 12 장 + IMU 궤적)
+python host\session_to_images.py logs\us_imu_20260909_163511 --every 10    # images\fan_000000.png ... (부채꼴)
+python host\session_to_images.py logs\us_imu_20260909_163511 --every 1 --polar --out D:\dump   # 극좌표 원본 전부
+```
 
 미해결: 공기 중에서 스트림이 **약 18 s 뒤 프로브 쪽에서 강제 종료(RST)** 되고 AP 가 잠시 사라진다 (USB+뷰어에서는
 42 프레임 뒤 정지). 접촉 자동 정지로 추정 — 젤/팬텀 접촉 상태에서 1000 프레임이 끊김 없이 오는지가 판정 기준.

@@ -97,12 +97,15 @@ def dump_raw(ser, seconds):
                 print("%-8s seq=%3d %s" % (TYPE_NAMES.get(rtype, hex(rtype)), seq, rec))
 
 
-def run_zero_calibration(stream, seconds, retries=2, quiet=False):
+def run_zero_calibration(stream, seconds, retries=2, quiet=False, profile="bench"):
     """로깅을 시작하기 전에 영점을 잡는다. 정지 판정에 실패하면 다시 시도한다.
 
+    profile: zero_ref.THRESHOLD_PROFILES 키 — 탁자/로봇은 "bench", 손으로 든 프로브는 "freehand".
     반환한 ZeroReference 를 stream.zero 에 걸면 이후 로그에 상대자세가 함께 남고,
     변위 계산에 필요한 지구프레임 가속도 바이어스가 확정된다.
+    실패하면 마지막 측정값을 run_zero_calibration.last 에 남긴다 (GUI 가 이유를 보여 주기 위해).
     """
+    run_zero_calibration.last = None
     for attempt in range(retries + 1):
         if not quiet:
             print("")
@@ -119,10 +122,11 @@ def run_zero_calibration(stream, seconds, retries=2, quiet=False):
         if not quiet:
             print("")
         try:
-            ref = zero_ref.measure(samples)
+            ref = zero_ref.measure(samples, profile=profile)
         except ValueError as e:
             print("  %s" % e)
             return None
+        run_zero_calibration.last = ref
         if not quiet:
             print(ref.report())
             sys.stdout.flush()   # 파일로 리다이렉트되면 블록 버퍼링이라 갇힌다

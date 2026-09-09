@@ -221,9 +221,29 @@ def control_state_to_vector(cs: Any, beam_axis_px: float, image_size: tuple[int,
 
 
 # --------------------------------------------------------------------------- 진입점
-def perception_cache_path(cfg: PolicyConfig, session_name: str, checkpoint_id: str) -> Path:
-    key = hashlib.sha1(f"{session_name}|{checkpoint_id}|{cfg.perception.frame_transform}".encode()).hexdigest()[:10]
+def perception_cache_path(cfg: PolicyConfig, session_name: str, checkpoint_id: str, bmode_tag: str = "") -> Path:
+    key = hashlib.sha1(f"{session_name}|{checkpoint_id}|{cfg.perception.frame_transform}|{bmode_tag}".encode()).hexdigest()[:10]
     return cfg.resolve(cfg.paths.perception_cache_dir) / f"{session_name}__{key}.npz"
+
+
+def session_bmode_frames(cfg: PolicyConfig, session, progress: bool = False) -> np.ndarray:
+    """세션 프레임 → 학습용 B-mode (필요하면 극좌표 → 부채꼴 → 레터박스) → frame_transform. (N, H, W) uint8."""
+    from .bmode import BmodeConverter
+
+    raw = np.asarray(session.frames)
+    conv = BmodeConverter(session.meta, tuple(raw.shape[1:]) if raw.ndim == 3 else (256, 256),
+                          out_size=max(cfg.perception.frame_size))
+    frames = conv.convert_all(raw, progress=progress)
+    return apply_frame_transform(frames, cfg.perception.frame_transform)
+
+
+def session_bmode_tag(session) -> str:
+    from .bmode import BmodeConverter
+
+    raw = session.frames
+    conv = BmodeConverter(session.meta, tuple(raw.shape[1:]) if raw.ndim == 3 else (256, 256))
+    d = conv.describe()
+    return d["mode"] + ("|ss%d" % d["supersample"] if "supersample" in d else "")
 
 
 def build_backend(cfg: PolicyConfig) -> Optional[UnetPerception]:
@@ -246,10 +266,10 @@ def build_backend(cfg: PolicyConfig) -> Optional[UnetPerception]:
 
 def perceive_session(cfg: PolicyConfig, session, backend: Optional[UnetPerception]) -> PerceptionResult:
     """세션 프레임 전체의 지각 결과 (캐시 사용)."""
-    frames = apply_frame_transform(np.asarray(session.frames), cfg.perception.frame_transform)
+    frames = session_bmode_frames(cfg, session, progress=True)
     if backend is None:
         return empty_result(len(frames), tuple(frames.shape[1:]) if frames.ndim == 3 else (256, 256))
-    path = perception_cache_path(cfg, session.name, backend.checkpoint_id)
+    path = perception_cache_path(cfg, session.name, backend.checkpoint_id, session_bmode_tag(session))
     if cfg.perception.cache and path.is_file():
         try:
             res = PerceptionResult.load(path)

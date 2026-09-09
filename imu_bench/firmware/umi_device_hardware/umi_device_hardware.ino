@@ -437,8 +437,29 @@ void vl53SoftReset() {
 
 // Enable all reports in one place — used by setup() AND reset recovery, so a
 // BNO08x reset restores every stream (the legacy firmware only restored RV).
+// BNO085 dynamic-calibration config (SH-2 ref. manual 6.4.7, "ME Calibration").
+// Chip default: accel + mag calibration ON, gyro calibration OFF. With the gyro
+// left off the "gyroscope calibrated" accuracy status stays 0 forever and the
+// rotation vector never climbs past accuracy 1 — exactly what the host logs
+// showed (cal_gyr 0, cal_rv 1 over whole sessions, 2026-09-09). Enable all
+// three; re-applied by enableImuReports() so a chip reset does not undo it.
+// Host may also send 'C' (re-apply) and 'S' (save DCD to the BNO085 flash so
+// the calibration survives a power cycle).
+bool enableImuCalibration() {
+  int rc = sh2_setCalConfig(SH2_CAL_ACCEL | SH2_CAL_GYRO | SH2_CAL_MAG);
+  if (rc != SH2_OK) i2cErrCount++;
+  return rc == SH2_OK;
+}
+
+bool saveImuCalibration() {
+  int rc = sh2_saveDcdNow();
+  if (rc != SH2_OK) i2cErrCount++;
+  return rc == SH2_OK;
+}
+
 bool enableImuReports() {
   bool ok = true;
+  ok &= enableImuCalibration();
   ok &= bno08x.enableReport(SH2_ROTATION_VECTOR, RV_INTERVAL_US);
 #if !LEGACY_CSV
   ok &= bno08x.enableReport(SH2_ACCELEROMETER, ACCEL_INTERVAL_US);
@@ -662,15 +683,21 @@ void loop() {
     nextOneHzUs   = now + ONE_HZ_PERIOD_US;
   }
 
-  // --- Host handshake: '?' -> board name (INFO record / legacy ASCII) ---
+  // --- Host commands: '?' -> board name (INFO record / legacy ASCII),
+  //                    'C' -> re-enable dynamic calibration, 'S' -> save DCD ---
   while (Serial.available()) {
-    if (Serial.read() == '?') {
+    int c = Serial.read();
+    if (c == '?') {
 #if LEGACY_CSV
       Serial.print("NAME,");
       Serial.println(CAL_NAME);
 #else
       sendRecord(REC_INFO, CAL_NAME, (uint8_t)strlen(CAL_NAME));
 #endif
+    } else if (c == 'C') {
+      enableImuCalibration();
+    } else if (c == 'S') {
+      saveImuCalibration();
     }
   }
 

@@ -12,6 +12,8 @@
 키:
     R  녹화 시작/정지 — US 와 IMU 를 **한 세션 폴더에 동시에**. `--record-frames N` 이면 N 프레임에서 자동 정지.
     F  스캔 시작/정지 — 클라이언트가 스캔을 명령하는 프로브(`--probe c10ur`)에서만. SL-2C 는 프로브 버튼.
+    K  IMU 보정 안내 모드 — BNO085 의 칩 보정 상태(가속도/자이로/자력계 0~3) 를 보며 단계별 동작을 안내한다.
+       세션 시작마다: K(자이로 정지 → 가속도 6방향 → 자력계 8자) → Z → R.  보정은 칩 안에서 되며, 전원을 끄면 사라진다.
     Z  영점(zero) — IMU 를 현재 자세 기준으로 잡는다 (몇 초간 정지 필요).
     C  자세 재설정 — 호스트 퓨전 프레임 정렬을 다시 잡는다.
     Q  종료.
@@ -65,6 +67,25 @@ from us_imu_sync import SyncWorker                                      # noqa: 
 
 # np.rot90 k 값 — tracer 뷰어의 Orientation 과 같은 네 가지 (표시용).
 ORIENTATIONS = {"none": 0, "rot90_ccw": 1, "rot180": 2, "rot90_cw": -1}
+
+# BNO085 보정 상태 (SH-2 accuracy): 0 unreliable, 1 low, 2 medium, 3 high.  세션 시작 기준 🟡
+CAL_MIN = {"gyr": 2, "acc": 2, "mag": 1}
+
+
+def calib_ready(cal: dict) -> bool:
+    return all((cal.get(k) or 0) >= v for k, v in CAL_MIN.items() if k != "mag")
+
+
+def calib_step(cal: dict) -> str:
+    """현재 칩 보정 상태에서 다음에 할 동작 (BNO085 동적 보정 절차)."""
+    g, a, m = (cal.get("gyr") or 0), (cal.get("acc") or 0), (cal.get("mag") or 0)
+    if g < CAL_MIN["gyr"]:
+        return "1) 자이로 %d/3 — 프로브를 탁자에 내려놓고 5 초 이상 완전히 정지" % g
+    if a < 3:
+        return "2) 가속도 %d/3 — 프로브를 천천히 6 방향(위·아래·좌·우·앞·뒤)으로 돌려 각 자세에서 2 초 정지" % a
+    if m < CAL_MIN["mag"]:
+        return "3) 자력계 %d/3 — 8 자로 천천히 흔들기 (선택: 6축 퓨전이면 생략 가능)" % m
+    return "보정 완료 (a%d g%d m%d) — Z 로 영점을 잡으십시오" % (a, g, m)
 
 
 class UsReceiver(threading.Thread):
@@ -174,8 +195,11 @@ class UsReceiver(threading.Thread):
                     with self._lock:
                         self.connected = True
                     self._scan_sent_at = 0.0
-                except OSError:
+                    print("US: 프로브 TCP 연결됨 (%s)%s" % (self.host, "  — 스캔 재요청 예정" if self.want_scan else ""), flush=True)
+                except OSError as exc:
                     with self._lock:
+                        if self.connected:
+                            print("US: 연결 실패 %s: %s" % (self.host, exc), flush=True)
                         self.connected = False
                     continue
 
@@ -183,13 +207,18 @@ class UsReceiver(threading.Thread):
             if (self.want_scan and self._session.can_command_scan and not self._session.scanner_active
                     and self._scan_sent_at == 0.0 and time.monotonic() - self._session._started_at >= 1.6):
                 self._session.start_scan(); self._scan_sent_at = time.monotonic()
+                print("US: 스캔 시작 요청 전송", flush=True)
+            was_active = self._session.scanner_active
             try:
                 frames = self._session.poll(0.05)
-            except (ConnectionError, OSError):
+            except (ConnectionError, OSError) as exc:
+                print("US: 프로브가 연결을 끊음 (%s) — 재접속 시도" % exc, flush=True)
                 self._session.close()
                 with self._lock:
                     self.connected = False
                 continue
+            if self._session.scanner_active and not was_active:
+                print("US: 스캔 활성 (프로브 응답)", flush=True)
 
             for frame in frames:
                 pc_unix = time.time()
@@ -257,6 +286,14 @@ class CombinedGui:
         self.us_text = self.us_ax.text(
             0.5, 0.5, "US 프레임 대기...", color="#8ab4ff", ha="center", va="center",
             transform=self.us_ax.transAxes, fontsize=12)
+        # 세션 시작 체크리스트 (보정 → 영점 → 녹화). 셋 다 끝나면 작게 남는다.
+        self.checklist = self.us_ax.text(
+            0.02, 0.98, "", color="#ffd27a", ha="left", va="top", transform=self.us_ax.transAxes, fontsize=10,
+            bbox=dict(boxstyle="round,pad=0.35", fc="black", ec="#ffd27a", alpha=0.75))
+        self.calib_mode = False
+        self.calib_started = None
+        self.zero_msg = ""
+        self.zero_msg_until = 0.0
 
         # 오른쪽: IMU 6패널 (2열 x 3행)
         self.orient = OrientationView(self.fig.add_subplot(gs[0, 1], projection="3d"))
@@ -279,7 +316,7 @@ class CombinedGui:
 
         self.status = self.fig.text(0.03, 0.965, "", fontsize=9, va="top")
         self.fig.text(0.98, 0.965,
-                      "[R] 녹화 시작/정지 (US+IMU 동시)   [F] 스캔 시작/정지   [Z] 영점   [C] 자세 재설정   [Q] 종료",
+                      "[K] IMU 보정 안내   [Z] 영점   [R] 녹화 시작/정지 (US+IMU 동시)   [F] 스캔 시작/정지   [C] 자세 재설정   [Q] 종료",
                       fontsize=9, ha="right", va="top", alpha=0.75)
         self.fig.canvas.mpl_connect("key_press_event", self.on_key)
 
@@ -292,6 +329,10 @@ class CombinedGui:
             self.stream.reset_align()
         elif k == "z":
             self.zero_now()
+        elif k == "k":
+            self.calib_mode = not self.calib_mode
+            self.calib_started = time.time() if self.calib_mode else None
+            print("IMU 보정 안내 %s" % ("시작 — 안내를 따르십시오" if self.calib_mode else "종료"))
         elif k == "r":
             self.toggle_record()
         elif k == "f":
@@ -301,7 +342,20 @@ class CombinedGui:
     def zero_now(self):
         self.status.set_text("영점 캘리브레이션 %.1f초 — 센서를 움직이지 마세요..." % self.args.zero)
         self.fig.canvas.draw_idle(); self.fig.canvas.flush_events()
-        run_zero_calibration(self.stream, self.args.zero, retries=0)
+        ref = run_zero_calibration(self.stream, self.args.zero, retries=0, profile=self.args.zero_profile)
+        if ref is not None:
+            self.zero_msg = "영점 OK (%s: gyro sd %.3f, acc sd %.2f)" % (
+                self.args.zero_profile, ref.quality["gyro_sd"], ref.quality["accel_sd"])
+        else:
+            last = getattr(run_zero_calibration, "last", None)
+            q = last.quality if last is not None else {}
+            th = q.get("thresholds", {})
+            self.zero_msg = "영점 실패 — 움직임 감지 (gyro sd %.3f/%.3f, mean %.3f/%.3f, acc sd %.2f/%.2f). 정지 후 Z 다시" % (
+                q.get("gyro_sd", float("nan")), th.get("gyro_sd", float("nan")),
+                q.get("gyro_mean_abs", float("nan")), th.get("gyro_mean_abs", float("nan")),
+                q.get("accel_sd", float("nan")), th.get("accel_sd", float("nan")))
+        self.zero_msg_until = time.time() + 8.0
+        print(self.zero_msg)
 
     def toggle_record(self):
         # 스캔 명령이 가능한 프로브인데 아직 스캔 중이 아니면 녹화 시작과 함께 스캔을 시작한다
@@ -329,8 +383,13 @@ class CombinedGui:
             self.stream.logger = self._new_imu_logger()
             self.us.start_recording(self.session_dir)
             self.session_count += 1
-            print("녹화 시작 #%d: %s%s" % (self.session_count, self.session_dir,
-                                          "" if self.stream.zero else "   ⚠ 영점(zero_ref) 없음 — Z 를 먼저 누르는 것을 권장"))
+            cal = self.stream.snapshot().get("cal_status") or {}
+            warn = ""
+            if not self.stream.zero:
+                warn += "   ⚠ 영점(zero_ref) 없음 — Z 를 먼저"
+            if not calib_ready(cal):
+                warn += "   ⚠ IMU 보정 미완 (a%s g%s m%s) — K 로 보정" % (cal.get("acc"), cal.get("gyr"), cal.get("mag"))
+            print("녹화 시작 #%d: %s%s" % (self.session_count, self.session_dir, warn))
 
     def _new_imu_logger(self):
         z = self.stream.zero
@@ -338,7 +397,8 @@ class CombinedGui:
             self.session_dir, fmt="csv", prefix="imu",
             meta={"source": "BNO085 via XIAO nRF52840 Sense",
                   "port": self.args.port, "use_mag": not self.args.no_mag,
-                  "zero_ref": z.to_dict() if z else None})
+                  "zero_ref": z.to_dict() if z else None,
+                  "cal_status_at_start": dict(self.stream.snapshot().get("cal_status") or {})})
 
     def _write_session_meta(self, imu_path, imu_n, us_n):
         if self.session_dir is None:
@@ -407,6 +467,27 @@ class CombinedGui:
                 panel.update(hist, self.t0)
 
         r = s["rates"]
+        cal = s.get("cal_status") or {}
+        z = s.get("zero")
+        zero_ok = bool(z and z.quality.get("still"))
+        cal_ok = calib_ready(cal)
+        lines = ["세션 시작 체크리스트",
+                 "%s [K] IMU 보정  a%s g%s m%s" % ("[v]" if cal_ok else "[ ]", cal.get("acc", "-"), cal.get("gyr", "-"), cal.get("mag", "-")),
+                 "%s [Z] 영점 (정지 %.0f s)" % ("[v]" if zero_ok else "[ ]", self.args.zero),
+                 "%s [R] 녹화 (%s)" % ("[v]" if self.session_count else "[ ]",
+                                      "%d 프레임 자동 정지" % self.record_frames if self.record_frames else "수동")]
+        if self.zero_msg and time.time() < self.zero_msg_until:
+            lines.append("")
+            lines.append(self.zero_msg)
+        if self.calib_mode:
+            lines.append("")
+            lines.append("보정 안내: " + calib_step(cal))
+            if cal_ok and (cal.get("acc") or 0) >= 3:
+                lines.append("(K 로 안내 닫기)")
+        elif not cal_ok:
+            lines.append("")
+            lines.append("K 를 눌러 보정 안내를 여십시오")
+        self.checklist.set_text("\n".join(lines))
         rec = "● 녹화중 #%d" % self.session_count if (self.stream.logger or self.us.recording) else \
             ("○ 대기 (세션 %d 저장됨)" % self.session_count if self.session_count else "○ 대기")
         rec_detail = ""
@@ -421,9 +502,10 @@ class CombinedGui:
         if not us_snap["connected"]:
             us_state = "연결 안 됨"
         self.status.set_text(
-            "IMU  A%5.1f G%5.1f M%5.1f RV%5.1f Hz  crc=%d gaps=%d  %s   |   "
+            "IMU  A%5.1f G%5.1f M%5.1f RV%5.1f Hz  cal a%s/g%s/m%s  crc=%d gaps=%d  %s   |   "
             "US  %s  %.1f fps  frames=%d   |   %s%s"
             % (r[REC_ACCEL], r[REC_GYRO], r[REC_MAG], r[REC_RV],
+               cal.get("acc", "-"), cal.get("gyr", "-"), cal.get("mag", "-"),
                s["crc_errors"], s["gaps"], zero_state,
                us_state, us_snap["fps"], us_snap["frames"], rec, rec_detail))
         return self.artists()
@@ -461,6 +543,8 @@ def main():
                     help="US 표시 방향 (저장은 항상 원시)")
     ap.add_argument("--out-dir", default=os.path.join(_HERE, "..", "logs"))
     ap.add_argument("--zero", type=float, default=3.0, metavar="SEC")
+    ap.add_argument("--zero-profile", default="freehand", choices=("freehand", "bench"),
+                    help="영점 정지 판정 임계: freehand(손으로 든 프로브, 기본) / bench(탁자·로봇 마운트)")
     ap.add_argument("--fps", type=float, default=20.0, help="화면 갱신 fps")
     args = ap.parse_args()
     args.out_dir = os.path.abspath(args.out_dir)
@@ -483,9 +567,8 @@ def main():
                        use_mag=not args.no_mag, logger=None)
     stream.start()
 
-    if not _wait_probe(args.host):
-        print("주의: 프로브 TCP %s:5002 에 지금 닿지 않음 — Wi-Fi/스캔 상태 확인. "
-              "뷰어는 계속 재연결을 시도한다." % args.host)
+    # ⚠ 프로브 포트를 미리 열어 보지 않는다 (_wait_probe). C10UR 은 클라이언트를 하나만 받고, 열었다 닫은 뒤 한동안
+    # 다음 접속을 거부해 정작 수신기가 못 붙는다 (2026-09-09). 연결 상태는 상태줄의 "US 연결 안 됨" 으로 본다.
 
     us = UsReceiver(args.host, profile=profile)
     us.start()

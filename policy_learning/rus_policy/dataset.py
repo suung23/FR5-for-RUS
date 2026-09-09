@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -35,7 +36,7 @@ import numpy as np
 from .config import PolicyConfig
 from .imu_labels import SegmentLabel, SessionLabels, label_session, previous_motion
 from .perception import STATE_DIM, STATE_FEATURE_NAMES, PerceptionResult, apply_frame_transform, \
-    build_backend, perceive_session
+    build_backend, perceive_session, session_bmode_frames
 from .session import Session, SessionRecord, load_session, read_sessions_manifest
 
 logger = logging.getLogger(__name__)
@@ -222,7 +223,11 @@ def assign_splits(records: list[SessionRecord], cfg: PolicyConfig) -> dict[str, 
         subj_splits.setdefault(r.subject or r.session_dir, set()).add(out[r.session_dir])
     leak = {s: v for s, v in subj_splits.items() if len(v) > 1}
     if leak:
-        raise ValueError(f"피험자가 여러 split 에 걸쳐 있습니다: {leak}")
+        if not cfg.split.allow_subject_overlap:
+            raise ValueError(f"피험자가 여러 split 에 걸쳐 있습니다: {leak}  "
+                             "(피험자 1 명 파일럿이면 --set split.allow_subject_overlap=true 로 세션 단위 split)")
+        warnings.warn(f"세션 단위 split — 같은 피험자가 여러 split 에 있어 val/test 는 일반화가 아니라 "
+                      f"같은 사람 안의 재현성만 잰다: {leak}")
     return out
 
 
@@ -327,7 +332,8 @@ def build_dataset(cfg: PolicyConfig, out_path: Optional[Path] = None, compress: 
             labels = label_session(session.imu, cfg.timing, cfg.imu, cfg.labels, source=rec.source,
                                    convention=conv)
             perc = perceive_session(cfg, session, backend)
-            frames_all = apply_frame_transform(np.asarray(session.frames), cfg.perception.frame_transform)
+            # C10UR 극좌표 세션은 여기서 부채꼴 B-mode 로 바뀐다 (rus_policy.bmode). SL-2C 는 항등.
+            frames_all = session_bmode_frames(cfg, session)
             frames_t = session.frame_t_pc - cfg.timing.us_latency_s
             area_norm = session_area_norm(perc)
             rng = np.random.RandomState(cfg.dataset.obs_anchor_seed + si)

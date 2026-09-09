@@ -1,7 +1,18 @@
 session_dir,subject,source,split,note
-# 한 줄에 세션 하나. session_dir 은 절대경로 또는 이 파일 기준 상대경로 (us_imu_<stamp>/ 디렉터리).
-# subject 가 같으면 같은 split 에 묶인다 (피험자 누수 방지). split 을 비우면 --set split.strategy=subject_random.
-# source: freehand (IMU 라벨) | teleop (FK 라벨 — 로더 미구현)
-# 예)
-# /data/rus/us_imu_20260910_101500,P01,freehand,train,phantom A
-# /data/rus/us_imu_20260910_113000,P02,freehand,val,
+# 2026-09-09 C10UR Wi-Fi 손 수집, 팬텀 1 개 (subject 열 P01 = 팬텀 A). 팬텀이 하나라 세션 단위로 split. 앞 6 세션은 연속 이동 규약.
+# session_dir 은 이 파일 기준 상대경로. 다른 PC 에서는 경로만 바꾼다.
+../../imu_bench/logs/us_imu_20260909_153452,P01,freehand,train,day1 continuous-motion protocol
+../../imu_bench/logs/us_imu_20260909_160656,P01,freehand,train,day1 continuous-motion protocol
+../../imu_bench/logs/us_imu_20260909_160858,P01,freehand,train,day1 continuous-motion protocol
+../../imu_bench/logs/us_imu_20260909_161109,P01,freehand,train,day1 continuous-motion protocol
+../../imu_bench/logs/us_imu_20260909_161317,P01,freehand,train,day1 continuous-motion protocol
+../../imu_bench/logs/us_imu_20260909_161540,P01,freehand,train,day1 continuous-motion protocol
+../../imu_bench/logs/us_imu_20260909_163123,P01,freehand,train,day1
+../../imu_bench/logs/us_imu_20260909_163323,P01,freehand,train,day1
+../../imu_bench/logs/us_imu_20260909_163511,P01,freehand,train,day1
+../../imu_bench/logs/us_imu_20260909_164324,P01,freehand,train,day1
+../../imu_bench/logs/us_imu_20260909_164526,P01,freehand,val,day1
+../../imu_bench/logs/us_imu_20260909_164740,P01,freehand,test,day1
+../../imu_bench/logs/us_imu_20260909_164936,P01,freehand,train,day1
+../../imu_bench/logs/us_imu_20260909_165248,P01,freehand,val,day1
+../../imu_bench/logs/us_imu_20260909_165434,P01,freehand,test,day1

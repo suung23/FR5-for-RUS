@@ -37,6 +37,12 @@ def get_args() -> argparse.Namespace:
     )
     parser.add_argument("--config", required=True, help="Path to a YAML experiment config")
     parser.add_argument("--resume", default=None, help="Checkpoint to resume training from")
+    parser.add_argument(
+        "--init-weights",
+        default=None,
+        help="Fine-tuning: load only the model weights from this checkpoint (fresh optimizer, "
+        "schedule and epoch counter). Use --resume to continue an interrupted run instead.",
+    )
     parser.add_argument("--manifest", default=None, help="Override data.manifest")
     parser.add_argument("--output-dir", default=None, help="Override train.checkpoint_dir")
     parser.add_argument("--epochs", type=int, default=None, help="Override train.epochs")
@@ -107,6 +113,23 @@ def main() -> int:
     )
     if args.resume:
         trainer.resume(args.resume)
+    elif args.init_weights:
+        from rus_perception.utils.checkpoint import load_checkpoint
+
+        payload = load_checkpoint(args.init_weights, map_location="cpu")
+        missing, unexpected = model.load_state_dict(payload["model_state"], strict=False)
+        if unexpected or missing:
+            raise SystemExit(
+                f"--init-weights {args.init_weights} does not match the configured model "
+                f"(missing {len(missing)}, unexpected {len(unexpected)} tensors)."
+            )
+        logger.info(
+            "Initialised weights from %s (epoch %s, %s=%.4f); optimizer and schedule start fresh",
+            args.init_weights,
+            payload.get("epoch", "?"),
+            payload.get("best_metric_name", "score"),
+            float(payload.get("best_metric", float("nan"))),
+        )
 
     state = trainer.fit()
     (output_dir / "history.json").write_text(json.dumps(state.history, indent=2), encoding="utf-8")

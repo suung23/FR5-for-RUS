@@ -32,7 +32,7 @@ for _p in (_HERE, os.path.abspath(os.path.join(_HERE, "..", "..", "fr5_control",
         sys.path.insert(0, _p)
 
 CANDIDATE_HOSTS = ("192.168.1.1", "192.168.156.1", "192.168.157.1")
-CANDIDATE_PASSWORDS = ("12345678", "88888888")
+CANDIDATE_PASSWORDS = ("usccgba010", "12345678", "88888888")   # 첫 값: 뷰어가 만든 Windows 프로필에서 복구한 이 프로브의 키
 VIDEO_PORT, CONTROL_PORT = 5002, 5003
 
 
@@ -199,14 +199,17 @@ def main() -> int:
     ip, gw = iface_ipv4(iface)
     print(f"IPv4 {ip}  게이트웨이 {gw}")
     if args.connect_only:
+        # ⚠ 여기서 TCP 포트를 열었다 닫지 않는다. 프로브는 클라이언트를 하나만 받고, 열었다 바로 닫은 뒤에도 한동안
+        # 다음 접속을 거부한다 (Wi-Fi 재연결로만 풀림). 접속 확인은 ping 까지만 — 포트는 GUI 가 연다.
+        import subprocess
         h = gw or CANDIDATE_HOSTS[0]
         for i in range(5):
-            v, c = tcp_open(h, VIDEO_PORT, 3), tcp_open(h, CONTROL_PORT, 3)
-            print(f"  {h}: TCP {VIDEO_PORT} {'OK' if v else 'x'}   TCP {CONTROL_PORT} {'OK' if c else 'x'}")
-            if v and c:
+            ok = subprocess.run(["ping", "-n", "1", "-w", "1000", h], capture_output=True).returncode == 0
+            print(f"  {h}: ping {'OK' if ok else 'x'}")
+            if ok:
                 return 0
-            time.sleep(3)
-        print("포트가 열리지 않음 — 뷰어가 프로브를 잡고 있거나(종료할 것) 프로브가 절전. 동글을 재연결하면 프로브 세션이 리셋된다.")
+            time.sleep(2)
+        print("프로브에 ping 이 안 됨 — 프로브 전원/절전, 동글 연결 확인")
         return 4
     hosts = [h for h in ([gw] if gw else []) + list(CANDIDATE_HOSTS) if h]
     seen = []

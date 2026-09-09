@@ -71,9 +71,9 @@ class BmodeConverter:
             from us_scan_convert import ScanConverter
 
             self.geometry = fan_geometry_from_meta(meta)
-            # 부채꼴을 supersample × out_size 높이로 만든 뒤 (폭 ≈ 1.16 × 높이) 면적 평균으로 정방형 레터박스.
-            # out_size 로 바로 만들면 근거리에서 512 깊이 표본·160 라인이 픽셀보다 촘촘해 모아레가 생긴다 (2026-09-09 실측: 256 직접
-            # 변환은 줄무늬가 심하고 512→256 면적 평균은 깨끗하다).
+            # 부채꼴을 supersample × out_size 높이로 만든 뒤 (폭 ≈ 1.16 × 높이) 면적 평균으로 정방형 레터박스 —
+            # 512 깊이 표본이 256 px 로 줄 때 앨리어싱 없이 평균되게 한다. (2026-09-09 낮에 본 "모아레" 의 진짜 원인은
+            # 320×256 오배치였다 — 160×512 로 고친 뒤에는 supersample 없이도 줄무늬가 없다. 품질을 위해 2× 는 유지.)
             self._conv = ScanConverter(self.geometry, frame_shape[0], frame_shape[1],
                                        out_h=self.supersample * self.out_size)
 

@@ -48,12 +48,18 @@ def reachable(host: str, user: str) -> bool:
 
 
 def local_sessions(min_frames: int = 10) -> list[Path]:
-    """session.meta.json 이 있고 프레임이 min_frames 이상인 세션 (에피소드 모드의 60–300 프레임 세션 포함)."""
+    """유효한 session.meta.json 이 있고 프레임이 min_frames 이상인 세션 (에피소드 모드의 60–300 프레임 세션 포함)."""
+    import json
     out = []
     for d in sorted(LOGS.glob("us_imu_*")):
         fb = d / "us_frames.bin"
-        if not (d / "session.meta.json").is_file() or not fb.is_file():
+        mp = d / "session.meta.json"
+        if not mp.is_file() or not fb.is_file():
             continue
+        try:
+            json.loads(mp.read_text(encoding="utf-8"))
+        except Exception:
+            continue                      # 깨진 시험 세션 (NaN 메타 등)
         if fb.stat().st_size < min_frames * 65536:
             continue
         out.append(d)
@@ -72,16 +78,32 @@ def remote_sizes(host: str, user: str, remote_dir: str) -> dict[str, int]:
     return sizes
 
 
-def push_session(d: Path, host: str, user: str, remote_dir: str) -> float:
-    """scp -r 로 폴더 전송 (images/ 제외). 전송한 MB 를 돌려준다."""
-    files = [p for p in d.iterdir() if p.is_file()]
-    mb = sum(p.stat().st_size for p in files) / 1e6
-    ssh(host, user, f"mkdir -p {remote_dir}/{d.name}")
-    cmd = ["scp", "-q", *SSH_OPTS, *[str(p) for p in files], f"{user}@{host}:{remote_dir}/{d.name}/"]
-    r = subprocess.run(cmd)
-    if r.returncode != 0:
-        raise RuntimeError(f"scp 실패 ({d.name}, exit {r.returncode})")
-    return mb
+def session_mb(d: Path) -> float:
+    return sum(p.stat().st_size for p in d.iterdir() if p.is_file()) / 1e6
+
+
+def push_session(d: Path, host: str, user: str, remote_dir: str, attempts: int = 3) -> float:
+    """tar 스트림 한 번으로 폴더 전송 (images/ 제외): ssh 접속이 세션당 하나라 mkdir+scp 두 번보다 빠르고
+    sshd 의 접속 제한에도 덜 걸린다. 실패하면 attempts 회까지 재시도. 전송한 MB 를 돌려준다."""
+    mb = session_mb(d)
+    last = None
+    for k in range(attempts):
+        tar = subprocess.Popen(["tar", "-cf", "-", "--exclude", "images", "-C", str(LOGS), d.name],
+                               stdout=subprocess.PIPE)
+        try:
+            r = subprocess.run(["ssh", *SSH_OPTS, f"{user}@{host}",
+                                f"mkdir -p {remote_dir} && tar -xf - -C {remote_dir}"],
+                               stdin=tar.stdout, capture_output=True, text=True, timeout=60 + mb * 2)
+            tar.stdout.close(); tar.wait(timeout=10)
+            if r.returncode == 0 and tar.returncode == 0:
+                return mb
+            last = (r.stderr or "").strip()[-200:] or f"exit {r.returncode}/{tar.returncode}"
+        except subprocess.TimeoutExpired:
+            last = "timeout"
+            tar.kill()
+        time.sleep(2 * (k + 1))
+        print("    재시도 %d/%d (%s)" % (k + 2, attempts, last)) if k + 1 < attempts else None
+    raise RuntimeError(f"전송 실패 ({d.name}): {last}")
 
 
 def pull_masks(host: str, user: str, remote_repo: str) -> None:
@@ -136,16 +158,46 @@ def main() -> int:
             print("  ", d.name, "%.0f MB" % (sum(p.stat().st_size for p in d.iterdir() if p.is_file()) / 1e6))
         return 0
     total_mb, t0 = 0.0, time.time()
+    failed: list[str] = []
+    others = [h for h in HOSTS if h != host]
     for k, d in enumerate(todo, 1):
         t = time.time()
-        mb = push_session(d, host, args.user, remote_dir)
+        try:
+            mb = push_session(d, host, args.user, remote_dir)
+        except RuntimeError as e:
+            # 이 경로가 죽었으면 다른 주소(공유기 Wi-Fi)로 넘어가 본다
+            print("  ! %s" % e)
+            switched = False
+            for h in others:
+                if reachable(h, args.user):
+                    print("  → %s 로 전환" % h)
+                    host, others, switched = h, [x for x in HOSTS if x != h], True
+                    break
+            if not switched or not reachable(host, args.user):
+                failed.append(d.name)
+                continue
+            try:
+                mb = push_session(d, host, args.user, remote_dir)
+            except RuntimeError as e2:
+                print("  ! %s" % e2)
+                failed.append(d.name)
+                continue
         total_mb += mb
         print("  [%d/%d] %s  %.0f MB  %.1f MB/s" % (k, len(todo), d.name, mb, mb / max(time.time() - t, 1e-3)))
     if todo:
-        print("완료: %.0f MB, %.0f s, 평균 %.1f MB/s → %s:%s" % (
+        print("전송: %.0f MB, %.0f s, 평균 %.1f MB/s → %s:%s" % (
             total_mb, time.time() - t0, total_mb / max(time.time() - t0, 1e-3), host, remote_dir))
     else:
         print("보낼 새 세션이 없습니다.")
+    # 검증: 리눅스 쪽 us_frames.bin 크기가 로컬과 같은지
+    have = remote_sizes(host, args.user, remote_dir)
+    checked = [d for d in local_sessions() if not args.sessions or d.name in args.sessions]
+    bad = [d.name for d in checked if have.get(d.name) != (d / "us_frames.bin").stat().st_size]
+    if bad or failed:
+        print("⚠ 리눅스에 없거나 크기가 다른 세션 %d: %s" % (len(bad), " ".join(bad[:10]) + (" ..." if len(bad) > 10 else "")))
+        print("  다시 실행하면 이것들만 보냅니다.")
+        return 1
+    print("검증 OK: 세션 %d 개가 리눅스에 같은 크기로 있습니다 (리눅스 전체 %d)." % (len(checked), len(have)))
     return 0
 
 

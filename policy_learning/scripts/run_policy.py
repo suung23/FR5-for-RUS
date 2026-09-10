@@ -174,6 +174,9 @@ class PolicyRunner(Node):
         self.state_t: list = []
         self.finished = False
         self._warned = False
+        self._uncompensated = ""    # 보상 안 된 렌치가 오고 있으면 그 frame_id
+        self._idle_reason = ""      # 왜 지령하지 않는가. 바뀔 때와 5 s 마다 알린다.
+        self._idle_logged = 0.0
         self.create_timer(1.0 / cfg.timing.policy_hz, self._tick)
         self.get_logger().info(
             f"준비됨 — {'DRY-RUN (지령 없음)' if not args.execute else '실행 모드'}, 축={args.axes}, "
@@ -184,7 +187,18 @@ class PolicyRunner(Node):
     def _on_pose(self, msg: Pose):
         self.pose = (msg.position, msg.orientation)
 
+    #: 중력 보상된 렌치임을 알리는 frame_id 접미사. us_diff_ik_node 와 같은 규약이다.
+    COMPENSATED_FRAME_SUFFIX = "_probe"
+
     def _on_wrench(self, msg: WrenchStamped):
+        # 보상 전 렌치에는 마운트·프로브 자중이 자세에 따라 10 N 가량 실려 있다. 그것을
+        # 접촉력으로 믿으면 start_force 게이트가 **닿지 않았는데도** 열린다. 브리지는 교정이
+        # 유효할 때만 보상값을 내고 frame_id 접미사로 그것을 알린다 (telemetry_bridge §1243).
+        if not msg.header.frame_id.endswith(self.COMPENSATED_FRAME_SUFFIX):
+            self.wrench = None
+            self._uncompensated = msg.header.frame_id
+            return
+        self._uncompensated = ""
         f = msg.wrench.force
         self.wrench = np.array([f.x, f.y, f.z], np.float32)
 
@@ -294,27 +308,56 @@ class PolicyRunner(Node):
         return lin, ang
 
     # -- 주기 --------------------------------------------------------------
+    def _idle(self, reason: str) -> None:
+        """지령하지 않는 이유를 알린다.
+
+        조용히 멈춰 있으면 조작자는 "눌렀는데 아무 일도 없다" 만 본다 — 접촉이 없는 것인지,
+        시작 조건이 안 열린 것인지, 렌치가 아예 안 오는 것인지 구별할 수 없다. 이유가 바뀔
+        때와 5 s 마다 한 번 찍는다 (매 tick 찍으면 5 Hz 로 로그가 흐른다).
+        """
+        self._stop()
+        now = time.time()
+        if reason != self._idle_reason or (now - self._idle_logged) > 5.0:
+            self.get_logger().warn(f"대기 — {reason}")
+            self._idle_reason, self._idle_logged = reason, now
+
     def _tick(self):
         import torch
         fn = float(np.linalg.norm(self.wrench)) if self.wrench is not None else 0.0
-        gate = (self.enabled and not self.retreating and fn >= self.args.start_force
-                and len(self.buf) > 0)
-        if not gate:
-            self._stop()
-            return
+        if not self.enabled:
+            return self._idle(f"정책이 꺼져 있다 ({self.args.enable_topic} 에 true)")
+        if self.retreating:
+            return self._idle("/diag/retreating — 제어 스택이 후퇴 중")
+        if self.wrench is None:
+            if self._uncompensated:
+                return self._idle(
+                    f"렌치가 **중력 보상되지 않았다** (frame_id={self._uncompensated!r}) — "
+                    "교정을 마쳐야 접촉력을 믿을 수 있다. 보상 전 값에는 자중 10 N 이 실려 있다")
+            return self._idle(f"렌치가 오지 않는다 ({self.args.robot_namespace}/wrench_px6d)")
+        if fn < self.args.start_force:
+            return self._idle(f"접촉 부족 ‖F‖={fn:.2f} N < {self.args.start_force:.2f} N")
+        if not self.buf:
+            return self._idle("영상 프레임이 아직 없다")
         obs = self._observation()
         if obs is None:
-            self._stop()
-            return
+            return self._idle("유효한 관측 프레임이 없다 (전부 오래됐거나 무효)")
         qn = obs.pop("quality_now")
+        if self._idle_reason:
+            self.get_logger().warn(f"대기 해제 — {self._idle_reason} 가 풀렸다")
+            self._idle_reason = ""
 
         # 시작 조건. 열리기 전에는 아무것도 지령하지 않는다 — 잘 보이는 자세에서 출발하면
         # 아무것도 안 해도 성공이라 찾는 능력을 못 잰다.
         if self.t_start is None:
             st = self.states[-1] if self.states else None
-            if st is None or not self.gate.update(t, st):
-                self._stop()
-                return
+            if st is None:
+                return self._idle("지각 상태가 아직 없다")
+            if not self.gate.update(t, st):
+                from rus_policy.episode import AREA, QUALITY
+                return self._idle(
+                    f"시작 조건 미충족 — 면적비 {st[AREA]:.3f} (< {self.args.gate_area_max}) · "
+                    f"Q_raw {st[QUALITY]:.2f} (≥ {self.args.gate_quality_min}) · "
+                    f"유지 {self.gate.held_s:.1f}/{self.args.gate_confirm_s:.1f} s")
             self.t_start = t
             self.get_logger().warn(
                 f"시작 조건 충족 — 에피소드 시작 (조건 {self.condition}, "
@@ -331,8 +374,8 @@ class PolicyRunner(Node):
             self.placebo.push(t, obs)
             past = self.placebo.take(t)
             if past is None:
-                self._stop()          # 아직 지연만큼 안 쌓였다 — 위약이 성립하지 않는다
-                return
+                # 아직 지연만큼 안 쌓였다 — 위약이 성립하지 않는다
+                return self._idle(f"위약 관측 버퍼 채우는 중 ({self.placebo.n_buffered} 장)")
             obs = past
         with torch.no_grad():
             sel = self.model.select_action(obs, n_samples=self.args.z_samples,

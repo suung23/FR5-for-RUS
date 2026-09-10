@@ -46,12 +46,14 @@ def main() -> int:
     if len(segs) < args.n_segments:
         print(f"이동 구간이 {len(segs)} 개뿐입니다 (필요 {args.n_segments}). 정지를 더 길게 두거나 임계를 조정하십시오.")
         return 1
-    # 누적 회전각 (∫|ω| dt) 가 큰 구간 n 개 → 시간 순
+    # 누적 회전각 (∫|ω| dt) 가 큰 구간 n 개 → 시간 순.
+    # np.trapz 는 NumPy 2.0 에서 제거됐다 (np.trapezoid 로 이름만 바뀜) — 두 쪽 다 받는다.
+    integrate = getattr(np, "trapezoid", None) or np.trapz
     rot = []
     for sg in segs:
         sl = slice(sg.a1, sg.b0 + 1)
         w = np.linalg.norm(imu.gyr[sl], axis=1)
-        rot.append(float(np.trapz(w, imu.t_dev[sl])) if w.size > 1 else 0.0)
+        rot.append(float(integrate(w, imu.t_dev[sl])) if w.size > 1 else 0.0)
     order = sorted(np.argsort(rot)[-args.n_segments:])
     chosen = [segs[i] for i in order]
     print("회전 구간 (시간 순 → x, y, z):")

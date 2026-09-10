@@ -32,7 +32,7 @@
 
 프로브 (`--probe`, 2026-09-09): sl2c (기본, 256×256) | c10ur (Konted, Wi-Fi AP "US-1C …", 160 라인 × 512 깊이 표본의
 극좌표 candidate, 10 fps, 시작/정지 명령 있음). 상세는 fr5_vision/us_protocol.py 의 ProbeProfile.
-Windows 에서는 IMU 포트를 비우면 VID 2886 의 COM 포트를 자동으로 잡는다.
+IMU 포트를 비우면 VID 2886 의 포트를 자동으로 잡는다 (윈도우·리눅스 공통).
 
     sg dialout -c "python3 host/us_imu_gui.py --host 192.168.1.1"
     sg dialout -c "python3 host/us_imu_gui.py --host 192.168.1.1 --orientation rot90_cw"
@@ -913,8 +913,12 @@ def main():
     ap.add_argument("--fan-depth", type=float, default=220.0, help="깊이 mm (뷰어 D:220mm)")
     ap.add_argument("--fan-flip", action="store_true", help="라인 순서 반전 (좌우 검증용)")
     ap.add_argument("--no-sync", action="store_true", help="저장 후 자동 동기화(sync.npz) 를 끈다")
-    ap.add_argument("--port", default=os.environ.get("IMU_PORT", None if sys.platform == "win32" else "/dev/ttyACM0"),
-                    help="IMU 시리얼 포트 (Windows 기본: VID 2886 자동 탐지)")
+    # 리눅스도 비워 둔다 — VID 2886 자동 탐지는 `list_ports` 가 플랫폼과 무관하게 해 준다.
+    # 예전 기본값 `/dev/ttyACM0` 은 이 셀에서 **PX6D F/T 센서**다 (IMU 는 ttyACM1, 게다가
+    # 꽂는 순서로 뒤바뀐다). 그대로 두면 IMU 대신 힘 센서를 열고, 921600 bps 스트림을
+    # 115200 으로 읽어 조용히 쓰레기를 낸다. 2026-09-10.
+    ap.add_argument("--port", default=os.environ.get("IMU_PORT"),
+                    help="IMU 시리얼 포트 (기본: VID 2886 자동 탐지)")
     ap.add_argument("--baud", type=int, default=115200)
     ap.add_argument("--beta", type=float, default=0.05)
     ap.add_argument("--no-mag", action="store_true", help="6축 IMU-only 퓨전")
@@ -935,7 +939,10 @@ def main():
         except ImportError:
             args.port = None
         if args.port is None:
-            print("IMU 포트를 찾지 못했습니다 (VID 2886) — --port 로 지정하십시오"); return 1
+            print("IMU 포트를 찾지 못했습니다 (VID 2886) — 보드가 꽂혀 있는지 확인하거나 "
+                  "--port 로 지정하십시오.\n"
+                  "  ⚠ 리눅스에서 /dev/ttyACM0 은 PX6D F/T 센서일 수 있습니다. "
+                  "/dev/serial/by-id/ 로 확인하십시오."); return 1
     profile = PROFILES[args.probe]
     if args.display == "auto":
         args.display = "fan" if profile.name == "c10ur" else "polar"

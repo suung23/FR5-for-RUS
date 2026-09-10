@@ -50,6 +50,17 @@ OBS_VEC_NAMES: tuple[str, ...] = (
     "has_force",
 )
 OBS_VEC_DIM = len(OBS_VEC_NAMES)
+
+
+def _sigma6(sig3) -> np.ndarray:
+    """저장된 3 축 σ (병진, 병진, 회전) → 6 축 (병진×3, 회전×3).
+
+    ``sigma_for`` 가 병진 하나·회전 하나의 스칼라로 만든 값이라 축을 늘려도 정보 손실이 없다.
+    기존 h5 를 그대로 쓰기 위한 확장이다 (재빌드 불필요).
+    """
+    a = np.asarray(sig3, np.float32)
+    s_t, s_r = float(a[0]), float(a[2])
+    return np.array([s_t, s_t, s_t, s_r, s_r, s_r], np.float32)
 SOURCE_IDS = {"freehand": 0, "teleop": 1}
 SPLITS = ("train", "val", "test")
 
@@ -429,9 +440,12 @@ class PolicyH5Dataset:
             "frame_valid": torch.from_numpy(np.asarray(fh["obs/frame_valid"][j], bool)),
             "state": torch.from_numpy(np.nan_to_num(np.asarray(fh["obs/state"][j], np.float32))),
             "vec": torch.from_numpy(np.nan_to_num(np.asarray(fh["obs/vec"][j], np.float32))),
-            "P": torch.from_numpy(np.asarray(fh["label/P"][j], np.float32)),
-            "sigma_net": torch.from_numpy(np.asarray(fh["label/sigma_net"][j], np.float32)),
-            "sigma_shape": torch.from_numpy(np.asarray(fh["label/sigma_shape"][j], np.float32)),
+            # 6 자유도 전체를 싣는다 (2026-09-10). label/P 는 (x, y, θz) 3 축 투영이라 품질을 좌우하는
+            # 기울임(θx)·부채질(θy)·빔방향(z) 이 빠진다 — 그걸 주지 않으면 Q̂ 이 행동을 볼 수 없다.
+            # label/P6 는 기존 h5 에도 이미 들어 있으므로 데이터셋을 다시 만들 필요는 없다.
+            "P": torch.from_numpy(np.asarray(fh["label/P6"][j], np.float32)),
+            "sigma_net": torch.from_numpy(_sigma6(fh["label/sigma_net"][j])),
+            "sigma_shape": torch.from_numpy(_sigma6(fh["label/sigma_shape"][j])),
             "Q": torch.from_numpy(np.nan_to_num(np.asarray(fh["label/Q"][j], np.float32))),
             "Q_valid": torch.from_numpy(np.asarray(fh["label/Q_valid"][j], bool)),
             "Q_area": torch.from_numpy(np.nan_to_num(np.asarray(fh["label/Q_area"][j], np.float32))),

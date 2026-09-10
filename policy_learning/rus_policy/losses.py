@@ -27,7 +27,7 @@ import torch
 import torch.nn.functional as F
 
 from .config import LossConfig
-from .model import ActPolicy, PolicyOutput
+from .model import AXIS_NAMES, AXIS_UNITS, Y_AXIS, ActPolicy, PolicyOutput
 
 
 def huber(x: torch.Tensor, delta: torch.Tensor) -> torch.Tensor:
@@ -66,7 +66,13 @@ def compute_loss(model: ActPolicy, out: PolicyOutput, batch: dict[str, torch.Ten
 
     # (a) 순변위 + 형상
     w_net = (1.0 / sig_net ** 2).clamp(max=cfg.net_weight_cap)
-    delta_net = cfg.huber_delta_sigma * sig_net
+    # δ 는 "도달 가능한 잔차" 규모여야 한다. 라벨 정밀도(σ_net≈1mm)에 묶어 두면 δ≈2mm 가 되는데
+    # 실제 잔차는 10mm 대라 모든 샘플이 L1 영역에 들어간다. 그러면 그래디언트 크기가 오차와 무관해져
+    # (3mm 틀리나 30mm 틀리나 같은 힘) 최적해가 가중 중앙값 = 상수가 된다 — 2026-09-10 exp1~3 이
+    # 전부 상수 예측기로 붕괴한 원인. 실측 라벨 산포 수준으로 바닥을 깐다.
+    mm_, dg_ = cfg.huber_delta_min_mm, cfg.huber_delta_min_deg
+    floor = torch.tensor([mm_, mm_, mm_, dg_, dg_, dg_], device=sig_net.device, dtype=sig_net.dtype)
+    delta_net = torch.maximum(cfg.huber_delta_sigma * sig_net, floor)
     net_err = P_hat[:, -1] - P_lab[:, -1]
     if model.head_type == "cvae":
         l_net = (w_net * huber(net_err, delta_net)).sum(1).mean()
@@ -78,7 +84,9 @@ def compute_loss(model: ActPolicy, out: PolicyOutput, batch: dict[str, torch.Ten
         # 이산 헤드에서도 연속 헤드의 순변위를 약하게 맞춘다 (형상·Q̂ 입력의 스케일 유지)
         l_net = l_net + 0.1 * (w_net * huber(net_err, delta_net)).sum(1).mean()
     w_shape = cfg.w_shape / sig_shape ** 2
-    delta_shape = cfg.huber_delta_sigma * sig_shape
+    # 형상 항도 같은 함정에 빠진다. 바닥을 σ_shape/σ_net 비율만큼 줄여 같은 관계를 유지한다.
+    delta_shape = torch.maximum(cfg.huber_delta_sigma * sig_shape,
+                                floor * (sig_shape / sig_net.clamp_min(1e-6)))
     shape_err = trajectory_shape(P_hat) - trajectory_shape(P_lab)              # (B,k−1,3)
     l_shape = (w_shape[:, None] * huber(shape_err, delta_shape[:, None])).sum(2).mean(1).mean() \
         if k > 1 else torch.zeros((), device=P_lab.device)
@@ -86,9 +94,24 @@ def compute_loss(model: ActPolicy, out: PolicyOutput, batch: dict[str, torch.Ten
     logs["act_net"], logs["act_shape"] = l_net.item(), l_shape.item()
 
     # (d) 품질 헤드 — 시연된 chunk (라벨) 에 대한 Q̃ 로 감독
-    Q_hat = model.predict_quality(out.memory_pooled, P_lab)
     qmask = batch["Q_valid"].float()
-    l_qual = ((Q_hat - batch["Q"]) ** 2 * qmask).sum() / qmask.sum().clamp_min(1.0)
+    denom = qmask.sum().clamp_min(1.0)
+
+    def _mse(pred: torch.Tensor) -> torch.Tensor:
+        return ((pred - batch["Q"]) ** 2 * qmask).sum() / denom
+
+    base, resid = model.quality_parts(out.memory_pooled, P_lab)
+    if model.quality_residual:
+        # b 는 관측만으로 Q 를 맞히고, 잔차는 b 가 남긴 것만 맡는다. b.detach() 로 그래디언트를
+        # 끊어야 잔차 경로가 설명한 몫을 b 가 도로 흡수하지 않는다.
+        l_base = _mse(base)
+        l_resid = _mse(base.detach() + resid)
+        l_qual = l_base + l_resid
+        logs["qual_base"], logs["qual_resid"] = l_base.item(), l_resid.item()
+        # 진단: 잔차가 실제로 행동을 쓰고 있는가 (0 이면 Q̂ 이 행동에 눈이 멀었다는 뜻)
+        logs["qual_resid_rms"] = float(resid.detach().pow(2).mean().sqrt())
+    else:
+        l_qual = _mse(base + resid)
     logs["qual"] = l_qual.item()
     logs["qual_frac"] = float(qmask.mean())
 
@@ -127,8 +150,10 @@ def compute_loss(model: ActPolicy, out: PolicyOutput, batch: dict[str, torch.Ten
     # 진단: 축별 순변위 절대오차 (mm, mm, deg)
     with torch.no_grad():
         ae = net_err.abs().mean(0)
-        logs["mae_x_mm"], logs["mae_y_mm"], logs["mae_th_deg"] = float(ae[0]), float(ae[1]), float(ae[2])
-        sign_ok = (torch.sign(P_hat[:, -1, 1]) == torch.sign(P_lab[:, -1, 1])).float()
-        big = P_lab[:, -1, 1].abs() > sig_net[:, 1]
+        for i, (nm, un) in enumerate(zip(AXIS_NAMES, AXIS_UNITS)):
+            logs[f"mae_{nm}_{un}"] = float(ae[i])
+        yi = Y_AXIS
+        sign_ok = (torch.sign(P_hat[:, -1, yi]) == torch.sign(P_lab[:, -1, yi])).float()
+        big = P_lab[:, -1, yi].abs() > sig_net[:, yi]
         logs["vy_sign_acc"] = float(sign_ok[big].mean()) if big.any() else float("nan")
     return total, logs

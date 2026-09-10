@@ -16,6 +16,7 @@ from pathlib import Path
 
 from _common import add_config_args, config_from_args
 
+from rus_policy.model import AXIS_NAMES, AXIS_UNITS
 from rus_policy.train import Trainer
 
 
@@ -34,9 +35,12 @@ def main() -> int:
         trainer.resume(Path(args.resume))
     history = trainer.fit()
     last = history[-1] if history else {}
-    print(f"\n완료: {trainer.out}  best val {trainer.best:.4f}")
-    for key in ("val/mae_x_mm", "val/mae_y_mm", "val/mae_th_deg", "val/vy_sign_acc",
-                "val/mode_collapse_vy_std", "val/mode_margin", "val/select_vy_sign_acc"):
+    print(f"\n완료: {trainer.out}  best {cfg.train.checkpoint_metric} {trainer.best:.4f}")
+    keys = ["val/select_nmae", "val/leak_gap_mm", "val/sigma_net_y_mm", "val/qual",
+            *[f"val/select_mae_{n}_{u}" for n, u in zip(AXIS_NAMES, AXIS_UNITS)],
+            *[f"val/mae_{n}_{u}" for n, u in zip(AXIS_NAMES, AXIS_UNITS)],
+            "val/vy_sign_acc", "val/mode_collapse_vy_std", "val/mode_margin", "val/select_vy_sign_acc"]
+    for key in keys:
         if key in last:
             print(f"  {key:28s} {last[key]:.4f}")
     return 0

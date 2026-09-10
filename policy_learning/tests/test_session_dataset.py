@@ -147,7 +147,8 @@ def test_torch_dataset_items(built_dataset):
     assert len(ds) > 0
     item = ds[0]
     assert item["frames"].dtype == torch.float32 and 0.0 <= item["frames"].min() and item["frames"].max() <= 1.0
-    assert item["P"].shape[-1] == 3 and item["Q_valid"].dtype == torch.bool
+    assert item["P"].shape[-1] == 6 and item["Q_valid"].dtype == torch.bool   # 6 자유도 전체
+    assert item["sigma_net"].shape[-1] == 6 and item["sigma_shape"].shape[-1] == 6
     assert torch.isfinite(item["state"]).all() and torch.isfinite(item["Q"]).all()
     va = PolicyH5Dataset(built_dataset, split="val")
     assert set(ds.indices).isdisjoint(set(va.indices))

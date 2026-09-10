@@ -37,7 +37,10 @@ class TimingConfig:
     # ⏳ m = ceil(f_us / f_dither). f_us 는 가정하지 않는다 — inspect_session.py 가 세션에서 잰 값으로
     # 재산정한다 (§1.3). 16 은 "8 fps × 2 s" 의 자리표시자일 뿐이다.
     obs_frames: int = 16
-    us_latency_s: float = 0.0       # ⏳ US 고정 엔드투엔드 지연 (§7.1). inspect_session.py --latency 로 실측
+    # US 고정 엔드투엔드 지연 (§7.1). 200ms 는 사후 추정 확정값 — 정책 스텝(1/5s)과 정확히 같아서
+    # 0 으로 두면 관측과 행동이 한 스텝 어긋난다. dataset.py 가 빌드 때 프레임 시각에서 빼므로
+    # 이 값을 바꾸면 **데이터셋을 다시 빌드해야** 반영된다 (학습만 다시 돌려선 안 바뀐다).
+    us_latency_s: float = 0.200
     obs_frame_max_age_s: float = 4.0  # 관측 프레임이 이보다 오래되면 무효 마스크
 
     @property
@@ -160,10 +163,16 @@ class ModelConfig:
     frame_channels: list = field(default_factory=lambda: [32, 64, 128, 256])
     frame_input_size: list = field(default_factory=lambda: [128, 128])  # 인코더 입력 (저장본을 리사이즈)
     # 이산 헤드: 축당 bins, ±range. 🟡 §5.3(g) 축당 21빈(±20 mm, 2 mm)
-    discrete_bins: int = 21
-    discrete_range_mm: float = 20.0
+    # 범위를 ±20→±80mm 로 넓히면서 빈 폭이 2→8mm 가 되므로 개수도 같이 올린다 (폭 4mm).
+    # 실행시 경로의 오차 하한이 곧 빈 폭이라, 도달 목표(수 mm)보다 굵으면 의미가 없다.
+    discrete_bins: int = 41
+    discrete_range_mm: float = 80.0    # 라벨 σ 가 27mm — ±20mm 로는 상당수 라벨이 표현 범위 밖이었다 (2026-09-10)
     discrete_range_deg: float = 10.0
     q_head_hidden: int = 256
+    # 잔차 분해 Q̂ = b(o) + [g(o,A) − g(o,0)] (2026-09-10). 단일 MLP 로는 E[Q|o] 만 맞혀도 MSE 가
+    # 거의 최소라 행동을 무시하는 해에 갇힌다 (행동을 0 으로 지워도 출력 변화가 Q std 의 2~7%).
+    # 관측 경로 b 와 행동 경로 g 를 나누고, g 의 목표를 b 가 설명 못 한 잔차로 고정한다.
+    quality_residual: bool = True
 
 
 @dataclass
@@ -177,9 +186,17 @@ class LossConfig:
     w_minus_over_plus: float = 5.0
     # β (§5.3g 2026-09-08): 0.02 는 누설 쪽으로 치우친다. 0.5 에서 시작해 {0.1, 0.5, 1, 5} 스윕,
     # 선택 규칙은 train.py 의 leak_gap_mm. 워밍업은 train.beta_warmup_epochs.
+    # 2026-09-10 exp1: β=0.5 고정은 ep19 에 leak_gap 14.25mm (σ_net,y≈1.42mm 의 10배) 로 누설했다.
+    # train.beta_adapt 가 켜져 있으면 이 값은 시작점일 뿐이고 실제 β 는 epoch 마다 조정된다.
     beta_kl: float = 0.5
     w_shape: float = 0.3
     huber_delta_sigma: float = 2.0      # δ = 2σ
+    # δ 하한 (2026-09-10). 실측 라벨 |Δ| 는 평균 (14.5, 13.4, 0.96), σ 는 (27.2, 25.8, 1.5) 인데
+    # σ_net 은 1mm 수준이라 δ=2σ_net≈2mm 로는 잔차 전체가 L1 영역이었다. 64 샘플 암기 시험:
+    # δ≈2mm 에서 train mae 12mm 로 80 epoch 정체 → δ≈20mm 에서 4.7mm. σ_net 이 작은 FK 라벨
+    # (σ=0.1mm)도 이 바닥 덕에 같이 구제된다 (huber_delta_sigma 만 올려서는 안 되던 부분).
+    huber_delta_min_mm: float = 20.0
+    huber_delta_min_deg: float = 2.0
     B_z: float = 1000.0                 # N·s/m  (§8.1 🟡)
     v_z_max_mm_s: float = 10.0          # mm/s
     net_weight_cap: float = 400.0       # (1/σ²) 상한 — FK 라벨이 배치를 독점하지 않게
@@ -203,6 +220,23 @@ class TrainConfig:
     log_every: int = 20
     max_train_samples: Optional[int] = None   # 디버그용 서브샘플
     augment: bool = True
+    # 체크포인트 기준 (§5.3g 2026-09-10). "select_nmae" = 실행시 경로(사전분포 z + Q̂)의 σ 정규화 오차.
+    # "total" 은 사후분포 경로(라벨이 z 로 들어감)라 누설이 심해질수록 좋아진다 — exp1 은 그 기준으로
+    # ep19 의 가장 많이 누설된 체크포인트를 best 로 골랐다.
+    checkpoint_metric: str = "select_nmae"    # "select_nmae" | "total"
+    # β 자동 조정 — train.py 헤더의 선택 규칙(gap ≤ σ_net 이면서 vy_std > 0 인 최소 β)을 epoch 마다 적용.
+    # exp1(β=0.5 고정)은 ep5~7 붕괴 → ep19 누설로 넘어갔다. 고정 β 하나로는 양쪽을 다 못 피한다.
+    # 고정 β 스윕을 하려면 beta_adapt=false.
+    beta_adapt: bool = True
+    beta_adapt_target_sigma: float = 1.0      # 누설 상한: leak_gap ≤ 이 값 × σ_net,y
+    beta_adapt_collapse_sigma: float = 0.25   # 붕괴 하한: vy_std < 이 값 × σ_net,y
+    beta_adapt_rate: float = 1.5              # epoch 당 최대 배율
+    # z 다양성은 Q̂ 가 그중에서 옳은 걸 고를 수 있을 때만 값어치가 있다. 선택기가 우연 수준이면
+    # β 를 낮춰 봐야 후보만 흩어지고 실행시 오차가 커진다 (exp2 ep5→6: β 0.5→0.333 에서
+    # sel_nmae 9.70→10.86). select_vy_sign_acc 가 이 값을 넘을 때만 하향을 허용한다.
+    beta_adapt_selector_acc: float = 0.55
+    beta_min: float = 0.05
+    beta_max: float = 32.0
 
 
 @dataclass

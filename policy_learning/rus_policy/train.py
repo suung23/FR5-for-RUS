@@ -8,9 +8,13 @@
   * KL 워밍업             β 를 train.beta_warmup_epochs 동안 0 → loss.beta_kl 로 올린다.
   * mode_margin           Q̂ 로 고른 모드와 반대 부호 모드의 점수 차. 잡음 수준이면 대칭 붕괴 (L11).
   * vy_sign_acc           |Δy| > σ 인 샘플에서 v_y 부호 정확도.
-  * mae_*                 축별 순변위 절대오차 (mm, mm, deg).
+  * mae_*                 축별 순변위 절대오차. 6 자유도 전부 (x,y,z mm · θx,θy,θz deg).
 
-체크포인트: <output_dir>/last.pt, best.pt (검증 total 기준). 이력: metrics.jsonl.
+  * select_nmae           실행시 경로(사전분포 z + Q̂ 선택)의 σ 정규화 절대오차. 사후분포 경로의 mae_*
+                          와 달리 라벨을 보지 않으므로 누설에 면역이다. 체크포인트 기준의 기본값.
+
+체크포인트: <output_dir>/last.pt, best.pt (train.checkpoint_metric 기준, 기본 select_nmae). 이력:
+metrics.jsonl. β 는 train.beta_adapt 가 켜져 있으면 위 선택 규칙에 따라 epoch 마다 조정된다.
 """
 
 from __future__ import annotations
@@ -29,7 +33,7 @@ from torch.utils.data import DataLoader
 from .config import PolicyConfig, save_config
 from .dataset import PolicyH5Dataset
 from .losses import compute_loss
-from .model import ActPolicy, build_policy, count_parameters
+from .model import AXIS_NAMES, AXIS_UNITS, Y_AXIS, ActPolicy, build_policy, count_parameters
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +103,7 @@ class Trainer:
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
         self.epoch = 0
         self.best = float("inf")
+        self.beta_mult = 1.0          # β 자동 조정 배율 (실제 β = loss.beta_kl × 워밍업 × 이 값)
         self.history: list[dict[str, Any]] = []
 
     # ------------------------------------------------------------------ 체크포인트
@@ -108,6 +113,7 @@ class Trainer:
             "model_state": self.model.state_dict(), "optimizer_state": self.opt.state_dict(),
             "scheduler_state": self.sched.state_dict(), "scaler_state": self.scaler.state_dict(),
             "epoch": self.epoch, "best": self.best, "config": self.cfg.to_dict(),
+            "best_metric": self.cfg.train.checkpoint_metric, "beta_mult": self.beta_mult,
             "state_features": self.train_ds.state_features,
         }, path)
         return path
@@ -120,15 +126,59 @@ class Trainer:
         self.scaler.load_state_dict(ck["scaler_state"])
         self.epoch = int(ck["epoch"])
         self.best = float(ck["best"])
-        logger.info("재개: %s (epoch %d, best %.4f)", path, self.epoch, self.best)
+        self.beta_mult = float(ck.get("beta_mult", 1.0))
+        prev_metric = ck.get("best_metric")
+        cur_metric = self.cfg.train.checkpoint_metric
+        if prev_metric is not None and prev_metric != cur_metric:
+            logger.warning("체크포인트 기준이 %s → %s 로 바뀌어 best 를 초기화합니다 (이전 값 %.4f 는 비교 불가)",
+                           prev_metric, cur_metric, self.best)
+            self.best = float("inf")
+        logger.info("재개: %s (epoch %d, best %.4f, β×%.3f)", path, self.epoch, self.best, self.beta_mult)
 
     # ------------------------------------------------------------------ 한 epoch
     def beta_scale(self) -> float:
-        """KL 워밍업: 첫 epoch 에서 1/warm, beta_warmup_epochs 번째 epoch 부터 1 (선형)."""
+        """KL 워밍업 × 자동 조정 배율. 워밍업: 첫 epoch 1/warm, beta_warmup_epochs 부터 1 (선형)."""
         warm = int(self.cfg.train.beta_warmup_epochs)
-        if warm <= 0:
-            return 1.0
-        return float(min(1.0, (self.epoch + 1) / warm))
+        ramp = 1.0 if warm <= 0 else float(min(1.0, (self.epoch + 1) / warm))
+        return ramp * self.beta_mult
+
+    def adapt_beta(self, va: dict[str, float]) -> None:
+        """헤더의 β 선택 규칙을 epoch 마다 적용한다.
+
+        누설(gap > target)이면 z 의 대역폭을 좁히고, 붕괴(vy_std 가 σ 아래)면 넓히고, 둘 다 여유가
+        있으면 "최소 β" 쪽으로 되돌린다. 누설이 배포 성능을 직접 망가뜨리므로 우선순위가 가장 높다.
+        """
+        t = self.cfg.train
+        if not t.beta_adapt or self.cfg.loss.beta_kl <= 0:
+            return
+        if self.model.head_type != "cvae":       # 잠재변수가 없는 헤드는 KL 항이 0 이라 β 가 무의미
+            return
+        if self.epoch < max(1, int(t.beta_warmup_epochs)):    # 워밍업 중에는 건드리지 않는다
+            return
+        sig = va.get("sigma_net_y_mm")
+        gap = va.get("leak_gap_mm")
+        vy = va.get("mode_collapse_vy_std")
+        if sig is None or gap is None or not np.isfinite(sig) or not np.isfinite(gap) or sig <= 0:
+            return
+        target = t.beta_adapt_target_sigma * sig
+        before = self.beta_mult
+        acc = va.get("select_vy_sign_acc")
+        selector_ok = acc is not None and np.isfinite(acc) and acc > t.beta_adapt_selector_acc
+        if gap > target:                                              # 누설 — 좁힌다 (최우선)
+            self.beta_mult *= t.beta_adapt_rate
+        elif not selector_ok:
+            pass                    # Q̂ 가 못 고르는 동안은 z 를 넓혀 봐야 실행시 오차만 커진다
+        elif vy is not None and np.isfinite(vy) and vy < t.beta_adapt_collapse_sigma * sig:
+            self.beta_mult /= t.beta_adapt_rate                       # 붕괴 — 넓힌다
+        elif gap < 0.5 * target:                                      # 여유 — 최소 β 쪽으로
+            self.beta_mult /= t.beta_adapt_rate
+        lo = t.beta_min / self.cfg.loss.beta_kl
+        hi = t.beta_max / self.cfg.loss.beta_kl
+        self.beta_mult = float(np.clip(self.beta_mult, lo, hi))
+        if self.beta_mult != before:
+            logger.info("    β %.3f → %.3f  (gap %.2f / 목표 %.2fmm, vy_std %s)",
+                        self.cfg.loss.beta_kl * before, self.cfg.loss.beta_kl * self.beta_mult,
+                        gap, target, "n/a" if vy is None else f"{vy:.2f}")
 
     def train_epoch(self) -> dict[str, float]:
         self.model.train()
@@ -164,7 +214,8 @@ class Trainer:
             return {}
         self.model.eval()
         agg: dict[str, list[float]] = {}
-        spreads, margins, sel_mae_y, sel_sign = [], [], [], []
+        spreads, margins, sel_sign = [], [], []
+        sel_ae, sel_nae, sig_y = [], [], []
         for batch in loader:
             batch = to_device(batch, self.device)
             out = self.model(batch, use_posterior=True)
@@ -183,20 +234,30 @@ class Trainer:
             m = m[torch.isfinite(m)]
             if m.numel():
                 margins.append(m.mean().item())
-            sel_mae_y.append((sel["net"][:, 1] - P_lab[:, -1, 1]).abs().mean().item())
-            big = P_lab[:, -1, 1].abs() > batch["sigma_net"][:, 1]
+            # 실행시 경로는 라벨을 보지 않으므로 누설에 면역인 유일한 정확도 지표다
+            sel_ae_b = (sel["net"] - P_lab[:, -1]).abs()
+            sel_ae.append(sel_ae_b.mean(0).cpu().numpy())
+            sel_nae.append((sel_ae_b / batch["sigma_net"].clamp_min(1e-6)).mean().item())
+            sig_y.append(batch["sigma_net"][:, 1].cpu().numpy())
+            big = P_lab[:, -1, Y_AXIS].abs() > batch["sigma_net"][:, Y_AXIS]
             if big.any():
-                sel_sign.append((torch.sign(sel["net"][big, 1]) == torch.sign(P_lab[big, -1, 1])).float().mean().item())
+                sel_sign.append((torch.sign(sel["net"][big, Y_AXIS]) == torch.sign(P_lab[big, -1, Y_AXIS])).float().mean().item())
         res = {k: float(np.mean(v)) for k, v in agg.items()}
         if spreads:
             res["mode_collapse_vy_std"] = float(np.mean(spreads))
         if margins:
             res["mode_margin"] = float(np.mean(margins))
-        if sel_mae_y:
-            res["select_mae_y_mm"] = float(np.mean(sel_mae_y))
+        if sel_ae:
+            m = np.mean(np.stack(sel_ae), axis=0)
+            for i, (nm, un) in enumerate(zip(AXIS_NAMES, AXIS_UNITS)):
+                res[f"select_mae_{nm}_{un}"] = float(m[i])
+        if sel_nae:
+            res["select_nmae"] = float(np.mean(sel_nae))
+        if sig_y:
+            res["sigma_net_y_mm"] = float(np.median(np.concatenate(sig_y)))
         if sel_sign:
             res["select_vy_sign_acc"] = float(np.mean(sel_sign))
-        if sel_mae_y and "mae_y_mm" in res:
+        if "select_mae_y_mm" in res and "mae_y_mm" in res:
             res["leak_gap_mm"] = res["select_mae_y_mm"] - res["mae_y_mm"]
         return res
 
@@ -212,19 +273,25 @@ class Trainer:
             self.history.append(row)
             with open(log_path, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(row) + "\n")
-            score = va.get("total", tr["total"])
+            metric = self.cfg.train.checkpoint_metric
+            score = va.get(metric, va.get("total", tr["total"]))
             msg = (f"epoch {self.epoch}/{self.cfg.train.epochs}  train {tr['total']:.4f}  "
                    f"val {va.get('total', float('nan')):.4f}  "
-                   f"mae(x,y,θ)=({va.get('mae_x_mm', float('nan')):.2f},{va.get('mae_y_mm', float('nan')):.2f},"
-                   f"{va.get('mae_th_deg', float('nan')):.2f})")
+                   f"mae(x,y,z)=({va.get('mae_x_mm', float('nan')):.2f},{va.get('mae_y_mm', float('nan')):.2f},"
+                   f"{va.get('mae_z_mm', float('nan')):.2f})"
+                   f" mae(θx,θy,θz)=({va.get('mae_thx_deg', float('nan')):.2f},"
+                   f"{va.get('mae_thy_deg', float('nan')):.2f},{va.get('mae_thz_deg', float('nan')):.2f})")
             if "mode_collapse_vy_std" in va:
                 msg += f"  vy_std {va['mode_collapse_vy_std']:.2f}"
             if "mode_margin" in va:
                 msg += f"  margin {va['mode_margin']:.3f}"
             if "leak_gap_mm" in va:
                 msg += f"  leak_gap {va['leak_gap_mm']:.2f}mm"
+            if "select_nmae" in va:
+                msg += f"  sel_nmae {va['select_nmae']:.3f}"
             msg += f"  beta {tr.get('beta', float('nan')):.3f}"
             logger.info(msg)
+            self.adapt_beta(va)          # 저장 전에 — last.pt 는 다음 epoch 에 쓸 β 를 담아야 한다
             self.save("last.pt")
             if score < self.best:
                 self.best = score

@@ -182,70 +182,92 @@ python3 scripts/diag_quality.py runs/qres2/last.pt --dataset /data4/seong/policy
 
 ## 6. 운용 프로토콜 — 콘솔에서
 
-콘솔이 조작자의 자리다. 터미널은 **에피소드 사이에 Enter 를 치는 것** 말고는 볼 일이 없다.
+조작자의 자리는 콘솔이다. 터미널은 에피소드 사이 Enter 말고는 볼 일이 없다.
+
+### 속도 상한과 정책 인계는 **다른 것**이다
+
+힘 트리거(`teleop.contact_probing_force_trigger`)를 켜 두는 것이 실사용에 맞다.
+
+* `in_contact_probing` 은 **힘 판정 OR 정책 요청** 이다. 트리거를 켜도 정책 진입에는
+  영향이 없다 — 힘은 속도 상한만 맡고 버튼은 정책만 맡는다.
+* 끄면 `freespace:=false` 로 기동해야 하는데, 그러면 **접근 단계도 10 mm/s** 라 자세를
+  잡는 데만 한참 걸린다 (probe.yaml 은 접근·접촉 상한이 둘 다 10 mm/s 이고 150 mm/s 는
+  freespace 오버라이드에서만 나온다).
+* 켜면 계획서 §3 의 "조작자가 teleop 으로 접촉을 만든다(접촉 프로빙 진입, 힘 유지 3.0 N)"
+  가 그대로 성립한다.
+
+```bash
+# 재빌드 없이 지금 바꾼다
+ros2 param set /us_diff_ik_node teleop.contact_probing_force_trigger true
+```
+
+굳히려면 `probe.yaml` 의 같은 키를 `true` 로.
 
 ### 기동
 
-세션은 **`scripts/start_session.sh` 하나**가 묶는다 — 정리 · PX6D · telemetry_bridge ·
-us_frame_node · 제어 스택 · GUI. 개별 `ros2 run` 을 늘어놓지 않는다.
-
 ```bash
+source ~/FR5-for-RUS/env.sh                      # 모든 터미널의 첫 줄
 cd ~/FR5-for-RUS
-./scripts/start_session.sh freespace:=false          # ① 세션 (GUI 포함)
+colcon build --packages-select fr5_control fr5_ik --symlink-install   # 코드가 바뀌었으면
+./scripts/start_session.sh                       # ① 세션 + GUI
 ```
 
-* **`freespace:=false` 를 반드시 붙인다** (§4 경고). 기본값은 150 mm/s 이고, 힘 트리거를
-  껐으므로 접촉 순간 내려 주던 안전망이 없다.
-* **`--seg` 를 붙이지 않는다.** 정책 러너가 자기 U-Net 을 돌리므로 두 벌이 되어 지각이
-  느려진다 (`start_session.sh` 주석). 영상 위 마스크는 러너 로그의 `Q` 로 본다.
-* `us_frame_node` 는 이 스크립트가 소유한다 — 프로브는 클라이언트를 하나만 받는다.
-  러너는 그것이 내는 `/us/image` 를 구독할 뿐이다.
-
-여기에 터미널 둘을 더한다.
+* `--seg` 를 붙이지 않는다 — 정책 러너가 자기 U-Net 을 돌리므로 두 벌이 된다.
+* 힘 트리거를 켰다면 `freespace` 는 기본값(빠른 접근)으로 둔다. 껐다면 `freespace:=false` 가
+  **필수**다 (§4 경고).
 
 ```bash
-source ~/FR5-for-RUS/env.sh
-ros2 run fr5_control force_search                    # ② 힘 탐색 (관찰 모드로 먼저)
-
-source ~/FR5-for-RUS/env.sh
-cd ~/FR5-for-RUS/policy_learning                     # ③ 정책 러너 / 세션 드라이버
+ros2 run fr5_control force_search                # ② 힘 탐색 (관찰 → execute:=true)
+cd ~/FR5-for-RUS/policy_learning                 # ③ 러너 / 세션 드라이버
 ```
 
-세션을 내릴 때는 `./scripts/stop_all.sh`.
-
-### 기동 확인 — 콘솔에서
+### 콘솔 확인
 
 | 볼 것 | 어디 | 기대 |
 |---|---|---|
 | 링크 | 상단 스트립 | `NO TELEMETRY` 가 아니다 |
-| 렌치 | Monitoring | 0 이 아니고 잡음이 보인다 |
-| 프로빙 모드 | Contact → Probing mode 패널 | `approach` |
-| 정책 패널 | Contact 뷰 하단 오른쪽 | 버튼이 눌리는 상태 (비활성 아님) |
+| 힘 | **Monitoring** | 추세가 그려진다 |
+| 정책 패널 | **Monitoring 하단 오른쪽** | 버튼이 활성 |
 
-`Policy inference` 패널이 회색이면 텔레메트리가 없는 것이다 — ② 를 확인한다.
+### 에피소드 한 번 — **접촉이 먼저다**
 
-### 에피소드 한 번
+정책 인계는 `us_diff_ik` 에도 가서 z 를 가져가고 **조작자의 여섯 축을 0 으로 만든다**
+(러너의 `--execute` 와 무관하다). 누른 뒤에는 접촉을 만들 수단이 없다.
 
-1. **접근** — Touch 데드맨(회색 버튼)을 쥐고 시작 자세로. 접촉이 잡히면 손을 놓는다.
-2. **터미널에서 Enter** — 세션 드라이버가 그 에피소드를 띄운다. 조건은 화면에 안 나온다
-   (`--blind`). `expert` 일 때만 "조작자가 계속 지령" 이라고 알린다.
-3. **콘솔에서 `Start inference`** — 패널이 `HANDOVER` 로 채워지고 프로빙 모드가
-   `contact_probing_policy` 로 바뀌는 것을 확인한다. **채워지지 않으면 누르지 않은 것과 같다** —
-   요청만 갔고 스택이 받지 않았다는 뜻이라 `PENDING` 으로 남는다.
-4. **손을 뗀다.** `desired_twist` 는 발행자가 하나여야 한다.
-5. 90 s 가 지나면 러너가 스스로 멈추고 판정을 인쇄한다.
-6. **콘솔에서 `Stop`** — 다음 자세로 접근하려면 régime 을 놓아야 Touch 가 돌아온다.
+```
+1. teleop 접촉        Touch 데드맨을 쥐고 팬텀에 댄다
+2. 힘 유지 확인       Monitoring 에서 3.0 ± 0.05 N
+3. 손을 놓는다
+4. 터미널 ③ Enter    세션 드라이버가 그 에피소드를 띄운다 (조건은 안 보인다)
+5. Start inference    ← **여기서 teleop 이 사라진다**
+6. HANDOVER 확인      채워지지 않으면 누르지 않은 것과 같다 (PENDING = 스택이 안 받음)
+7. 90 s 대기          러너가 스스로 멈추고 판정을 인쇄한다
+8. Stop               눌러야 régime 이 풀리고 Touch 가 돌아온다
+```
+
+조건이 `hold` 나 `placebo` 여도 **5 번을 똑같이 누른다.** 조작자가 조건을 모르는 것이
+위약 대조의 전제다.
+
+### 러너가 조용하면 이유를 읽는다
+
+지령하지 않을 때 5 s 마다 이유를 찍는다.
+
+| 메시지 | 뜻 |
+|---|---|
+| `렌치가 중력 보상되지 않았다` | 교정을 마쳐야 한다. 보상 전 값에는 자중 10 N 이 실려 있다 |
+| `접촉 부족 ‖F‖=…` | 아직 안 닿았다 |
+| `정책이 꺼져 있다` | 접촉은 됐고 버튼을 안 눌렀다 |
+| `시작 조건 미충족 — 면적비 0.145` | 방광이 이미 보인다 — 안 보이는 자세로 |
+| `시작 조건 미충족 — Q_raw 0.31` | 접촉·에코 불량. 정책이 풀 문제가 아니다 |
 
 ### 즉시 멈춰야 할 때
 
-콘솔 `Stop` 이 가장 빠르다. 그것으로 안 되면 Touch 데드맨을 놓는다 (워치독 후퇴).
-그것도 아니면 ① 터미널 Ctrl-C.
+콘솔 `Stop` → Touch 데드맨 놓기(워치독 후퇴) → 터미널 ① Ctrl-C → `./scripts/stop_all.sh`
 
 ### 아직 콘솔에서 못 하는 것
 
-조건 선택(hold/placebo/policy)과 에피소드 길이는 `run_experiment.py` 의 인자다. 콘솔에서
-고르게 하려면 조건을 토픽이나 파라미터로 받아야 하는데, 그러면 **가림(blinding)이 깨진다** —
-조작자가 화면에서 조건을 보게 된다. 지금 구조는 조건을 터미널이 쥐고 조작자는 모르는 쪽이다.
+조건 선택과 에피소드 길이는 `run_experiment.py` 의 인자다. 콘솔로 올리면 조작자가 조건을
+보게 되어 **가림이 깨진다.**
 
 ## 7. 평가 프로토콜
 

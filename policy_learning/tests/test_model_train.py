@@ -117,6 +117,26 @@ def test_select_action(head):
         assert sel["prob"].shape == (2, ACTION_DIM, cfg.model.discrete_bins)
 
 
+def test_quality_residual_vanishes_at_zero_action():
+    """Q̂ = b(o) + [g(o,A) − g(o,0)] — A=0 에서 잔차가 정확히 0, 그리고 A 가 바뀌면 움직인다."""
+    cfg = small_config()
+    model = build_policy(cfg.model, cfg.timing).eval()
+    batch = fake_batch(cfg)
+    out = model(batch, use_posterior=True)
+    P = batch["P"]
+    base, resid = model.quality_parts(out.memory_pooled, P)
+    _, resid0 = model.quality_parts(out.memory_pooled, torch.zeros_like(P))
+    assert torch.allclose(resid0, torch.zeros_like(resid0), atol=1e-6)
+    assert torch.allclose(model.predict_quality(out.memory_pooled, torch.zeros_like(P)), base, atol=1e-6)
+    assert resid.abs().mean() > 0                      # 행동이 실제로 출력을 움직인다
+
+    # 잔차 항의 그래디언트가 기저로 새지 않아야 한다 (b 가 행동 몫을 도로 흡수하는 것을 막는다)
+    model.zero_grad(set_to_none=True)
+    base2, resid2 = model.quality_parts(out.memory_pooled, P)
+    (base2.detach() + resid2).sum().backward(retain_graph=True)
+    assert all(p.grad is None or p.grad.abs().sum() == 0 for p in model.quality_base.parameters())
+
+
 def test_quality_input_is_independent_of_z():
     """2026-09-08: z 는 디코더에만 들어간다 — Q̂ 의 관측 요약은 z 와 무관해야 한다 (누설 차단)."""
     cfg = small_config()

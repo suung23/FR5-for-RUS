@@ -94,9 +94,24 @@ def compute_loss(model: ActPolicy, out: PolicyOutput, batch: dict[str, torch.Ten
     logs["act_net"], logs["act_shape"] = l_net.item(), l_shape.item()
 
     # (d) 품질 헤드 — 시연된 chunk (라벨) 에 대한 Q̃ 로 감독
-    Q_hat = model.predict_quality(out.memory_pooled, P_lab)
     qmask = batch["Q_valid"].float()
-    l_qual = ((Q_hat - batch["Q"]) ** 2 * qmask).sum() / qmask.sum().clamp_min(1.0)
+    denom = qmask.sum().clamp_min(1.0)
+
+    def _mse(pred: torch.Tensor) -> torch.Tensor:
+        return ((pred - batch["Q"]) ** 2 * qmask).sum() / denom
+
+    base, resid = model.quality_parts(out.memory_pooled, P_lab)
+    if model.quality_residual:
+        # b 는 관측만으로 Q 를 맞히고, 잔차는 b 가 남긴 것만 맡는다. b.detach() 로 그래디언트를
+        # 끊어야 잔차 경로가 설명한 몫을 b 가 도로 흡수하지 않는다.
+        l_base = _mse(base)
+        l_resid = _mse(base.detach() + resid)
+        l_qual = l_base + l_resid
+        logs["qual_base"], logs["qual_resid"] = l_base.item(), l_resid.item()
+        # 진단: 잔차가 실제로 행동을 쓰고 있는가 (0 이면 Q̂ 이 행동에 눈이 멀었다는 뜻)
+        logs["qual_resid_rms"] = float(resid.detach().pow(2).mean().sqrt())
+    else:
+        l_qual = _mse(base + resid)
     logs["qual"] = l_qual.item()
     logs["qual_frac"] = float(qmask.mean())
 

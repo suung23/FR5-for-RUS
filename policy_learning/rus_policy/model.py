@@ -167,7 +167,11 @@ class ActPolicy(nn.Module):
         self.n_bins = mcfg.discrete_bins
         if self.head_type == "discrete":
             self.discrete_head = MLP(d, d, ACTION_DIM * self.n_bins)
+        self.quality_residual = bool(mcfg.quality_residual)
         self.quality_head = MLP(d + self.k * ACTION_DIM, mcfg.q_head_hidden, self.k, mcfg.dropout)
+        if self.quality_residual:
+            # b(o) — 관측만 보는 기저. g 는 quality_head 를 그대로 쓰되 차분으로 A=0 에서 0 이 된다.
+            self.quality_base = MLP(d, mcfg.q_head_hidden, self.k, mcfg.dropout)
         self.register_buffer("action_scale", torch.tensor(ACTION_SCALE), persistent=False)
 
     # ------------------------------------------------------------------ 이산 bin
@@ -240,10 +244,24 @@ class ActPolicy(nn.Module):
             logits = self.discrete_head(h.mean(1)).reshape(B, ACTION_DIM, self.n_bins)
         return a_hat, P_hat, F_hat, logits
 
-    def predict_quality(self, memory_pooled: torch.Tensor, P: torch.Tensor) -> torch.Tensor:
-        """Q̂(o, A). P: (B,k+1,3) 누적 변위 → 미래 Q (B,k)."""
+    def quality_parts(self, memory_pooled: torch.Tensor, P: torch.Tensor
+                      ) -> tuple[torch.Tensor, torch.Tensor]:
+        """(기저 b(o), 행동 잔차) — 잔차는 A=0 에서 정확히 0 이다.
+
+        차분 ``g(o,A) − g(o,0)`` 으로 만들기 때문에 제약 항 없이 항등식으로 성립한다. 잔차 모드가
+        꺼져 있으면 기저는 0 이고 잔차가 Q̂ 전체가 된다 (기존 동작).
+        """
         flat = (P[:, 1:] / self.action_scale).flatten(1)
-        return self.quality_head(torch.cat([memory_pooled, flat], dim=1))
+        g_a = self.quality_head(torch.cat([memory_pooled, flat], dim=1))
+        if not self.quality_residual:
+            return torch.zeros_like(g_a), g_a
+        g_0 = self.quality_head(torch.cat([memory_pooled, torch.zeros_like(flat)], dim=1))
+        return self.quality_base(memory_pooled), g_a - g_0
+
+    def predict_quality(self, memory_pooled: torch.Tensor, P: torch.Tensor) -> torch.Tensor:
+        """Q̂(o, A). P: (B,k+1,6) 누적 변위 → 미래 Q (B,k)."""
+        base, resid = self.quality_parts(memory_pooled, P)
+        return base + resid
 
     def forward(self, batch: dict[str, torch.Tensor], z: Optional[torch.Tensor] = None,
                 use_posterior: bool = True) -> PolicyOutput:

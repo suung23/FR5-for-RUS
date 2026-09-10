@@ -169,6 +169,10 @@ class ModelConfig:
     discrete_range_mm: float = 80.0    # 라벨 σ 가 27mm — ±20mm 로는 상당수 라벨이 표현 범위 밖이었다 (2026-09-10)
     discrete_range_deg: float = 10.0
     q_head_hidden: int = 256
+    # 잔차 분해 Q̂ = b(o) + [g(o,A) − g(o,0)] (2026-09-10). 단일 MLP 로는 E[Q|o] 만 맞혀도 MSE 가
+    # 거의 최소라 행동을 무시하는 해에 갇힌다 (행동을 0 으로 지워도 출력 변화가 Q std 의 2~7%).
+    # 관측 경로 b 와 행동 경로 g 를 나누고, g 의 목표를 b 가 설명 못 한 잔차로 고정한다.
+    quality_residual: bool = True
 
 
 @dataclass

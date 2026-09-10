@@ -7,4 +7,5 @@ Pillow>=9.3
 opencv-python-headless>=4.7   # Unet_seg 후처리(연결요소)에 필요 — perception.backend=unet
 tqdm>=4.64
 pytest>=7.2
+pyflakes>=3.0                 # 정적 검사. rclpy 가 있어야 도는 코드의 미정의 이름을 잡는다
 matplotlib>=3.6               # scripts/inspect_session.py --plot 에만

@@ -323,6 +323,7 @@ class PolicyRunner(Node):
 
     def _tick(self):
         import torch
+        t = time.time()          # 이 tick 의 시각. 게이트·에피소드·위약이 모두 이 값을 쓴다.
         fn = float(np.linalg.norm(self.wrench)) if self.wrench is not None else 0.0
         if not self.enabled:
             return self._idle(f"정책이 꺼져 있다 ({self.args.enable_topic} 에 true)")

@@ -11,11 +11,17 @@
 }
 
 .picture {
-  max-width: 100%;
-  max-height: 100%;
+  /* Grown to the plate, not left at the network's 256². `object-fit` keeps it
+     square inside whatever shape the plate is, and a boundary two screen pixels
+     wide cannot be judged — this is the panel where the operator is looking at
+     the edge itself. */
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
   /* Nearest, deliberately. The mask is drawn in the network's own pixels, and
      smoothing them would round off the boundary being inspected — the operator
-     would be checking an interpolation, not a segmentation. */
+     would be checking an interpolation, not a segmentation. Upscaled this way
+     the blocks on screen *are* the pixels the network classified. */
   image-rendering: pixelated;
   display: block;
 }
@@ -41,6 +47,40 @@
   max-height: 45%;
   overflow: auto;
   border-top: 1px solid var(--rule);
+}
+
+/* The shared `.field` row gives the label whatever width it wants and lets the
+   value ellipsis away. In a narrow plate that squeezes the value to zero and
+   leaves a row of labels with nothing beside them — a readout that has become
+   a list of words. Here the value wins: it is the reading. */
+.readout :global(.field__label) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.readout :global(.field__value) {
+  flex: 0 0 auto;
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Rejection reasons are a sentence, not a number — they get the whole row and
+   wrap, because truncating them hides which check failed. */
+.readout :global(.field--warn) {
+  height: auto;
+  min-height: var(--row);
+  align-items: flex-start;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.readout :global(.field--warn) .reasons {
+  flex: 1 1 auto;
+  text-align: right;
+  white-space: normal;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .note {

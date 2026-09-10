@@ -212,7 +212,9 @@ export function BladderSegmentation({
     };
   }, [frame, showMask, showFill, showMarks]);
 
-  const ageMs = frame ? now - frame.receivedAt : null;
+  // Clamped: the re-render timer runs at 4 Hz, so a frame that arrived since the
+  // last tick would otherwise show a negative age, and an elapsed time cannot be.
+  const ageMs = frame ? Math.max(0, now - frame.receivedAt) : null;
   const stale = ageMs !== null && ageMs > staleAfterMs;
   const state = frame?.state;
   const mismatched =
@@ -327,7 +329,9 @@ export function BladderSegmentation({
             {state && state.rejectionReasons.length > 0 ? (
               <div className="field field--warn">
                 <span className="field__label">Rejected</span>
-                <span className="field__value">{state.rejectionReasons.join(', ')}</span>
+                <span className={`field__value ${styles.reasons}`}>
+                  {state.rejectionReasons.join(', ')}
+                </span>
               </div>
             ) : null}
             <div className="field">

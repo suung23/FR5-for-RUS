@@ -63,14 +63,23 @@
   min-width: 240px;
 }
 
-/* The segmentation plate is not square: the picture is, but a readout hangs
-   below it and the rejection reasons are the point of that readout. It takes a
-   share of the row rather than a fixed box, with a floor wide enough that the
-   256px picture is never shown smaller than the network's own pixels. */
-.segPanel {
+/* The segmentation view is two renderings of one frame, side by side, and the
+   whole point of it is looking from one to the other. So they split the row
+   evenly and the 3D view stands down here — see the note in App.tsx. Three
+   plates in this width left each of them too narrow to read a boundary in, and
+   squeezed the readout's values out of existence entirely. */
+.viewportPair > * {
   flex: 1 1 0;
-  min-width: 300px;
-  max-width: 560px;
+  min-width: 320px;
+}
+
+/* Neither plate is square on this view: the pictures are, and the height left
+   over goes to the readout under the mask rather than to letterboxing. */
+.viewportPair .usPanel,
+.viewportPair .segPanel {
+  flex: 1 1 0;
+  aspect-ratio: auto;
+  max-width: none;
 }
 
 .lower {
@@ -83,6 +92,13 @@
    it from its rows. */
 .lowerChart {
   flex: 0 0 292px;
+}
+
+/* 모니터링 하단은 추세 그래프가 폭을 먹고 정책 패널이 그 오른쪽에 선다. 그래프는 시간축이라
+   넓을수록 읽히고, 버튼 둘은 넓어질 이유가 없다 — 그래서 고정 폭을 주고 나머지를 그래프에
+   남긴다. 그래프 아래로 접히면 292 px 안에서 둘 다 잘린다. */
+.lowerChart > :last-child {
+  flex: 0 0 300px;
 }
 
 /* Dense reference pages get more of the column; the workspace keeps a floor. */

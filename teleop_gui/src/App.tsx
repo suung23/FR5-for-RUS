@@ -4,7 +4,6 @@ import { EventLog } from './components/EventLog';
 import { GuidanceGate } from './components/GuidanceGate';
 import { ForceTrend } from './components/ForceTrend';
 import { JointRates } from './components/JointRates';
-import { ModeTimeline } from './components/ModeTimeline';
 import { NavRail, viewFromHash, type ConsoleView } from './components/NavRail';
 import { OperatorFrame } from './components/OperatorFrame';
 import { ProbingNotice } from './components/ProbingNotice';
@@ -149,20 +148,32 @@ export function App() {
           <NavRail view={view} onSelect={selectView} alarmCount={alarmCount} />
 
           <div className={styles.workspace}>
-            <div className={styles.viewport}>
+            <div
+              className={`${styles.viewport} ${
+                view === 'segmentation' ? styles.viewportPair : ''
+              }`}
+            >
               {/* The picture leads. It is what the operator is actually reading
                   while probing; the arm beside it is context. On the frame views
                   it stands down — the triads need that width. */}
-              {view === 'monitoring' || view === 'contact' || view === 'segmentation' ? (
+              {view === 'monitoring' || view === 'segmentation' ? (
                 <Ultrasound frame={ultrasound} className={styles.usPanel} />
               ) : null}
               {/* Beside the sector, never instead of it. The two are different
                   scan conversions of the same probe, and the operator has to be
                   able to look from one to the other — a mask that disagrees
-                  with the picture next to it is the thing worth catching. */}
+                  with the picture next to it is the thing worth catching.
+
+                  This is the one view the arm stands down on. Not because the
+                  pose stopped mattering — the stage, the limits and the contact
+                  force are all still on the right column — but because a third
+                  plate in this row leaves both pictures too narrow to judge a
+                  boundary in, and judging the boundary is the only reason to be
+                  on this view. */}
               {view === 'segmentation' ? (
                 <BladderSegmentation frame={segmentation} className={styles.segPanel} />
               ) : null}
+              {view === 'segmentation' ? null : (
               <Workspace
                 jointPositions={telemetry.jointPositions}
                 available={available}
@@ -171,8 +182,9 @@ export function App() {
                 // Frames belong to the views that are about frames. On the
                 // monitoring view they would sit on top of the force reading
                 // the operator is there to watch.
-                showFrames={view === 'calibration' || view === 'contact'}
+                showFrames={view === 'calibration'}
               />
+              )}
             </div>
             <div
               className={`${styles.lower} ${
@@ -180,10 +192,19 @@ export function App() {
             } ${view === 'calibration' || view === 'safety' ? styles.lowerTall : ''}`}
             >
               {view === 'monitoring' ? (
-                <ForceTrend
-                  history={history}
-                  waveformHz={waveformHz}
-                />
+                <>
+                  <ForceTrend
+                    history={history}
+                    waveformHz={waveformHz}
+                  />
+                  {/* 정책 인계는 조작자가 힘 추세를 보면서 누르는 것이라 여기 있는 것이
+                      맞다 — 누른 뒤 접촉이 어떻게 되는지가 바로 옆에 그려진다. */}
+                  <PolicyInference
+                    telemetry={telemetry}
+                    available={available}
+                    onCommand={sendCommand}
+                  />
+                </>
               ) : null}
               {view === 'teleoperation' ? (
                 <>
@@ -193,16 +214,6 @@ export function App() {
                     onCommand={sendCommand}
                   />
                   <JointRates telemetry={telemetry} available={available} />
-                </>
-              ) : null}
-              {view === 'contact' ? (
-                <>
-                  <ModeTimeline history={history} contact={contact} />
-                  <PolicyInference
-                    telemetry={telemetry}
-                    available={available}
-                    onCommand={sendCommand}
-                  />
                 </>
               ) : null}
               {view === 'calibration' ? (

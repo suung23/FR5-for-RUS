@@ -3,7 +3,6 @@ import styles from './NavRail.module.css';
 export type ConsoleView =
   | 'monitoring'
   | 'teleoperation'
-  | 'contact'
   | 'segmentation'
   | 'calibration'
   | 'safety';
@@ -11,7 +10,6 @@ export type ConsoleView =
 export const CONSOLE_VIEWS: ConsoleView[] = [
   'monitoring',
   'teleoperation',
-  'contact',
   'segmentation',
   'calibration',
   'safety',
@@ -44,7 +42,6 @@ interface Props {
 const ITEMS: { id: ConsoleView; label: string; note: string }[] = [
   { id: 'monitoring', label: 'Monitoring', note: 'Force trend' },
   { id: 'teleoperation', label: 'Teleoperation', note: 'Joint rates' },
-  { id: 'contact', label: 'Contact', note: 'Stage timeline' },
   { id: 'segmentation', label: 'Segmentation', note: 'Bladder mask' },
   { id: 'calibration', label: 'Calibration', note: 'Sensor frames' },
   { id: 'safety', label: 'Safety', note: 'Limits · events' },

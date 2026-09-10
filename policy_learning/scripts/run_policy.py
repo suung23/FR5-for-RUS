@@ -48,7 +48,7 @@ try:
     from rclpy.node import Node
     from rclpy.qos import qos_profile_sensor_data
     from sensor_msgs.msg import Image
-    from std_msgs.msg import Bool
+    from std_msgs.msg import Bool, String
 except ImportError:                                   # ROS 없이 --help 는 되게 한다
     rclpy = None
     Node = object
@@ -122,12 +122,24 @@ class PolicyRunner(Node):
         self.dt = cfg.timing.chunk_dt
         self.dev = next(model.parameters()).device
 
-        ns = args.namespace
+        # 로봇 토픽과 정책 토픽은 **다른 네임스페이스**다. 예전에는 하나(`--namespace`,
+        # 기본 `/us`)로 둘 다 잡아서 자세·렌치·twist 가 `/us/...` 를 보고 있었는데
+        # 그것을 내는 노드가 없다 — 렌치가 0 이면 `start_force` 게이트가 영영 안 열려
+        # `policy_enable` 을 켜도 아무 일이 없다 (2026-09-10 확인).
+        ns = args.robot_namespace
         self.twist_pub = self.create_publisher(Twist, f"{ns}/desired_twist", 10)
         self.create_subscription(Pose, f"{ns}/ee_wrt_base", self._on_pose, 10)
         self.create_subscription(WrenchStamped, f"{ns}/wrench_px6d", self._on_wrench, 10)
-        self.create_subscription(Bool, f"{ns}/policy_enable", self._on_enable, 10)
+        self.create_subscription(Bool, args.enable_topic, self._on_enable, 10)
         self.create_subscription(Bool, "/diag/retreating", self._on_retreat, 10)
+        if args.start_on == "probing":
+            # `probing_mode` 는 **전환할 때만** 발행되고 TRANSIENT_LOCAL 로 래치된다.
+            # 기본 QoS(VOLATILE) 로 구독하면 늦게 붙은 이 노드는 현재 모드를 못 받고
+            # 다음 전환까지 조용히 기다린다.
+            from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+            latched = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                                 durability=DurabilityPolicy.TRANSIENT_LOCAL)
+            self.create_subscription(String, f"{ns}/probing_mode", self._on_mode, latched)
         # us_frame_node 는 BEST_EFFORT 로 낸다. 기본 QoS 로 구독하면 프레임이 하나도 오지 않는다.
         self.create_subscription(Image, args.image_topic, self._on_image, qos_profile_sensor_data)
 
@@ -146,7 +158,7 @@ class PolicyRunner(Node):
         self.get_logger().info(
             f"준비됨 — {'DRY-RUN (지령 없음)' if not args.execute else '실행 모드'}, 축={args.axes}, "
             f"m={self.m} k={self.k} @{cfg.timing.policy_hz:.0f}Hz, "
-            f"enable 토픽: {ns}/policy_enable")
+            f"enable 토픽: {args.enable_topic}" + (" · 접촉 프로빙에 맞춰 자동 시작" if args.start_on == "probing" else ""))
 
     # -- 되먹임 -----------------------------------------------------------
     def _on_pose(self, msg: Pose):
@@ -161,6 +173,29 @@ class PolicyRunner(Node):
             self.get_logger().warn(f"정책 {'시작' if msg.data else '정지'}")
         self.enabled = bool(msg.data)
         if not self.enabled:
+            self._stop()
+
+    def _on_mode(self, msg) -> None:
+        """접촉 프로빙에 들어가면 켜고, 나오면 끈다 (`--start-on probing`).
+
+        런북 §6 은 인퍼런싱 시작을 "접촉 ~1 N, 영상이 보이기 시작하는 시점" 으로 잡는다.
+        접촉 프로빙 진입이 바로 그 시점이다 — 제어 스택이 접촉을 판정해 z 를 가져간
+        순간이라, 사람이 초를 재는 것보다 재현성이 좋다.
+
+        **켜는 것은 계산을 시작한다는 뜻일 뿐이다.** 지령은 `--execute` 가 있어야 나가고,
+        그때도 `--start-force` 미만이면 나가지 않는다. 모드에서 나오면 즉시 멈춘다.
+        """
+        mode = str(msg.data)
+        want = mode.startswith("contact_probing")
+        if want == self.enabled:
+            return
+        self.enabled = want
+        self.get_logger().warn(
+            f"정책 {'시작' if want else '정지'} — probing_mode={mode!r} (자동)"
+            # desired_twist 는 발행자가 하나여야 한다 (imu_bench/qc_track/excite_magmap.py §29).
+            # 모드 전환이 곧 인계 시점이므로, 조작자는 여기서 Touch 지령을 놓아야 한다.
+            + ("   ⚠️ teleop 이 desired_twist 를 같이 내면 두 발행자가 싸운다 — 인계 확인" if want else ""))
+        if not want:
             self._stop()
 
     def _on_retreat(self, msg: Bool):
@@ -281,7 +316,14 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("checkpoint")
     p.add_argument("--out", default=None, help="기록 폴더 (기본 runs/live_<시각>)")
-    p.add_argument("--namespace", default="/us")
+    p.add_argument("--robot-namespace", default="/fr5_right",
+                   help="제어 스택 토픽의 네임스페이스 — desired_twist · ee_wrt_base · "
+                        "wrench_px6d · probing_mode 가 여기 있다")
+    p.add_argument("--enable-topic", default="/us/policy_enable",
+                   help="시작/정지 Bool 토픽 (런북 §4)")
+    p.add_argument("--start-on", default="topic", choices=["topic", "probing"],
+                   help="topic=사용자가 enable 토픽으로 시작 (기본, 런북 §6). "
+                        "probing=접촉 프로빙 진입에 맞춰 자동 시작")
     p.add_argument("--image-topic", default="/us/image")
     p.add_argument("--axes", default="rot", choices=["rot", "all"], help="rot=회전만 (기본), all=병진까지")
     p.add_argument("--execute", action="store_true", help="실제로 지령한다 (기본은 계산만)")

@@ -84,6 +84,32 @@ python3 scripts/run_policy.py runs/qres2/last.pt --execute --axes rot \
 `/diag/retreating` 구독, 영상은 **BEST_EFFORT**(`qos_profile_sensor_data`) 구독 — 기본 QoS 로 구독하면
 DDS 가 짝을 맺지 않아 프레임이 하나도 오지 않는다.
 
+### 시작 방식 둘
+
+| `--start-on` | 시작 시점 | 쓰는 곳 |
+|---|---|---|
+| `topic` (기본) | `--enable-topic` 에 true 가 올 때 | 사람이 초를 재서 지정 |
+| **`probing`** | `probing_mode` 가 `contact_probing*` 에 들어갈 때 | **GUI 버튼으로 모드를 바꾸는 평가** |
+
+`probing` 은 GUI 버튼 → `us_diff_ik_node` 가 모드를 판정 → `{ns}/probing_mode` 발행 → 정책이 인계받는
+경로다. **버튼이 아니라 되돌아온 모드가 권위**라는 기존 규약을 그대로 따른다
+(`telemetry_bridge.py:1605`). `contact_probing` 과 `contact_probing_inplane` 을 모두 잡는다.
+
+이 토픽은 **전환할 때만 발행되고 TRANSIENT_LOCAL 로 래치**되므로 구독 QoS 를 맞춰야 한다 — 기본
+QoS 로 구독하면 이미 그 모드에 들어가 있을 때 아무것도 받지 못한다.
+
+> ⚠️ **`desired_twist` 는 발행자가 하나여야 한다** (`imu_bench/qc_track/excite_magmap.py` §29).
+> 모드 전환이 곧 인계 시점이므로 **조작자는 그 순간 Touch 지령을 놓아야 한다.** 특히
+> `contact_probing_inplane` 은 원래 "힘은 로봇이 잡고 회전은 조작자가 한다" 는 뜻이라
+> (`us_diff_ik_node.py:960`), 정책이 그 회전을 가져가면 둘이 같은 축을 다툰다.
+
+```bash
+python3 scripts/run_policy.py runs/qres2_ep25.pt --start-on probing        # DRY-RUN
+python3 scripts/run_policy.py runs/qres2_ep25.pt --start-on probing --execute --axes rot --max-deg-s 3
+```
+
+모드에 들어가도 **`--start-force` 미만이면 지령하지 않고**, 모드에서 나오면 즉시 멈춘다.
+
 ### DRY-RUN 에서 반드시 확인할 넷
 
 | 확인 | 기대 | 틀리면 |

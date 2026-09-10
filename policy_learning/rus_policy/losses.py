@@ -66,7 +66,13 @@ def compute_loss(model: ActPolicy, out: PolicyOutput, batch: dict[str, torch.Ten
 
     # (a) 순변위 + 형상
     w_net = (1.0 / sig_net ** 2).clamp(max=cfg.net_weight_cap)
-    delta_net = cfg.huber_delta_sigma * sig_net
+    # δ 는 "도달 가능한 잔차" 규모여야 한다. 라벨 정밀도(σ_net≈1mm)에 묶어 두면 δ≈2mm 가 되는데
+    # 실제 잔차는 10mm 대라 모든 샘플이 L1 영역에 들어간다. 그러면 그래디언트 크기가 오차와 무관해져
+    # (3mm 틀리나 30mm 틀리나 같은 힘) 최적해가 가중 중앙값 = 상수가 된다 — 2026-09-10 exp1~3 이
+    # 전부 상수 예측기로 붕괴한 원인. 실측 라벨 산포 수준으로 바닥을 깐다.
+    floor = torch.tensor([cfg.huber_delta_min_mm, cfg.huber_delta_min_mm, cfg.huber_delta_min_deg],
+                         device=sig_net.device, dtype=sig_net.dtype)
+    delta_net = torch.maximum(cfg.huber_delta_sigma * sig_net, floor)
     net_err = P_hat[:, -1] - P_lab[:, -1]
     if model.head_type == "cvae":
         l_net = (w_net * huber(net_err, delta_net)).sum(1).mean()
@@ -78,7 +84,9 @@ def compute_loss(model: ActPolicy, out: PolicyOutput, batch: dict[str, torch.Ten
         # 이산 헤드에서도 연속 헤드의 순변위를 약하게 맞춘다 (형상·Q̂ 입력의 스케일 유지)
         l_net = l_net + 0.1 * (w_net * huber(net_err, delta_net)).sum(1).mean()
     w_shape = cfg.w_shape / sig_shape ** 2
-    delta_shape = cfg.huber_delta_sigma * sig_shape
+    # 형상 항도 같은 함정에 빠진다. 바닥을 σ_shape/σ_net 비율만큼 줄여 같은 관계를 유지한다.
+    delta_shape = torch.maximum(cfg.huber_delta_sigma * sig_shape,
+                                floor * (sig_shape / sig_net.clamp_min(1e-6)))
     shape_err = trajectory_shape(P_hat) - trajectory_shape(P_lab)              # (B,k−1,3)
     l_shape = (w_shape[:, None] * huber(shape_err, delta_shape[:, None])).sum(2).mean(1).mean() \
         if k > 1 else torch.zeros((), device=P_lab.device)

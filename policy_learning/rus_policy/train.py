@@ -151,6 +151,8 @@ class Trainer:
         t = self.cfg.train
         if not t.beta_adapt or self.cfg.loss.beta_kl <= 0:
             return
+        if self.model.head_type != "cvae":       # 잠재변수가 없는 헤드는 KL 항이 0 이라 β 가 무의미
+            return
         if self.epoch < max(1, int(t.beta_warmup_epochs)):    # 워밍업 중에는 건드리지 않는다
             return
         sig = va.get("sigma_net_y_mm")
@@ -160,8 +162,12 @@ class Trainer:
             return
         target = t.beta_adapt_target_sigma * sig
         before = self.beta_mult
-        if gap > target:                                              # 누설 — 좁힌다
+        acc = va.get("select_vy_sign_acc")
+        selector_ok = acc is not None and np.isfinite(acc) and acc > t.beta_adapt_selector_acc
+        if gap > target:                                              # 누설 — 좁힌다 (최우선)
             self.beta_mult *= t.beta_adapt_rate
+        elif not selector_ok:
+            pass                    # Q̂ 가 못 고르는 동안은 z 를 넓혀 봐야 실행시 오차만 커진다
         elif vy is not None and np.isfinite(vy) and vy < t.beta_adapt_collapse_sigma * sig:
             self.beta_mult /= t.beta_adapt_rate                       # 붕괴 — 넓힌다
         elif gap < 0.5 * target:                                      # 여유 — 최소 β 쪽으로

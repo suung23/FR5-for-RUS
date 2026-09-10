@@ -37,7 +37,10 @@ class TimingConfig:
     # ⏳ m = ceil(f_us / f_dither). f_us 는 가정하지 않는다 — inspect_session.py 가 세션에서 잰 값으로
     # 재산정한다 (§1.3). 16 은 "8 fps × 2 s" 의 자리표시자일 뿐이다.
     obs_frames: int = 16
-    us_latency_s: float = 0.0       # ⏳ US 고정 엔드투엔드 지연 (§7.1). inspect_session.py --latency 로 실측
+    # US 고정 엔드투엔드 지연 (§7.1). 200ms 는 사후 추정 확정값 — 정책 스텝(1/5s)과 정확히 같아서
+    # 0 으로 두면 관측과 행동이 한 스텝 어긋난다. dataset.py 가 빌드 때 프레임 시각에서 빼므로
+    # 이 값을 바꾸면 **데이터셋을 다시 빌드해야** 반영된다 (학습만 다시 돌려선 안 바뀐다).
+    us_latency_s: float = 0.200
     obs_frame_max_age_s: float = 4.0  # 관측 프레임이 이보다 오래되면 무효 마스크
 
     @property
@@ -160,8 +163,10 @@ class ModelConfig:
     frame_channels: list = field(default_factory=lambda: [32, 64, 128, 256])
     frame_input_size: list = field(default_factory=lambda: [128, 128])  # 인코더 입력 (저장본을 리사이즈)
     # 이산 헤드: 축당 bins, ±range. 🟡 §5.3(g) 축당 21빈(±20 mm, 2 mm)
-    discrete_bins: int = 21
-    discrete_range_mm: float = 20.0
+    # 범위를 ±20→±80mm 로 넓히면서 빈 폭이 2→8mm 가 되므로 개수도 같이 올린다 (폭 4mm).
+    # 실행시 경로의 오차 하한이 곧 빈 폭이라, 도달 목표(수 mm)보다 굵으면 의미가 없다.
+    discrete_bins: int = 41
+    discrete_range_mm: float = 80.0    # 라벨 σ 가 27mm — ±20mm 로는 상당수 라벨이 표현 범위 밖이었다 (2026-09-10)
     discrete_range_deg: float = 10.0
     q_head_hidden: int = 256
 
@@ -182,6 +187,12 @@ class LossConfig:
     beta_kl: float = 0.5
     w_shape: float = 0.3
     huber_delta_sigma: float = 2.0      # δ = 2σ
+    # δ 하한 (2026-09-10). 실측 라벨 |Δ| 는 평균 (14.5, 13.4, 0.96), σ 는 (27.2, 25.8, 1.5) 인데
+    # σ_net 은 1mm 수준이라 δ=2σ_net≈2mm 로는 잔차 전체가 L1 영역이었다. 64 샘플 암기 시험:
+    # δ≈2mm 에서 train mae 12mm 로 80 epoch 정체 → δ≈20mm 에서 4.7mm. σ_net 이 작은 FK 라벨
+    # (σ=0.1mm)도 이 바닥 덕에 같이 구제된다 (huber_delta_sigma 만 올려서는 안 되던 부분).
+    huber_delta_min_mm: float = 20.0
+    huber_delta_min_deg: float = 2.0
     B_z: float = 1000.0                 # N·s/m  (§8.1 🟡)
     v_z_max_mm_s: float = 10.0          # mm/s
     net_weight_cap: float = 400.0       # (1/σ²) 상한 — FK 라벨이 배치를 독점하지 않게
@@ -216,6 +227,10 @@ class TrainConfig:
     beta_adapt_target_sigma: float = 1.0      # 누설 상한: leak_gap ≤ 이 값 × σ_net,y
     beta_adapt_collapse_sigma: float = 0.25   # 붕괴 하한: vy_std < 이 값 × σ_net,y
     beta_adapt_rate: float = 1.5              # epoch 당 최대 배율
+    # z 다양성은 Q̂ 가 그중에서 옳은 걸 고를 수 있을 때만 값어치가 있다. 선택기가 우연 수준이면
+    # β 를 낮춰 봐야 후보만 흩어지고 실행시 오차가 커진다 (exp2 ep5→6: β 0.5→0.333 에서
+    # sel_nmae 9.70→10.86). select_vy_sign_acc 가 이 값을 넘을 때만 하향을 허용한다.
+    beta_adapt_selector_acc: float = 0.55
     beta_min: float = 0.05
     beta_max: float = 32.0
 

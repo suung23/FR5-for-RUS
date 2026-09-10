@@ -205,3 +205,46 @@ def test_trainer_runs_and_checkpoints(built_dataset, tmp_path):
     tr2 = Trainer(cfg, dataset_path=built_dataset, output_dir=tmp_path / "run2")
     tr2.resume(tmp_path / "run" / "last.pt")
     assert tr2.epoch == 2
+
+
+def test_checkpoint_metric_is_leak_immune_and_beta_adapts(built_dataset, tmp_path):
+    """best 는 실행시 경로(select_nmae) 기준이어야 하고, β 는 leak_gap 을 보고 움직여야 한다."""
+    from rus_policy.train import Trainer
+
+    cfg = small_config()
+    cfg.train.epochs, cfg.train.beta_warmup_epochs, cfg.train.beta_adapt_rate = 3, 1, 2.0
+    tr = Trainer(cfg, dataset_path=built_dataset, output_dir=tmp_path / "run")
+    tr.fit()
+    rows = [json.loads(l) for l in (tmp_path / "run" / "metrics.jsonl").read_text().splitlines()]
+    for key in ("val/select_nmae", "val/select_mae_x_mm", "val/select_mae_th_deg", "val/sigma_net_y_mm"):
+        assert key in rows[-1] and np.isfinite(rows[-1][key]), key
+    # σ_net,y 는 라벨 설정에서 나온다: 0.7 · τ^1.5, τ = k / f_p
+    tau = cfg.timing.chunk_steps / cfg.timing.policy_hz
+    assert rows[-1]["val/sigma_net_y_mm"] == pytest.approx(
+        max(cfg.labels.sigma_translation_coeff_mm * tau ** 1.5, cfg.labels.sigma_floor_mm), rel=0.05)
+    # best 는 total 이 아니라 select_nmae 의 최소값
+    assert tr.best == pytest.approx(min(r["val/select_nmae"] for r in rows))
+    # 합성 데이터는 관측과 행동이 무관 → 항상 누설 쪽 → β 는 올라가야 한다
+    assert tr.beta_mult > 1.0
+    assert rows[-1]["train/beta"] > rows[0]["train/beta"]
+
+    # 기준이 바뀌면 이전 best 는 단위가 달라 비교 불가 → 초기화, β 배율은 승계
+    cfg2 = small_config()
+    cfg2.train.checkpoint_metric = "total"
+    tr2 = Trainer(cfg2, dataset_path=built_dataset, output_dir=tmp_path / "run2")
+    tr2.resume(tmp_path / "run" / "last.pt")
+    assert tr2.best == float("inf")
+    assert tr2.beta_mult == pytest.approx(tr.beta_mult)
+
+
+def test_beta_adapt_off_keeps_beta_fixed(built_dataset, tmp_path):
+    """고정 β 스윕용 — beta_adapt=false 면 워밍업 뒤 β 가 beta_kl 에 머문다."""
+    from rus_policy.train import Trainer
+
+    cfg = small_config()
+    cfg.train.epochs, cfg.train.beta_warmup_epochs, cfg.train.beta_adapt = 3, 1, False
+    tr = Trainer(cfg, dataset_path=built_dataset, output_dir=tmp_path / "run")
+    tr.fit()
+    rows = [json.loads(l) for l in (tmp_path / "run" / "metrics.jsonl").read_text().splitlines()]
+    assert tr.beta_mult == 1.0
+    assert all(r["train/beta"] == pytest.approx(cfg.loss.beta_kl) for r in rows)

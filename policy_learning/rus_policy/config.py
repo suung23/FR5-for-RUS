@@ -177,6 +177,8 @@ class LossConfig:
     w_minus_over_plus: float = 5.0
     # β (§5.3g 2026-09-08): 0.02 는 누설 쪽으로 치우친다. 0.5 에서 시작해 {0.1, 0.5, 1, 5} 스윕,
     # 선택 규칙은 train.py 의 leak_gap_mm. 워밍업은 train.beta_warmup_epochs.
+    # 2026-09-10 exp1: β=0.5 고정은 ep19 에 leak_gap 14.25mm (σ_net,y≈1.42mm 의 10배) 로 누설했다.
+    # train.beta_adapt 가 켜져 있으면 이 값은 시작점일 뿐이고 실제 β 는 epoch 마다 조정된다.
     beta_kl: float = 0.5
     w_shape: float = 0.3
     huber_delta_sigma: float = 2.0      # δ = 2σ
@@ -203,6 +205,19 @@ class TrainConfig:
     log_every: int = 20
     max_train_samples: Optional[int] = None   # 디버그용 서브샘플
     augment: bool = True
+    # 체크포인트 기준 (§5.3g 2026-09-10). "select_nmae" = 실행시 경로(사전분포 z + Q̂)의 σ 정규화 오차.
+    # "total" 은 사후분포 경로(라벨이 z 로 들어감)라 누설이 심해질수록 좋아진다 — exp1 은 그 기준으로
+    # ep19 의 가장 많이 누설된 체크포인트를 best 로 골랐다.
+    checkpoint_metric: str = "select_nmae"    # "select_nmae" | "total"
+    # β 자동 조정 — train.py 헤더의 선택 규칙(gap ≤ σ_net 이면서 vy_std > 0 인 최소 β)을 epoch 마다 적용.
+    # exp1(β=0.5 고정)은 ep5~7 붕괴 → ep19 누설로 넘어갔다. 고정 β 하나로는 양쪽을 다 못 피한다.
+    # 고정 β 스윕을 하려면 beta_adapt=false.
+    beta_adapt: bool = True
+    beta_adapt_target_sigma: float = 1.0      # 누설 상한: leak_gap ≤ 이 값 × σ_net,y
+    beta_adapt_collapse_sigma: float = 0.25   # 붕괴 하한: vy_std < 이 값 × σ_net,y
+    beta_adapt_rate: float = 1.5              # epoch 당 최대 배율
+    beta_min: float = 0.05
+    beta_max: float = 32.0
 
 
 @dataclass

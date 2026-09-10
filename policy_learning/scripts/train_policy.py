@@ -34,8 +34,10 @@ def main() -> int:
         trainer.resume(Path(args.resume))
     history = trainer.fit()
     last = history[-1] if history else {}
-    print(f"\n완료: {trainer.out}  best val {trainer.best:.4f}")
-    for key in ("val/mae_x_mm", "val/mae_y_mm", "val/mae_th_deg", "val/vy_sign_acc",
+    print(f"\n완료: {trainer.out}  best {cfg.train.checkpoint_metric} {trainer.best:.4f}")
+    for key in ("val/select_nmae", "val/select_mae_x_mm", "val/select_mae_y_mm", "val/select_mae_th_deg",
+                "val/leak_gap_mm", "val/sigma_net_y_mm",
+                "val/mae_x_mm", "val/mae_y_mm", "val/mae_th_deg", "val/vy_sign_acc",
                 "val/mode_collapse_vy_std", "val/mode_margin", "val/select_vy_sign_acc"):
         if key in last:
             print(f"  {key:28s} {last[key]:.4f}")

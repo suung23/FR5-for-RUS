@@ -50,8 +50,23 @@ python3 scripts/eval_policy.py runs/qres2/last.pt \
 
 ## 4. 실시간 인퍼런싱
 
+### 환경 — 순서가 중요하다
+
+torch 는 venv 에, rclpy 는 ROS 에 있다. 둘 다 보이게 하려면 **ROS 를 먼저** 소스하고 venv 를 나중에
+활성화한다. `setup.bash` 가 `PYTHONPATH` 와 `LD_LIBRARY_PATH` 를 둘 다 잡아주기 때문이다
+(`PYTHONPATH` 만 넣으면 `librcl_action.so` 를 못 찾는다).
+
 ```bash
+source /opt/ros/jazzy/setup.bash
 source ~/FR5-for-RUS/install/setup.bash
+source ~/FR5-for-RUS/Unet_seg/.venv/bin/activate     # ← 반드시 ROS 다음
+python3 -c "import rclpy, torch; print('OK', torch.__version__)"
+```
+
+시스템 파이썬과 venv 가 같은 3.12 라서 성립한다 (rosota, 2026-09-10 확인: torch 2.6.0+cu124, CUDA 사용 가능).
+venv 를 먼저 켜고 ROS 를 안 소스하면 `ros2: command not found` 가 난다.
+
+```bash
 cd policy_learning
 
 # (1) DRY-RUN — 기본값. 계산만 하고 지령하지 않는다

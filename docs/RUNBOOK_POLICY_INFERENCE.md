@@ -145,7 +145,20 @@ python3 scripts/diag_quality.py runs/qres2/last.pt --dataset /data4/seong/policy
 > 학습 데이터는 **프리핸드 접근·재위치** 동작이고 평가는 **접촉 후 서보** 구간이다. 분포가 다르다.
 > 결과가 나쁠 때 정책의 한계인지 분포 밖 상황인지 구분해서 볼 것.
 
-## 7. 열려 있는 항목
+## 7. 함정 — YAML 이 데이터클래스 기본값을 덮는다
+
+`configs/policy_default.yaml` 에 적힌 키는 `config.py` 의 기본값을 **무조건 이긴다**. 2026-09-10 에
+`discrete_bins`·`discrete_range_mm` 를 config.py 에서 고쳤는데 YAML 이 옛 값(21 / ±20mm)을 들고 있어
+학습에 반영되지 않았다 (qres2 체크포인트에 그 흔적이 남아 있다 — CVAE 헤드는 빈을 안 써서 무해했다).
+
+**설정을 바꿀 때는 두 곳을 같이 본다.** 실제로 적용된 값은 학습 산출물의 `<out>/config.yaml` 이
+정답이고, 체크포인트에도 같은 것이 박혀 있다:
+
+```python
+import torch; print(torch.load("runs/last.pt", map_location="cpu", weights_only=False)["config"])
+```
+
+## 8. 열려 있는 항목
 
 1. **`timing.us_latency_s`** 기본값을 0 → 0.200 으로 고쳐 두었으나 **데이터셋을 다시 빌드해야 반영된다**
    (`dataset.py` 가 빌드 때 프레임 시각에서 뺀다). 정책 스텝이 0.2 s 라 관측·행동이 한 스텝 어긋나 있다.

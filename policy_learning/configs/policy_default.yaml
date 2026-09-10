@@ -107,13 +107,17 @@ model:
   z_dim: 4                # z 용량 = 누설 상한 (§5.3g 2026-09-08). z 는 디코더 쿼리에만 들어간다
   frame_channels: [32, 64, 128, 256]
   frame_input_size: [128, 128]
-  discrete_bins: 21
-  discrete_range_mm: 20.0
+  # 2026-09-10: 실측 라벨 산포가 σ 27mm 라 ±20mm 로는 상당수가 표현 범위 밖이었다.
+  # ±80mm(≈3σ)로 넓히고 빈 폭 4mm 를 유지하도록 개수도 올린다. config.py 기본값과 같은 값.
+  discrete_bins: 41
+  discrete_range_mm: 80.0
   discrete_range_deg: 10.0
 
 loss:                     # §5.4 (전부 🟡)
   lambda_force: 0.3
-  lambda_quality: 1.0
+  # 2026-09-10 λ 스윕 (25 epoch, n=575): Q̂ 순위상관 ρ 가 1e2 에서 +0.150(p≈3e-4) 로 최고.
+  # 10 → +0.135, 1e3 → +0.106, 1 → +0.050(유의하지 않음). 근거는 scripts/diag_quality.py.
+  lambda_quality: 100.0
   lambda_smooth: 0.05
   lambda_feas: 0.5
   lambda_risk: 0.2

@@ -27,7 +27,7 @@ import torch
 import torch.nn.functional as F
 
 from .config import LossConfig
-from .model import ActPolicy, PolicyOutput
+from .model import AXIS_NAMES, AXIS_UNITS, Y_AXIS, ActPolicy, PolicyOutput
 
 
 def huber(x: torch.Tensor, delta: torch.Tensor) -> torch.Tensor:
@@ -70,8 +70,8 @@ def compute_loss(model: ActPolicy, out: PolicyOutput, batch: dict[str, torch.Ten
     # 실제 잔차는 10mm 대라 모든 샘플이 L1 영역에 들어간다. 그러면 그래디언트 크기가 오차와 무관해져
     # (3mm 틀리나 30mm 틀리나 같은 힘) 최적해가 가중 중앙값 = 상수가 된다 — 2026-09-10 exp1~3 이
     # 전부 상수 예측기로 붕괴한 원인. 실측 라벨 산포 수준으로 바닥을 깐다.
-    floor = torch.tensor([cfg.huber_delta_min_mm, cfg.huber_delta_min_mm, cfg.huber_delta_min_deg],
-                         device=sig_net.device, dtype=sig_net.dtype)
+    mm_, dg_ = cfg.huber_delta_min_mm, cfg.huber_delta_min_deg
+    floor = torch.tensor([mm_, mm_, mm_, dg_, dg_, dg_], device=sig_net.device, dtype=sig_net.dtype)
     delta_net = torch.maximum(cfg.huber_delta_sigma * sig_net, floor)
     net_err = P_hat[:, -1] - P_lab[:, -1]
     if model.head_type == "cvae":
@@ -135,8 +135,10 @@ def compute_loss(model: ActPolicy, out: PolicyOutput, batch: dict[str, torch.Ten
     # 진단: 축별 순변위 절대오차 (mm, mm, deg)
     with torch.no_grad():
         ae = net_err.abs().mean(0)
-        logs["mae_x_mm"], logs["mae_y_mm"], logs["mae_th_deg"] = float(ae[0]), float(ae[1]), float(ae[2])
-        sign_ok = (torch.sign(P_hat[:, -1, 1]) == torch.sign(P_lab[:, -1, 1])).float()
-        big = P_lab[:, -1, 1].abs() > sig_net[:, 1]
+        for i, (nm, un) in enumerate(zip(AXIS_NAMES, AXIS_UNITS)):
+            logs[f"mae_{nm}_{un}"] = float(ae[i])
+        yi = Y_AXIS
+        sign_ok = (torch.sign(P_hat[:, -1, yi]) == torch.sign(P_lab[:, -1, yi])).float()
+        big = P_lab[:, -1, yi].abs() > sig_net[:, yi]
         logs["vy_sign_acc"] = float(sign_ok[big].mean()) if big.any() else float("nan")
     return total, logs

@@ -3,7 +3,7 @@
 
     python scripts/eval_policy.py runs/exp1/best.pt --dataset data/policy_dataset.h5 --split test --csv eval.csv
 
-출력: 축별 순변위 MAE, Δy 부호 정확도, 모드 마진, (csv) 샘플별 예측·라벨.
+출력: 6 축 순변위 MAE·부호 정확도, σ 정규화 오차(nmae), 모드 마진, (csv) 샘플별 예측·라벨.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ import torch
 from _common import setup_logging
 
 from rus_policy.dataset import PolicyH5Dataset
+from rus_policy.model import AXIS_NAMES, AXIS_UNITS, Y_AXIS
 from rus_policy.train import load_policy, to_device
 
 
@@ -54,28 +55,36 @@ def main() -> int:
             sig = batch["sigma_net"].cpu().numpy()
             margin = sel["mode_margin"].cpu().numpy()
             if margin.ndim > 1:
-                margin = margin[:, 1]
+                margin = margin[:, Y_AXIS]
             Qh = sel["Q_hat"].mean(1).cpu().numpy()
             for b in range(net_hat.shape[0]):
-                rows.append({"index": int(batch["index"][b]), "dx_hat": net_hat[b, 0], "dy_hat": net_hat[b, 1],
-                             "dth_hat": net_hat[b, 2], "dx": net_lab[b, 0], "dy": net_lab[b, 1], "dth": net_lab[b, 2],
-                             "sigma_xy": sig[b, 0], "sigma_th": sig[b, 2], "mode_margin": float(margin[b]),
-                             "Q_hat_mean": float(Qh[b])})
-    hat = np.array([[r["dx_hat"], r["dy_hat"], r["dth_hat"]] for r in rows])
-    lab = np.array([[r["dx"], r["dy"], r["dth"]] for r in rows])
-    sig = np.array([[r["sigma_xy"], r["sigma_xy"], r["sigma_th"]] for r in rows])
+                row: dict[str, float] = {"index": int(batch["index"][b])}
+                for i, nm in enumerate(AXIS_NAMES):
+                    row[f"d{nm}_hat"] = float(net_hat[b, i])
+                    row[f"d{nm}"] = float(net_lab[b, i])
+                    row[f"sigma_{nm}"] = float(sig[b, i])
+                row["mode_margin"] = float(margin[b])
+                row["Q_hat_mean"] = float(Qh[b])
+                rows.append(row)
+    hat = np.array([[r[f"d{nm}_hat"] for nm in AXIS_NAMES] for r in rows])
+    lab = np.array([[r[f"d{nm}"] for nm in AXIS_NAMES] for r in rows])
+    sig = np.array([[r[f"sigma_{nm}"] for nm in AXIS_NAMES] for r in rows])
     err = np.abs(hat - lab)
-    big_y = np.abs(lab[:, 1]) > sig[:, 1]
     summary = {
         "checkpoint": args.checkpoint, "split": args.split, "n": len(rows), "head": cfg.model.head,
-        "mae_x_mm": float(err[:, 0].mean()), "mae_y_mm": float(err[:, 1].mean()), "mae_th_deg": float(err[:, 2].mean()),
-        "median_err_x_mm": float(np.median(err[:, 0])), "median_err_y_mm": float(np.median(err[:, 1])),
-        "vy_sign_acc": float((np.sign(hat[big_y, 1]) == np.sign(lab[big_y, 1])).mean()) if big_y.any() else float("nan"),
-        "vx_sign_acc": float((np.sign(hat[:, 0]) == np.sign(lab[:, 0]))[np.abs(lab[:, 0]) > sig[:, 0]].mean()),
-        "within_2sigma_x": float((err[:, 0] < 2 * sig[:, 0]).mean()),
+        # σ 정규화 오차 — 학습 로그의 select_nmae 와 같은 정의. 축 단위가 달라도 하나로 비교된다.
+        "nmae": float((err / np.maximum(sig, 1e-6)).mean()),
         "mode_margin_mean": float(np.nanmean([r["mode_margin"] for r in rows])),
-        "label_sigma_xy_median": float(np.median(sig[:, 0])),
+        "Q_hat_mean": float(np.mean([r["Q_hat_mean"] for r in rows])),
     }
+    for i, (nm, un) in enumerate(zip(AXIS_NAMES, AXIS_UNITS)):
+        big = np.abs(lab[:, i]) > sig[:, i]
+        summary[f"mae_{nm}_{un}"] = float(err[:, i].mean())
+        summary[f"median_err_{nm}_{un}"] = float(np.median(err[:, i]))
+        summary[f"sign_acc_{nm}"] = (float((np.sign(hat[big, i]) == np.sign(lab[big, i])).mean())
+                                     if big.any() else float("nan"))
+        summary[f"within_2sigma_{nm}"] = float((err[:, i] < 2 * sig[:, i]).mean())
+        summary[f"sigma_{nm}_median"] = float(np.median(sig[:, i]))
     print(json.dumps(summary, indent=2, ensure_ascii=False))
     if args.csv:
         with open(args.csv, "w", newline="", encoding="utf-8") as fh:

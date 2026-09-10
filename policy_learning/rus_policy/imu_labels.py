@@ -41,6 +41,8 @@ def imu_config_for_session(meta: dict[str, Any] | None, imu_cfg: ImuConfig) -> I
     return cfg
 
 G0 = 9.80665
+# 레거시 3 축 투영. 학습은 2026-09-10 부터 label/P6 (6 자유도 전체) 를 쓴다 — 품질을 좌우하는
+# θx(기울임)·θy(부채질)·z(빔방향) 를 걸러내면 Q̂ 이 행동을 볼 수 없기 때문. label/P 는 호환용.
 POLICY_AXES = (0, 1, 5)   # (x, y, θz) in the 6-dim (x, y, z, θx, θy, θz)
 
 

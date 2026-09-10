@@ -8,7 +8,7 @@
   * KL 워밍업             β 를 train.beta_warmup_epochs 동안 0 → loss.beta_kl 로 올린다.
   * mode_margin           Q̂ 로 고른 모드와 반대 부호 모드의 점수 차. 잡음 수준이면 대칭 붕괴 (L11).
   * vy_sign_acc           |Δy| > σ 인 샘플에서 v_y 부호 정확도.
-  * mae_*                 축별 순변위 절대오차 (mm, mm, deg).
+  * mae_*                 축별 순변위 절대오차. 6 자유도 전부 (x,y,z mm · θx,θy,θz deg).
 
   * select_nmae           실행시 경로(사전분포 z + Q̂ 선택)의 σ 정규화 절대오차. 사후분포 경로의 mae_*
                           와 달리 라벨을 보지 않으므로 누설에 면역이다. 체크포인트 기준의 기본값.
@@ -33,7 +33,7 @@ from torch.utils.data import DataLoader
 from .config import PolicyConfig, save_config
 from .dataset import PolicyH5Dataset
 from .losses import compute_loss
-from .model import ActPolicy, build_policy, count_parameters
+from .model import AXIS_NAMES, AXIS_UNITS, Y_AXIS, ActPolicy, build_policy, count_parameters
 
 logger = logging.getLogger(__name__)
 
@@ -214,7 +214,7 @@ class Trainer:
             return {}
         self.model.eval()
         agg: dict[str, list[float]] = {}
-        spreads, margins, sel_mae_y, sel_sign = [], [], [], []
+        spreads, margins, sel_sign = [], [], []
         sel_ae, sel_nae, sig_y = [], [], []
         for batch in loader:
             batch = to_device(batch, self.device)
@@ -234,32 +234,30 @@ class Trainer:
             m = m[torch.isfinite(m)]
             if m.numel():
                 margins.append(m.mean().item())
-            sel_mae_y.append((sel["net"][:, 1] - P_lab[:, -1, 1]).abs().mean().item())
             # 실행시 경로는 라벨을 보지 않으므로 누설에 면역인 유일한 정확도 지표다
             sel_ae_b = (sel["net"] - P_lab[:, -1]).abs()
             sel_ae.append(sel_ae_b.mean(0).cpu().numpy())
             sel_nae.append((sel_ae_b / batch["sigma_net"].clamp_min(1e-6)).mean().item())
             sig_y.append(batch["sigma_net"][:, 1].cpu().numpy())
-            big = P_lab[:, -1, 1].abs() > batch["sigma_net"][:, 1]
+            big = P_lab[:, -1, Y_AXIS].abs() > batch["sigma_net"][:, Y_AXIS]
             if big.any():
-                sel_sign.append((torch.sign(sel["net"][big, 1]) == torch.sign(P_lab[big, -1, 1])).float().mean().item())
+                sel_sign.append((torch.sign(sel["net"][big, Y_AXIS]) == torch.sign(P_lab[big, -1, Y_AXIS])).float().mean().item())
         res = {k: float(np.mean(v)) for k, v in agg.items()}
         if spreads:
             res["mode_collapse_vy_std"] = float(np.mean(spreads))
         if margins:
             res["mode_margin"] = float(np.mean(margins))
-        if sel_mae_y:
-            res["select_mae_y_mm"] = float(np.mean(sel_mae_y))
         if sel_ae:
             m = np.mean(np.stack(sel_ae), axis=0)
-            res["select_mae_x_mm"], res["select_mae_th_deg"] = float(m[0]), float(m[2])
+            for i, (nm, un) in enumerate(zip(AXIS_NAMES, AXIS_UNITS)):
+                res[f"select_mae_{nm}_{un}"] = float(m[i])
         if sel_nae:
             res["select_nmae"] = float(np.mean(sel_nae))
         if sig_y:
             res["sigma_net_y_mm"] = float(np.median(np.concatenate(sig_y)))
         if sel_sign:
             res["select_vy_sign_acc"] = float(np.mean(sel_sign))
-        if sel_mae_y and "mae_y_mm" in res:
+        if "select_mae_y_mm" in res and "mae_y_mm" in res:
             res["leak_gap_mm"] = res["select_mae_y_mm"] - res["mae_y_mm"]
         return res
 
@@ -279,8 +277,10 @@ class Trainer:
             score = va.get(metric, va.get("total", tr["total"]))
             msg = (f"epoch {self.epoch}/{self.cfg.train.epochs}  train {tr['total']:.4f}  "
                    f"val {va.get('total', float('nan')):.4f}  "
-                   f"mae(x,y,θ)=({va.get('mae_x_mm', float('nan')):.2f},{va.get('mae_y_mm', float('nan')):.2f},"
-                   f"{va.get('mae_th_deg', float('nan')):.2f})")
+                   f"mae(x,y,z)=({va.get('mae_x_mm', float('nan')):.2f},{va.get('mae_y_mm', float('nan')):.2f},"
+                   f"{va.get('mae_z_mm', float('nan')):.2f})"
+                   f" mae(θx,θy,θz)=({va.get('mae_thx_deg', float('nan')):.2f},"
+                   f"{va.get('mae_thy_deg', float('nan')):.2f},{va.get('mae_thz_deg', float('nan')):.2f})")
             if "mode_collapse_vy_std" in va:
                 msg += f"  vy_std {va['mode_collapse_vy_std']:.2f}"
             if "mode_margin" in va:

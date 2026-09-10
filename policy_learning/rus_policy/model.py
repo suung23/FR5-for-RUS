@@ -8,8 +8,8 @@
     인코더         TransformerEncoder (무효 프레임은 key padding mask). **z 는 들어가지 않는다.**
     디코더         k 개 학습 쿼리 **+ z_proj(z)** → TransformerDecoder → 스텝별 특징
     헤드
-      action       스텝별 (v_x, v_y, ω_z)  [mm/s, mm/s, deg/s]  →  P̂ = Δt·cumsum
-      discrete     (선택) 축별 순변위 bin 로짓 (B, 3, n_bins)  §5.3(g)
+      action       스텝별 6 자유도 속도 [mm/s ×3, deg/s ×3]  →  P̂ = Δt·cumsum
+      discrete     (선택) 축별 순변위 bin 로짓 (B, 6, n_bins)  §5.3(g)
       quality      Q̂(o, A) — 관측 요약 + 행동 chunk 를 받아 미래 Q k 개 (§3.3)
       force        스텝별 F̂_n (텔레오퍼레이션 데이터에서만 감독)
     CVAE 인코더    q_φ(z | A, o): 라벨 chunk + 벡터 + 마지막 프레임 특징 → (μ, logσ²)
@@ -37,9 +37,16 @@ from .config import ModelConfig, TimingConfig
 from .dataset import OBS_VEC_DIM
 from .perception import STATE_DIM
 
-ACTION_DIM = 3
+# 2026-09-10: IMU 가 잰 6 자유도를 그대로 모델까지 보낸다. 정답 궤적을 따라하는 것이 목적이 아니라
+# "어떤 움직임이 어떤 영상 변화를 만드는가" 를 배우는 것이 목적이므로, 품질을 좌우하는 면외 축
+# (θx 기울임, θy 부채질, z 빔방향) 을 걸러내면 Q̂ 이 볼 것이 남지 않는다. 실제로 (x, y, θz) 만
+# 주었을 때 Q̂ 은 행동에 완전히 무감각했다 (행동을 0 으로 지워도 출력 변화가 Q 표준편차의 2%).
+ACTION_DIM = 6
+AXIS_NAMES = ("x", "y", "z", "thx", "thy", "thz")     # P6 = [x,y,z mm, θx,θy,θz deg]
+AXIS_UNITS = ("mm", "mm", "mm", "deg", "deg", "deg")
+Y_AXIS = 1                                            # elevational — 붕괴·누설 진단 축
 # 행동 정규화 스케일 (Q̂ 입력·CVAE 입력용). mm, mm, deg
-ACTION_SCALE = (20.0, 20.0, 10.0)
+ACTION_SCALE = (20.0, 20.0, 20.0, 10.0, 10.0, 10.0)
 
 
 # --------------------------------------------------------------------------- 블록
@@ -95,11 +102,11 @@ def sinusoid(n: int, d: int) -> torch.Tensor:
 # --------------------------------------------------------------------------- 모델
 @dataclass
 class PolicyOutput:
-    a_hat: torch.Tensor                 # (B,k,3) 스텝 속도 [mm/s, mm/s, deg/s]
-    P_hat: torch.Tensor                 # (B,k+1,3) 누적 변위, P_hat[:,0]=0
+    a_hat: torch.Tensor                 # (B,k,6) 스텝 속도 [mm/s ×3, deg/s ×3]
+    P_hat: torch.Tensor                 # (B,k+1,6) 누적 변위, P_hat[:,0]=0
     memory_pooled: torch.Tensor         # (B,d) 관측 요약 (Q̂ 입력) — z 를 포함하지 않는다
     F_hat: torch.Tensor                 # (B,k)
-    logits: Optional[torch.Tensor]      # (B,3,n_bins) 이산 헤드
+    logits: Optional[torch.Tensor]      # (B,6,n_bins) 이산 헤드
     mu: Optional[torch.Tensor]          # (B,z)
     logvar: Optional[torch.Tensor]
     z: Optional[torch.Tensor]
@@ -165,9 +172,9 @@ class ActPolicy(nn.Module):
 
     # ------------------------------------------------------------------ 이산 bin
     def bin_centers(self, device=None) -> torch.Tensor:
-        """(3, n_bins) 순변위 bin 중심 [mm, mm, deg]."""
-        r = torch.tensor([self.mcfg.discrete_range_mm, self.mcfg.discrete_range_mm,
-                          self.mcfg.discrete_range_deg], device=device)
+        """(6, n_bins) 순변위 bin 중심 [mm, mm, mm, deg, deg, deg]."""
+        rm, rd = self.mcfg.discrete_range_mm, self.mcfg.discrete_range_deg
+        r = torch.tensor([rm, rm, rm, rd, rd, rd], device=device)
         grid = torch.linspace(-1.0, 1.0, self.n_bins, device=device)
         return r[:, None] * grid[None, :]
 
@@ -284,7 +291,7 @@ class ActPolicy(nn.Module):
         _, P_hat, _, _ = self.decode(mem_rep, pad_rep, B * n_samples, z)
         Q = self.predict_quality(pooled_rep, P_hat)                           # (B*M,k)
         score = Q.sum(1)
-        P = P_hat.reshape(B, n_samples, self.k + 1, 3)
+        P = P_hat.reshape(B, n_samples, self.k + 1, ACTION_DIM)
         Qm = Q.reshape(B, n_samples, self.k)
         score = score.reshape(B, n_samples)
         if prev_dy is not None and gamma > 0:
@@ -294,13 +301,13 @@ class ActPolicy(nn.Module):
         ar = torch.arange(B, device=dev)
         P_best = P[ar, best]
         # 모드 마진: 선택 모드와 반대 부호 v_y 후보 중 최고 점수의 차 (§6 진단 2)
-        opp = torch.sign(P[:, :, -1, 1]) != torch.sign(P_best[:, -1, 1])[:, None]
+        opp = torch.sign(P[:, :, -1, Y_AXIS]) != torch.sign(P_best[:, -1, Y_AXIS])[:, None]
         opp_score = torch.where(opp, score, torch.full_like(score, -1e9)).max(1).values
         margin = score[ar, best] - opp_score
         margin = torch.where(opp.any(1), margin, torch.full_like(margin, float("nan")))
         return {"P": P_best, "a": (P_best[:, 1:] - P_best[:, :-1]) / self.dt, "Q_hat": Qm[ar, best],
                 "net": P_best[:, -1], "mode_margin": margin, "candidates": P, "scores": score,
-                "vy_spread": P[:, :, -1, 1].std(1)}
+                "vy_spread": P[:, :, -1, Y_AXIS].std(1)}
 
 
 def build_policy(mcfg: ModelConfig, timing: TimingConfig) -> ActPolicy:

@@ -304,6 +304,10 @@ def load_policy(path: str | Path, device: str = "auto") -> tuple[ActPolicy, Poli
     dev = pick_device(device)
     ck = torch.load(path, map_location=dev, weights_only=False)
     cfg = PolicyConfig.from_dict(ck["config"])
+    # 저장된 설정에 없는 키는 from_dict 가 **현재 기본값**으로 채운다. 그래서 기능이 추가되면 옛
+    # 체크포인트가 새 구조로 조립돼 state_dict 가 어긋난다. 가중치를 보고 되돌린다.
+    if "quality_base.net.0.weight" not in ck["model_state"]:
+        cfg.model.quality_residual = False
     model = build_policy(cfg.model, cfg.timing).to(dev)
     model.load_state_dict(ck["model_state"])
     model.eval()

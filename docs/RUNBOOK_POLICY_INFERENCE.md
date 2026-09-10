@@ -184,24 +184,34 @@ python3 scripts/diag_quality.py runs/qres2/last.pt --dataset /data4/seong/policy
 
 콘솔이 조작자의 자리다. 터미널은 **에피소드 사이에 Enter 를 치는 것** 말고는 볼 일이 없다.
 
-### 기동 (터미널 넷, 순서대로)
+### 기동
+
+세션은 **`scripts/start_session.sh` 하나**가 묶는다 — 정리 · PX6D · telemetry_bridge ·
+us_frame_node · 제어 스택 · GUI. 개별 `ros2 run` 을 늘어놓지 않는다.
 
 ```bash
-# ① 제어 스택 — freespace:=false 는 필수다 (§4 경고)
-source ~/FR5-for-RUS/env.sh
-ros2 launch fr5_launch us_phase0.launch.py backend:=fairino teleop:=true freespace:=false
-
-# ② 브리지 — launch 가 띄우지 않는다. 없으면 콘솔 버튼이 아무 데도 안 닿는다
-source ~/FR5-for-RUS/env.sh
-ros2 run fr5_control telemetry_bridge
-
-# ③ 콘솔
-cd ~/FR5-for-RUS/teleop_gui && npm run console
-
-# ④ 힘 탐색 — 먼저 관찰 모드로 디더를 확인하고 execute:=true 로 바꾼다
-source ~/FR5-for-RUS/env.sh
-ros2 run fr5_control force_search
+cd ~/FR5-for-RUS
+./scripts/start_session.sh freespace:=false          # ① 세션 (GUI 포함)
 ```
+
+* **`freespace:=false` 를 반드시 붙인다** (§4 경고). 기본값은 150 mm/s 이고, 힘 트리거를
+  껐으므로 접촉 순간 내려 주던 안전망이 없다.
+* **`--seg` 를 붙이지 않는다.** 정책 러너가 자기 U-Net 을 돌리므로 두 벌이 되어 지각이
+  느려진다 (`start_session.sh` 주석). 영상 위 마스크는 러너 로그의 `Q` 로 본다.
+* `us_frame_node` 는 이 스크립트가 소유한다 — 프로브는 클라이언트를 하나만 받는다.
+  러너는 그것이 내는 `/us/image` 를 구독할 뿐이다.
+
+여기에 터미널 둘을 더한다.
+
+```bash
+source ~/FR5-for-RUS/env.sh
+ros2 run fr5_control force_search                    # ② 힘 탐색 (관찰 모드로 먼저)
+
+source ~/FR5-for-RUS/env.sh
+cd ~/FR5-for-RUS/policy_learning                     # ③ 정책 러너 / 세션 드라이버
+```
+
+세션을 내릴 때는 `./scripts/stop_all.sh`.
 
 ### 기동 확인 — 콘솔에서
 

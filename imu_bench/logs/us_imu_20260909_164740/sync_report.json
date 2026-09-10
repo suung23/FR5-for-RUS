@@ -5,7 +5,7 @@
   "duration_s": 100.03241539001465,
   "us_fps": 9.944505430672095,
   "imu_hz": 254.1232353832172,
-  "us_latency_s_applied": 0.0,
+  "us_latency_s_applied": 0.2,
   "frame_dt_ms": {
     "median": 100.55804252624512,
     "p95": 111.04621887207031,
@@ -20,19 +20,19 @@
     "p99": 18.044781684875485,
     "max": 27.1451473236084
   },
-  "frames_outside_imu": 0,
-  "frames_outside_fraction": 0.0,
+  "frames_outside_imu": 2,
+  "frames_outside_fraction": 0.002,
   "imu_nearest_dt_ms": {
-    "median_abs": 0.000476837158203125,
-    "max_abs": 7.03120231628418
+    "median_abs": 1.3508796691894531,
+    "max_abs": 152.8925895690918
   },
   "clock": {
-    "a": 1788939033.4347742,
-    "b": 0.9999945155975608,
-    "skew_ppm": -5.484402439193126,
-    "residual_p95_ms": 9.868574142456055
+    "a": 1788939033.4347734,
+    "b": 0.9999945152291503,
+    "skew_ppm": -5.484770849717435,
+    "residual_p95_ms": 9.867727756500244
   },
-  "still_fraction_frames": 0.415,
+  "still_fraction_frames": 0.409,
   "quat_convention": "R",
   "zero_ref": false,
   "cal_status_mode": [
@@ -48,7 +48,6 @@
   "ok": true,
   "warnings": [
     "영점(zero_ref) 없음 — 다음 세션은 Z 를 R 보다 먼저",
-    "BNO085 자이로 보정 상태 낮음 (cal_gyr < 2) — 회전 라벨 신뢰도 주의",
-    "us_latency_s 미측정 (0 적용) — inspect_session.py --latency"
+    "BNO085 자이로 보정 상태 낮음 (cal_gyr < 2) — 회전 라벨 신뢰도 주의"
   ]
 }

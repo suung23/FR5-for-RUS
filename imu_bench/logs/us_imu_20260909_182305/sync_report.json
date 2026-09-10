@@ -5,7 +5,7 @@
   "duration_s": 67.28124904632568,
   "us_fps": 9.946981734358474,
   "imu_hz": 290.42404099155243,
-  "us_latency_s_applied": 0.0,
+  "us_latency_s_applied": 0.2,
   "frame_dt_ms": {
     "median": 100.53300857543945,
     "p95": 113.76515626907344,
@@ -20,19 +20,19 @@
     "p99": 18.5943603515625,
     "max": 25.42901039123535
   },
-  "frames_outside_imu": 0,
-  "frames_outside_fraction": 0.0,
+  "frames_outside_imu": 2,
+  "frames_outside_fraction": 0.0029717682020802376,
   "imu_nearest_dt_ms": {
-    "median_abs": 0.000476837158203125,
-    "max_abs": 7.030963897705078
+    "median_abs": 1.5711784362792969,
+    "max_abs": 168.66350173950195
   },
   "clock": {
-    "a": 1788944911.7775686,
+    "a": 1788944911.7775688,
     "b": 1.0000089243147894,
     "skew_ppm": 8.924314789382493,
-    "residual_p95_ms": 9.136557579040527
+    "residual_p95_ms": 9.136795997619629
   },
-  "still_fraction_frames": 0.3967310549777117,
+  "still_fraction_frames": 0.3952451708766716,
   "quat_convention": "R",
   "zero_ref": false,
   "cal_status_mode": [
@@ -48,7 +48,6 @@
   "ok": true,
   "warnings": [
     "영점(zero_ref) 없음 — 다음 세션은 Z 를 R 보다 먼저",
-    "BNO085 자이로 보정 상태 낮음 (cal_gyr < 2) — 회전 라벨 신뢰도 주의",
-    "us_latency_s 미측정 (0 적용) — inspect_session.py --latency"
+    "BNO085 자이로 보정 상태 낮음 (cal_gyr < 2) — 회전 라벨 신뢰도 주의"
   ]
 }

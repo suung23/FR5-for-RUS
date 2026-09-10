@@ -35,3 +35,7 @@ imu_bench/logs/
 # 그 안의 electron 바이너리(177.7 MB)가 GitHub 하드 리밋(100 MB)에 걸려 push 가
 # 거부됐다. 미푸시 6 커밋을 filter-branch 로 재작성해 걷어냈다.
 node_modules/
+
+# 강성 압입 세션. 점 자료는 작지만 US 프레임이 붙으면 세션당 수십 MB 가 된다.
+# imu_bench/logs 와 같은 이유로 리포에 담지 않는다 — 쓸 결과는 stiffness_fit.* 다.
+phantom_stiffness/runs/

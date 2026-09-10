@@ -180,3 +180,23 @@ def test_placebo_does_not_mutate_its_input():
     a = np.array([1.0, 2.0, 3.0, 0.4, -0.7, 1.1])
     randomize_direction(a, rng)
     assert np.array_equal(a, [1.0, 2.0, 3.0, 0.4, -0.7, 1.1])
+
+
+def test_gate_opens_with_no_mask_at_all():
+    """'방광이 안 보인다' 의 가장 극단이 면적비 0 이다 — 마스크 없음을 요구로 걸면 안 된다.
+
+    2026-09-11 실기: 면적비 0.000 · Q_raw 0.72 인 자세가 계속 폐기됐다.
+    """
+    g = StartGate(area_max=0.02, quality_min=0.6, confirm_s=1.0)
+    s = _state(area=0.0, q=0.72, mask=0.0)          # 마스크가 아예 없다
+    for t in np.arange(0.0, 1.5, 0.1):
+        g.update(float(t), s)
+    assert g.is_open
+
+
+def test_success_still_requires_a_mask():
+    """시작 조건과 반대다 — 진단 가능 뷰는 마스크가 있어야 한다."""
+    thr = Thresholds(area_min=0.08, component_min=0.8, hold_s=1.0)
+    t = np.arange(0.0, 6.0, 0.5)
+    no_mask = np.stack([_state(area=0.2, comp=0.9, dx=0.0, mask=0.0) for _ in t])
+    assert not judge(t, no_mask, thr)["success"]

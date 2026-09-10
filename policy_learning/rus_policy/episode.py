@@ -69,7 +69,12 @@ class StartGate:
         dt = 0.0 if self._last_t is None else max(0.0, float(t) - self._last_t)
         self._last_t = float(t)
         s = np.asarray(state, float)
-        ok = bool(s[HAS_MASK] > 0.5) and s[AREA] < self.area_max and s[QUALITY] >= self.quality_min
+        # 마스크가 **없는 것도 시작 조건이다.** "방광이 안 보인다" 의 가장 극단이 면적비 0 이고,
+        # has_mask 를 요구하면 그 자세가 영영 채택되지 않는다 (2026-09-11 실기에서 확인:
+        # 면적비 0.000 · Q_raw 0.72 인 자세가 계속 폐기됐다). 계획서 §3 도 마스크 존재를
+        # 요구하지 않는다 — 면적비 < 2 % 이면서 Q_raw ≥ 0.6 둘뿐이다.
+        # 성공 판정(judge)은 반대다: 거기서는 마스크가 있어야 진단 가능 뷰다.
+        ok = s[AREA] < self.area_max and s[QUALITY] >= self.quality_min
         self._held_s = self._held_s + dt if ok else 0.0
         return self.is_open
 

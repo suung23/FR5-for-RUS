@@ -343,9 +343,6 @@ class PolicyRunner(Node):
         if obs is None:
             return self._idle("유효한 관측 프레임이 없다 (전부 오래됐거나 무효)")
         qn = obs.pop("quality_now")
-        if self._idle_reason:
-            self.get_logger().warn(f"대기 해제 — {self._idle_reason} 가 풀렸다")
-            self._idle_reason = ""
 
         # 시작 조건. 열리기 전에는 아무것도 지령하지 않는다 — 잘 보이는 자세에서 출발하면
         # 아무것도 안 해도 성공이라 찾는 능력을 못 잰다.
@@ -378,6 +375,11 @@ class PolicyRunner(Node):
                 # 아직 지연만큼 안 쌓였다 — 위약이 성립하지 않는다
                 return self._idle(f"위약 관측 버퍼 채우는 중 ({self.placebo.n_buffered} 장)")
             obs = past
+        if self._idle_reason:
+            # 여기까지 왔다는 것은 실제로 지령을 낸다는 뜻이다. 관측을 얻은 자리에서 지우면
+            # 시작 조건에서 막히는 동안 매 tick "해제 → 대기" 가 번갈아 찍힌다.
+            self.get_logger().warn(f"대기 해제 — {self._idle_reason}")
+            self._idle_reason = ""
         with torch.no_grad():
             sel = self.model.select_action(obs, n_samples=self.args.z_samples,
                                            gamma=self.cfg.train.gamma_mode_consistency,

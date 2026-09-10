@@ -88,6 +88,7 @@ class SetpointPusher:
     def mark(self, setpoint: float) -> None:
         self.last = float(setpoint)
 
+
 class ForceSetpointAdapter:
     """구형파 디더 극값 탐색으로 힘 설정값을 적응시킨다.
 

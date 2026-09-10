@@ -7,6 +7,8 @@
 
 import math
 
+import pytest
+
 from fr5_control.force_setpoint_adapter import SetpointPusher
 
 
@@ -40,3 +42,23 @@ def test_non_finite_setpoint_is_never_pushed():
     p.mark(3.0)
     assert not p.should_push(math.nan)     # 이전 값을 지우지도 않는다
     assert p.should_push(3.5)
+
+
+def test_node_defaults_actually_construct_an_adapter():
+    """force_search_node 가 선언한 기본값으로 어댑터가 만들어져야 한다.
+
+    2026-09-11: 노드가 f_bar0 를 생성자에 안 넘겨 `ros2 run` 이 즉시 죽었다. 노드는 rclpy 를
+    끌어들여 pytest 로 못 잡으므로, **파라미터 이름과 값**을 여기에 못 박아 계약을 지킨다.
+    """
+    from fr5_control.force_setpoint_adapter import ForceSetpointAdapter
+
+    defaults = dict(f_bar0=3.0, amplitude_n=0.25, period_s=5.0, settle_s=0.5,
+                    step_max_n=0.1, f_min_n=1.0, f_max_n=4.5)
+    a = ForceSetpointAdapter(**defaults)
+    a.reset(defaults["f_bar0"], 0.0)
+    assert a.f_bar == 3.0
+    # 디더가 반주기(2.5 s)에 부호를 뒤집는다 — 설정값이 [f_min, f_max] 를 벗어나지 않는다
+    assert a.setpoint(0.0) == pytest.approx(3.25)
+    assert a.setpoint(3.0) == pytest.approx(2.75)
+    for t in (0.0, 1.0, 2.6, 4.9):
+        assert defaults["f_min_n"] <= a.setpoint(t) <= defaults["f_max_n"]

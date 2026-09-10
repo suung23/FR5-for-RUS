@@ -65,6 +65,7 @@ class ForceSearchNode(Node):
         self.control_node = str(g("control_node"))
         self.execute = bool(g("execute"))
         self.adapter = ForceSetpointAdapter(
+            f_bar0=float(g("f_bar0_n")),          # 탐색의 **시작값**. 고정 목표가 아니다.
             amplitude_n=float(g("dither_amplitude_n")),
             period_s=float(g("dither_period_s")),
             settle_s=float(g("settle_s")),

@@ -57,6 +57,7 @@ from _common import setup_logging
 
 from rus_policy.bmode import BmodeConverter
 from rus_policy.dataset import OBS_VEC_DIM, _resize_frames
+from rus_policy.episode import CONDITIONS, PlaceboBuffer, StartGate, Thresholds, judge
 from rus_policy.model import ACTION_DIM
 from rus_policy.perception import STATE_DIM, apply_frame_transform, build_backend
 from rus_policy.train import load_policy
@@ -157,6 +158,15 @@ class PolicyRunner(Node):
         self.prev_t = None
         self.rows: list[dict] = []
         self.n_img = self.n_drop = 0
+        # 에피소드 틀 (실험용). duration 0 이면 예전처럼 계속 돈다.
+        self.condition = args.condition
+        self.gate = StartGate(area_max=args.gate_area_max, quality_min=args.gate_quality_min,
+                              confirm_s=args.gate_confirm_s)
+        self.placebo = PlaceboBuffer(args.placebo_delay_s) if self.condition == "placebo" else None
+        self.t_start: Optional[float] = None      # 게이트가 열린 시각 = 에피소드 시작
+        self.states: list = []                    # 판정에 쓸 상태 이력
+        self.state_t: list = []
+        self.finished = False
         self._warned = False
         self.create_timer(1.0 / cfg.timing.policy_hz, self._tick)
         self.get_logger().info(
@@ -239,7 +249,10 @@ class PolicyRunner(Node):
         dt_ms = (time.time() - t0) * 1000
         if dt_ms > 1000.0 / max(self.args.min_perception_fps, 1e-6):
             self.n_drop += 1
-        self.buf.append((time.time(), bm, state, q))
+        now_t = time.time()
+        self.buf.append((now_t, bm, state, q))
+        self.state_t.append(now_t)
+        self.states.append(state)
         self.quality_pub.publish(Float32(data=float(q)))     # NaN 도 그대로 — "측정 안 됨"
         self.n_img += 1
         if self.n_img % 50 == 0:
@@ -288,6 +301,33 @@ class PolicyRunner(Node):
             self._stop()
             return
         qn = obs.pop("quality_now")
+
+        # 시작 조건. 열리기 전에는 아무것도 지령하지 않는다 — 잘 보이는 자세에서 출발하면
+        # 아무것도 안 해도 성공이라 찾는 능력을 못 잰다.
+        if self.t_start is None:
+            st = self.states[-1] if self.states else None
+            if st is None or not self.gate.update(t, st):
+                self._stop()
+                return
+            self.t_start = t
+            self.get_logger().warn(
+                f"시작 조건 충족 — 에피소드 시작 (조건 {self.condition}, "
+                + (f"{self.args.duration:.0f} s)" if self.args.duration > 0 else "무제한)"))
+
+        if self.args.duration > 0 and (t - self.t_start) >= self.args.duration:
+            self._stop()
+            self.finished = True
+            self.get_logger().warn("에피소드 종료 — 지령을 멈춘다")
+            return
+
+        # 위약: 같은 정책·같은 후보 분포로, **지금이 아닌 관측**에서 지령을 만든다.
+        if self.placebo is not None:
+            self.placebo.push(t, obs)
+            past = self.placebo.take(t)
+            if past is None:
+                self._stop()          # 아직 지연만큼 안 쌓였다 — 위약이 성립하지 않는다
+                return
+            obs = past
         with torch.no_grad():
             sel = self.model.select_action(obs, n_samples=self.args.z_samples,
                                            gamma=self.cfg.train.gamma_mode_consistency,
@@ -295,7 +335,12 @@ class PolicyRunner(Node):
         a = sel["a"][0, 0].cpu().numpy()                    # 첫 스텝 속도 (B,k,6) → (6,)
         net = sel["net"][0].cpu().numpy()
         qhat = float(sel["Q_hat"][0].mean())
-        lin, ang = self._publish(a.astype(np.float64))
+        if self.condition in ("hold", "expert"):
+            # hold 는 바닥선, expert 는 사람이 지령한다. 둘 다 러너는 **기록만** 한다.
+            self._stop()
+            lin, ang = np.zeros(3), np.zeros(3)
+        else:
+            lin, ang = self._publish(a.astype(np.float64))
         self.prev_net = np.array([net[0], net[1], net[5]], np.float32)   # 레거시 3축 규약
         self.prev_t = time.time()
         self.rows.append({
@@ -305,6 +350,7 @@ class PolicyRunner(Node):
             **{f"net_{n}": float(v) for n, v in zip("x y z thx thy thz".split(), net)},
             "margin": float(sel["mode_margin"][0].mean()) if sel["mode_margin"].ndim else float("nan"),
             "n_frames": len(self.buf), "enabled": int(self.enabled),
+            "condition": self.condition, "t_episode": t - self.t_start,
         })
         if len(self.rows) % 10 == 0:
             self.get_logger().info(
@@ -317,10 +363,34 @@ class PolicyRunner(Node):
             with open(out / "decisions.csv", "w", newline="", encoding="utf-8") as fh:
                 w = csv.DictWriter(fh, fieldnames=list(self.rows[0].keys()))
                 w.writeheader(); w.writerows(self.rows)
+        verdict = {}
+        if self.t_start is not None and self.states:
+            m = [i for i, tt in enumerate(self.state_t) if tt >= self.t_start]
+            if m:
+                thr = Thresholds(area_min=self.args.success_area_min,
+                                 component_min=self.args.success_component_min,
+                                 hold_s=self.args.success_hold_s)
+                verdict = judge([self.state_t[i] for i in m],
+                                np.stack([self.states[i] for i in m]), thr)
+                print("\n판정: " + "  ".join(f"{k}={v}" for k, v in verdict.items()))
+        if self.states:
+            # 판정 임계를 나중에 다시 훑으려면 원자료가 있어야 한다 — 파일럿의 목적이
+            # "예비 촬영으로 임계를 확정한다" 이므로 판정 결과만 남기면 되돌아갈 수 없다.
+            np.savez_compressed(out / "states.npz", t=np.asarray(self.state_t, np.float64),
+                                state=np.stack(self.states).astype(np.float32),
+                                t_start=np.float64(self.t_start if self.t_start else np.nan))
         (out / "meta.json").write_text(json.dumps({
             "checkpoint": self.args.checkpoint, "axes": self.args.axes, "execute": self.args.execute,
             "z_samples": self.args.z_samples, "start_force_N": self.args.start_force,
             "max_mm_s": self.args.max_mm_s, "max_deg_s": self.args.max_deg_s,
+            "condition": self.condition, "duration_s": self.args.duration,
+            "episode_started": self.t_start is not None,
+            "gate": {"area_max": self.args.gate_area_max, "quality_min": self.args.gate_quality_min,
+                     "confirm_s": self.args.gate_confirm_s, "held_s": self.gate.held_s},
+            "thresholds": {"area_min": self.args.success_area_min,
+                           "component_min": self.args.success_component_min,
+                           "hold_s": self.args.success_hold_s},
+            "verdict": verdict,
             "n_ticks": len(self.rows), "n_frames": self.n_img, "n_slow_perception": self.n_drop,
             "bmode": self.conv.describe() if self.conv else None,
         }, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -334,12 +404,27 @@ def main() -> int:
     p.add_argument("--robot-namespace", default="/fr5_right",
                    help="제어 스택 토픽의 네임스페이스 — desired_twist · ee_wrt_base · "
                         "wrench_px6d · probing_mode 가 여기 있다")
-    p.add_argument("--enable-topic", default="/us/policy_enable",
-                   help="시작/정지 Bool 토픽 (런북 §4)")
+    # 브리지(telemetry_bridge)가 {robot_ns}/policy_enable 로 낸다. us_diff_ik_node 도 같은
+    # 이름을 구독해 régime 을 함께 연다 — 셋이 같은 이름을 봐야 버튼 하나가 다 움직인다.
+    p.add_argument("--enable-topic", default="/fr5_right/policy_enable",
+                   help="시작/정지 Bool 토픽. 브리지가 내는 {robot_ns}/policy_enable 과 같아야 한다")
     p.add_argument("--start-on", default="topic", choices=["topic", "probing"],
                    help="topic=사용자가 enable 토픽으로 시작 (기본, 런북 §6). "
                         "probing=접촉 프로빙 진입에 맞춰 자동 시작")
     p.add_argument("--image-topic", default="/us/image")
+    p.add_argument("--condition", default="policy", choices=list(CONDITIONS),
+                   help="hold=정지(바닥선) · placebo=지연 관측으로 같은 분포의 움직임 · "
+                        "policy=학습된 정책 · expert=숙련자(러너는 기록만)")
+    p.add_argument("--duration", type=float, default=0.0,
+                   help="에피소드 길이 [s]. 0 이면 무제한 (예전 거동)")
+    p.add_argument("--placebo-delay-s", type=float, default=30.0,
+                   help="위약이 쓰는 관측 지연 [s]. 풍선 변형의 시간 규모보다 길어야 한다")
+    p.add_argument("--gate-area-max", type=float, default=0.02, help="시작: 면적비 < 이 값")
+    p.add_argument("--gate-quality-min", type=float, default=0.6, help="시작: Q_raw ≥ 이 값")
+    p.add_argument("--gate-confirm-s", type=float, default=1.0, help="시작 조건 확인 창 [s]")
+    p.add_argument("--success-area-min", type=float, default=0.08, help="성공: 면적비 ≥ (파일럿이 확정)")
+    p.add_argument("--success-component-min", type=float, default=0.80, help="성공: 연결성분 ≥")
+    p.add_argument("--success-hold-s", type=float, default=3.0, help="성공: 연속 유지 [s]")
     p.add_argument("--axes", default="rot", choices=["rot", "all"], help="rot=회전만 (기본), all=병진까지")
     p.add_argument("--execute", action="store_true", help="실제로 지령한다 (기본은 계산만)")
     p.add_argument("--z-samples", type=int, default=64, help="후보 수 M — Q̂ 순위가 약하므로 넉넉히")
@@ -362,7 +447,8 @@ def main() -> int:
     rclpy.init()
     node = PolicyRunner(args, model, cfg, backend)
     try:
-        rclpy.spin(node)
+        while rclpy.ok() and not node.finished:
+            rclpy.spin_once(node, timeout_sec=0.1)
     except KeyboardInterrupt:
         pass
     finally:

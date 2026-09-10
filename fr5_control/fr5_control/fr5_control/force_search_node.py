@@ -45,8 +45,10 @@ from fr5_control.force_setpoint_adapter import ForceSetpointAdapter, SetpointPus
 class ForceSearchNode(Node):
     def __init__(self) -> None:
         super().__init__("force_search")
-        self.declare_parameter("namespace", "/us")
-        self.declare_parameter("control_node", "/us_diff_ik")
+        # 제어 스택 토픽은 /{robot.name} 아래에 있다 (us_diff_ik_node · telemetry_bridge 와 동일).
+        # run_policy 가 {robot_ns}/image_quality 로 Q_raw 를 내므로 여기와 같아야 한다.
+        self.declare_parameter("namespace", "/fr5_right")
+        self.declare_parameter("control_node", "/us_diff_ik_node")
         self.declare_parameter("quality_topic", "")
         self.declare_parameter("execute", False)
         self.declare_parameter("f_bar0_n", 3.0)

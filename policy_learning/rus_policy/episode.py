@@ -1,0 +1,186 @@
+"""에피소드 판정 — 시작 조건, 성공 판정, 위약 조건.
+
+실험 설계 (2026-09-11)
+---------------------
+팬텀 물풍선의 부피를 바꾸는 동안 정책이 영상 품질을 유지하는가를 본다. 에피소드 하나는
+시작 자세에서 90 s 이고, 조건은 넷이다.
+
+    hold      정지. 아무것도 지령하지 않는다 — **바닥선**. 풍선이 변형되는 동안 가만히
+              있으면 품질이 얼마나 떨어지는가.
+    placebo   정책과 **같은 분포의 움직임**을 내되 지금 영상과 무관하게. 위약이 없으면
+              "움직이니까 좋아졌다" 와 "옳게 움직여서 좋아졌다" 를 못 가른다.
+    policy    학습된 정책.
+    expert    숙련자 텔레오퍼레이션. 상한선 — 본 시험에서만.
+
+**판정 임계는 파일럿이 정한다.** 여기 있는 기본값은 자리표시자다 (면적비 8 %, 연결성분
+80 %). 예비 촬영으로 확정한 뒤 설정으로 넘긴다 — 코드를 고치지 않는다.
+
+시작 조건
+--------
+"방광이 잘 안 보이는 자세" 에서 출발해야 찾는 능력을 잰다. 이미 잘 보이면 아무것도 안 해도
+성공이다. 그래서 **면적비 < 2 % 이면서 Q_raw ≥ 0.6** 을 요구한다 — 앞은 "안 보인다",
+뒤는 "그래도 영상은 쓸 만하다"(접촉이 있고 화면이 잡음이 아니다) 이다. 둘 중 하나라도
+안 맞으면 그 자세는 **폐기**하고 다음으로 간다. 폐기율 자체가 파일럿의 산출물이다.
+
+``rclpy`` 없이 돈다. 이 판정의 버그는 실기 앞이 아니라 pytest 로 찾아야 하는 종류다.
+시간은 밖에서 받는다.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Optional, Sequence
+
+import numpy as np
+
+from .perception import STATE_FEATURE_NAMES
+
+#: 조건. expert 는 로봇이 아니라 사람이 지령하므로 러너는 기록만 한다.
+CONDITIONS = ("hold", "placebo", "policy", "expert")
+
+_IDX = {name: i for i, name in enumerate(STATE_FEATURE_NAMES)}
+AREA = _IDX["area_ratio"]
+COMPONENT = _IDX["largest_component_ratio"]
+QUALITY = _IDX["quality"]
+HAS_MASK = _IDX["has_mask"]
+
+
+@dataclass
+class StartGate:
+    """시작 조건을 연속으로 만족했는가.
+
+    한 프레임짜리 만족으로 열지 않는다 — 분할이 한 장 튄 것과 "그 자세가 실제로 그렇다"
+    를 가르려면 창이 필요하다.
+    """
+
+    area_max: float = 0.02          # 면적비 < 2 % — 방광이 잘 안 보인다
+    quality_min: float = 0.6        # Q_raw ≥ 0.6 — 그래도 영상은 쓸 만하다
+    confirm_s: float = 1.0
+    _held_s: float = field(default=0.0, init=False)
+    _last_t: Optional[float] = field(default=None, init=False)
+
+    def reset(self) -> None:
+        self._held_s = 0.0
+        self._last_t = None
+
+    def update(self, t: float, state: Sequence[float]) -> bool:
+        """상태 표본 하나. 조건이 확인 창만큼 이어졌으면 참."""
+        dt = 0.0 if self._last_t is None else max(0.0, float(t) - self._last_t)
+        self._last_t = float(t)
+        s = np.asarray(state, float)
+        ok = bool(s[HAS_MASK] > 0.5) and s[AREA] < self.area_max and s[QUALITY] >= self.quality_min
+        self._held_s = self._held_s + dt if ok else 0.0
+        return self.is_open
+
+    @property
+    def is_open(self) -> bool:
+        return self._held_s >= self.confirm_s
+
+    @property
+    def held_s(self) -> float:
+        return self._held_s
+
+
+@dataclass
+class Thresholds:
+    """성공 판정. **파일럿이 확정할 값이다** — 여기 숫자는 자리표시자다."""
+
+    area_min: float = 0.08          # 마스크 면적비 ≥ 8 %
+    component_min: float = 0.80     # 가장 큰 연결성분 ≥ 80 %
+    hold_s: float = 3.0             # 이 조건이 연속으로 유지돼야 한다
+
+
+def longest_run_s(t: Sequence[float], ok: Sequence[bool]) -> float:
+    """``ok`` 가 연속으로 참인 가장 긴 구간의 길이 [s]."""
+    t = np.asarray(t, float)
+    ok = np.asarray(ok, bool)
+    if t.size < 2:
+        return 0.0
+    best = run = 0.0
+    for i in range(1, t.size):
+        if ok[i] and ok[i - 1]:
+            run += max(0.0, t[i] - t[i - 1])
+            best = max(best, run)
+        else:
+            run = 0.0
+    return float(best)
+
+
+def judge(t: Sequence[float], state: np.ndarray, thr: Thresholds) -> dict:
+    """에피소드 하나의 결과.
+
+    성공은 "언젠가 한 프레임 좋았다" 가 아니라 **연속으로 ``hold_s`` 동안 좋았다** 이다.
+    한 프레임짜리 성공을 세면 무작위로 흔들기만 해도 성공률이 올라간다 — 위약이 이기게 된다.
+    """
+    state = np.asarray(state, float)
+    if state.ndim != 2 or state.shape[0] != len(t):
+        raise ValueError(f"state 는 (N, {len(STATE_FEATURE_NAMES)}) 여야 한다: {state.shape}")
+    good = ((state[:, HAS_MASK] > 0.5)
+            & (state[:, AREA] >= thr.area_min)
+            & (state[:, COMPONENT] >= thr.component_min))
+    best = longest_run_s(t, good)
+    q = state[:, QUALITY]
+    finite = np.isfinite(q)
+    return {
+        "success": bool(best >= thr.hold_s),
+        "best_run_s": best,
+        "good_fraction": float(good.mean()) if good.size else 0.0,
+        "q_mean": float(q[finite].mean()) if finite.any() else float("nan"),
+        "q_final_10s": _tail_mean(t, q, 10.0),
+        "area_max": float(state[:, AREA].max()) if state.size else 0.0,
+        "n_samples": int(state.shape[0]),
+    }
+
+
+def _tail_mean(t: Sequence[float], v: Sequence[float], window_s: float) -> float:
+    t = np.asarray(t, float)
+    v = np.asarray(v, float)
+    if t.size == 0:
+        return float("nan")
+    m = (t >= t[-1] - window_s) & np.isfinite(v)
+    return float(v[m].mean()) if m.any() else float("nan")
+
+
+class PlaceboBuffer:
+    """위약 조건 — 정책에게 **지금이 아닌 관측**을 먹인다.
+
+    같은 정책, 같은 후보 분포, 같은 지령 크기. 다른 것은 그 지령이 지금 화면과 무관하다는
+    것뿐이다. 그래서 "움직여서 좋아졌다" 와 "옳게 움직여서 좋아졌다" 가 갈린다.
+
+    지연을 쓰는 이유는 재생(replay)과 달리 **부트스트랩이 필요 없기** 때문이다. 조건 순서를
+    무작위로 돌릴 수 있고, 앞선 policy 에피소드가 없어도 첫 에피소드부터 돈다.
+
+    ⚠️ 지연이 짧으면 위약이 아니다. 풍선 변형의 시간 규모보다 길어야 한다 — 기본 30 s 는
+    자리표시자이고, 파일럿에서 Q_raw 자기상관을 보고 정한다.
+    """
+
+    def __init__(self, delay_s: float = 30.0) -> None:
+        if delay_s <= 0.0:
+            raise ValueError(f"delay_s 는 양수여야 한다: {delay_s}")
+        self.delay_s = float(delay_s)
+        self._items: list = []
+
+    def push(self, t: float, item) -> None:
+        self._items.append((float(t), item))
+
+    def take(self, t: float):
+        """``t − delay`` 이전의 가장 최근 항목. 아직 그만큼 안 쌓였으면 ``None``.
+
+        ``t`` 는 **단조** 여야 한다 — 쓰이지 않을 과거를 버리므로 뒤로 가면 이미 없다.
+        실시간 루프가 부르는 방식이 그렇고, 되감아 다시 판정할 일이 있으면 새로 만든다.
+        """
+        cutoff = float(t) - self.delay_s
+        chosen = None
+        drop = 0
+        for i, (ts, item) in enumerate(self._items):
+            if ts <= cutoff:
+                chosen, drop = item, i
+            else:
+                break
+        if drop > 0:                      # 쓰이지 않을 과거는 버린다 (90 s 에피소드 × 8 fps)
+            del self._items[:drop]
+        return chosen
+
+    @property
+    def n_buffered(self) -> int:
+        return len(self._items)

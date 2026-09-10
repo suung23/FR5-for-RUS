@@ -170,6 +170,19 @@ class UnetPerception:
         "첫 프레임" 으로 처리된다** — 학습 때 세션을 순차로 돌린 것과 분포가 달라지고,
         state 안의 quality 가 직접 틀어진다. 실시간에서는 이 메서드를 쓴다.
         """
+        return self.step_detailed(frame)[:4]
+
+    def step_detailed(self, frame: np.ndarray) -> tuple[np.ndarray, float, int, float, Any]:
+        """``step`` 과 같되 ``ControlState`` 를 함께 돌려준다 — 마스크가 필요한 곳용.
+
+        화면에 마스크를 겹쳐 보이려면 특징 벡터가 아니라 ``cs.binary_mask`` 와, 그것이
+        어느 그림 위의 마스크인지(= 여기서 실제로 넣은 256² B-mode)가 있어야 한다. 그
+        둘을 따로 계산하는 경로를 하나 더 만들면 화면과 정책이 **다른 전처리** 를 보게
+        되므로, 지각은 이 메서드 하나로만 돈다. ``step`` 은 앞 넷을 자른 것이다.
+
+        스트리밍 상태(``_prev``)도 같은 것을 쓴다 — 시각화 때문에 시간 의존 특징이
+        갈라지지 않는다.
+        """
         from rus_perception.data.io import resize_image
 
         image = np.asarray(frame, np.float32) / 255.0
@@ -178,7 +191,9 @@ class UnetPerception:
         cs = self._extract(prob, image=image, previous_state=getattr(self, "_prev", None),
                            config=self.feature_config, roi_mask=self.roi)
         self._prev = cs
-        return control_state_to_vector(cs, self.beam_axis_px, self.image_size, self.hold_deadband_px)
+        vec, q, tok, e_px = control_state_to_vector(
+            cs, self.beam_axis_px, self.image_size, self.hold_deadband_px)
+        return vec, q, tok, e_px, cs
 
     def run(self, frames: np.ndarray, progress: bool = True) -> PerceptionResult:
         """세션 프레임 전체를 순차로. ``step`` 을 처음부터 다시 돌리는 것과 같다."""

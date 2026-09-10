@@ -8,6 +8,9 @@ from rus_policy.episode import (AREA, CENTROID_DX, COMPONENT, HAS_MASK, QUALITY,
 from rus_policy.perception import STATE_DIM
 
 
+_Q_RAW = 0.72          # 시작 조건의 Q_raw — 상태 벡터의 quality(=Q_seg) 와 다르다
+
+
 def _state(area=0.0, comp=0.0, q=0.0, mask=1.0, dx=0.0):
     s = np.zeros(STATE_DIM, np.float32)
     s[AREA], s[COMPONENT], s[QUALITY], s[HAS_MASK], s[CENTROID_DX] = area, comp, q, mask, dx
@@ -20,9 +23,9 @@ def test_gate_needs_the_window_not_one_frame():
     g = StartGate(confirm_s=1.0)
     s = _state(area=0.01, q=0.7)
     for t in np.arange(0.0, 0.9, 0.1):
-        assert not g.update(float(t), s)
+        assert not g.update(float(t), s, _Q_RAW)
     for t in np.arange(0.9, 1.3, 0.1):
-        g.update(float(t), s)
+        g.update(float(t), s, _Q_RAW)
     assert g.is_open
 
 
@@ -31,8 +34,8 @@ def test_gate_resets_on_a_single_bad_sample():
     g = StartGate(confirm_s=1.0)
     good, bad = _state(area=0.01, q=0.7), _state(area=0.5, q=0.7)
     for t in np.arange(0.0, 0.9, 0.1):
-        g.update(float(t), good)
-    g.update(0.9, bad)
+        g.update(float(t), good, _Q_RAW)
+    g.update(0.9, bad, _Q_RAW)
     assert g.held_s == 0.0 and not g.is_open
 
 
@@ -40,14 +43,14 @@ def test_gate_rejects_a_visible_bladder():
     """이미 잘 보이면 아무것도 안 해도 성공이라 찾는 능력을 못 잰다."""
     g = StartGate(area_max=0.02, quality_min=0.6, confirm_s=0.2)
     for t in np.arange(0.0, 1.0, 0.1):
-        g.update(float(t), _state(area=0.10, q=0.9))
+        g.update(float(t), _state(area=0.10), _Q_RAW)      # 이미 잘 보인다
     assert not g.is_open
 
 
 def test_gate_rejects_a_useless_image():
     g = StartGate(area_max=0.02, quality_min=0.6, confirm_s=0.2)
     for t in np.arange(0.0, 1.0, 0.1):
-        g.update(float(t), _state(area=0.01, q=0.3))     # 안 보이지만 영상도 못 쓴다
+        g.update(float(t), _state(area=0.01), 0.3)        # 안 보이는데 접촉도 나쁘다
     assert not g.is_open
 
 
@@ -190,7 +193,7 @@ def test_gate_opens_with_no_mask_at_all():
     g = StartGate(area_max=0.02, quality_min=0.6, confirm_s=1.0)
     s = _state(area=0.0, q=0.72, mask=0.0)          # 마스크가 아예 없다
     for t in np.arange(0.0, 1.5, 0.1):
-        g.update(float(t), s)
+        g.update(float(t), s, _Q_RAW)
     assert g.is_open
 
 
@@ -200,3 +203,24 @@ def test_success_still_requires_a_mask():
     t = np.arange(0.0, 6.0, 0.5)
     no_mask = np.stack([_state(area=0.2, comp=0.9, dx=0.0, mask=0.0) for _ in t])
     assert not judge(t, no_mask, thr)["success"]
+
+
+def test_gate_uses_q_raw_not_the_segmentation_score():
+    """계획서 §3 의 통제는 "접촉은 좋은데 방광이 없다" 이다 — 분할 점수로 재면 뜻이 뒤집힌다."""
+    g = StartGate(area_max=0.02, quality_min=0.6, confirm_s=0.5)
+    s = _state(area=0.0, q=0.95, mask=0.0)        # 상태의 quality(Q_seg)는 높지만
+    for t in np.arange(0.0, 1.0, 0.1):
+        g.update(float(t), s, 0.30)                # Q_raw 는 낮다 → 접촉 불량
+    assert not g.is_open
+
+    g.reset()
+    for t in np.arange(0.0, 1.0, 0.1):
+        g.update(float(t), _state(area=0.0, q=0.0, mask=0.0), 0.72)   # 반대
+    assert g.is_open
+
+
+def test_gate_treats_unmeasured_q_raw_as_not_met():
+    g = StartGate(area_max=0.02, quality_min=0.6, confirm_s=0.5)
+    for t in np.arange(0.0, 1.0, 0.1):
+        g.update(float(t), _state(area=0.0), float("nan"))
+    assert not g.is_open

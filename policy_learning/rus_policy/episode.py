@@ -54,8 +54,8 @@ class StartGate:
     를 가르려면 창이 필요하다.
     """
 
-    area_max: float = 0.02          # 면적비 < 2 % — 방광이 잘 안 보인다
-    quality_min: float = 0.6        # Q_raw ≥ 0.6 — 그래도 영상은 쓸 만하다
+    area_max: float = 0.02          # 면적비 < 2 % — 방광이 잘 안 보인다 (Q_seg 쪽 재료)
+    quality_min: float = 0.6        # **Q_raw** ≥ 0.6 — 접촉은 좋다 (힘 축 신호)
     confirm_s: float = 1.0
     _held_s: float = field(default=0.0, init=False)
     _last_t: Optional[float] = field(default=None, init=False)
@@ -64,8 +64,16 @@ class StartGate:
         self._held_s = 0.0
         self._last_t = None
 
-    def update(self, t: float, state: Sequence[float]) -> bool:
-        """상태 표본 하나. 조건이 확인 창만큼 이어졌으면 참."""
+    def update(self, t: float, state: Sequence[float], q_raw: float) -> bool:
+        """상태 표본 하나. 조건이 확인 창만큼 이어졌으면 참.
+
+        Args:
+            state: 지각 상태 벡터. 면적비를 여기서 읽는다.
+            q_raw: **Q_raw** (접촉·에코 품질). 상태 벡터의 ``quality`` 는 Q_seg 이므로
+                여기 쓰면 안 된다 — 계획서 §3 의 통제는 "접촉은 좋은데 방광이 없다" 이고,
+                그것을 분할 점수로 재면 "분할이 뭔가 봤다" 를 요구하게 되어 뜻이 뒤집힌다.
+                측정 불가(NaN)는 조건 불충족으로 센다.
+        """
         dt = 0.0 if self._last_t is None else max(0.0, float(t) - self._last_t)
         self._last_t = float(t)
         s = np.asarray(state, float)
@@ -74,7 +82,8 @@ class StartGate:
         # 면적비 0.000 · Q_raw 0.72 인 자세가 계속 폐기됐다). 계획서 §3 도 마스크 존재를
         # 요구하지 않는다 — 면적비 < 2 % 이면서 Q_raw ≥ 0.6 둘뿐이다.
         # 성공 판정(judge)은 반대다: 거기서는 마스크가 있어야 진단 가능 뷰다.
-        ok = s[AREA] < self.area_max and s[QUALITY] >= self.quality_min
+        ok = (s[AREA] < self.area_max
+              and np.isfinite(q_raw) and float(q_raw) >= self.quality_min)
         self._held_s = self._held_s + dt if ok else 0.0
         return self.is_open
 

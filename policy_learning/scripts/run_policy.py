@@ -369,11 +369,11 @@ class PolicyRunner(Node):
             st = self.states[-1] if self.states else None
             if st is None:
                 return self._idle("지각 상태가 아직 없다")
-            if not self.gate.update(t, st):
-                from rus_policy.episode import AREA, QUALITY
+            if not self.gate.update(t, st, self.q_raw):
+                from rus_policy.episode import AREA
                 return self._idle(
                     f"시작 조건 미충족 — 면적비 {st[AREA]:.3f} (< {self.args.gate_area_max}) · "
-                    f"Q_raw {st[QUALITY]:.2f} (≥ {self.args.gate_quality_min}) · "
+                    f"Q_raw {self.q_raw:.2f} (≥ {self.args.gate_quality_min}) · "
                     f"유지 {self.gate.held_s:.1f}/{self.args.gate_confirm_s:.1f} s")
             self.t_start = t
             self.get_logger().warn(

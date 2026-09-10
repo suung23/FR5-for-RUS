@@ -1,0 +1,20 @@
+[PASS] watertight
+[PASS] winding consistent
+[PASS] no non-manifold edges (every edge has exactly 2 faces)  (0 bad edges of 16377)
+[PASS] single connected body
+[PASS] positive volume  (258178 mm3)
+[PASS] pocket width >= 99.30  (min 99.300)
+[PASS] pocket thickness >= 20.00  (min 20.000)
+[PASS] pocket depth >= 60.0 (open top)  (floor z=84.00, rim z=144.00, depth 60.00)
+[PASS] fastener region: skins are solid  (16/16 solid probes inside)
+[PASS] fastener region: hole / nut slot / pad recess are open  (12/12 void probes outside)
+[PASS] nut slot does not break the boss outer face  (exterior |y| at screws: 11.50..25.50)
+[PASS] flange disc at z=3.0: radius & 4 holes identical to original  (r=29.99 vs 29.99; holes [np.float64(5.0), np.float64(5.0), np.float64(5.0), np.float64(5.0)] vs [np.float64(5.0), np.float64(5.0), np.float64(5.0), np.float64(5.0)])
+[PASS] flange disc at z=9.0: radius & 4 holes identical to original  (r=29.99 vs 29.99; holes [np.float64(9.99), np.float64(9.99), np.float64(9.99), np.float64(9.99)] vs [np.float64(9.99), np.float64(9.99), np.float64(9.99), np.float64(9.99)])
+[PASS] column section at z=20.0: no original material removed  (removed 0.0 mm2, added by gussets 0 mm2 (orig 751))
+[PASS] column section at z=35.0: no original material removed  (removed 0.0 mm2, added by gussets 93 mm2 (orig 851))
+[PASS] column section at z=60.0: no original material removed  (removed 0.0 mm2, added by gussets 920 mm2 (orig 1023))
+[PASS] column section at z=78.0: no original material removed  (removed 0.0 mm2, added by gussets 1729 mm2 (orig 1151))
+[PASS] cable slot / floor opening / gusset channel are open
+volume 258.2 cm3 -> solid-mass estimate PETG 328 g / ASA 276 g (printed weight lower with infill)
+bounds (aligned) [[-54.65, -29.99, 0.0], [54.65, 29.99, 144.0]]  faces 10918

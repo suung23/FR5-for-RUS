@@ -1,0 +1,22 @@
+[PASS] watertight
+[PASS] winding consistent
+[PASS] no non-manifold edges (every edge has exactly 2 faces)  (0 bad of 15735)
+[PASS] single connected body
+[PASS] pocket width >= 42.80  (min 42.800)
+[PASS] pocket thickness >= 19.85  (min 19.850)
+[PASS] pocket depth >= 60.0 (open top)  (floor z=82.00, rim z=142.00, depth 60.00)
+[PASS] top plate thickness = 3.0  (3.00)
+[PASS] flange gap = 6.0  (6.00)
+[PASS] flange thickness = 3.0  (2.99)
+[PASS] 4 flange screw holes: O4.0 clearance (-Y) / O3.3 tap (+Y), material beside them  (x=+28.90 z=102: clr 4.00 tap 3.30; x=+28.90 z=132: clr 4.00 tap 3.30; x=-28.90 z=102: clr 4.00 tap 3.30; x=-28.90 z=132: clr 4.00 tap 3.30)
+[PASS] side walls / top plates intact at the screw heights
+[PASS] overhanging plate ends chamfered (void just above the floor level under the flange ends)
+[PASS] flange disc at z=3.0: radius & 4 holes identical to original  (r=29.99 vs 29.99; holes [5.0, 5.0, 5.0, 5.0] vs [5.0, 5.0, 5.0, 5.0])
+[PASS] flange disc at z=9.0: radius & 4 holes identical to original  (r=29.99 vs 29.99; holes [9.99, 9.99, 9.99, 9.99] vs [9.99, 9.99, 9.99, 9.99])
+[PASS] column section at z=20.0: identical to original  (removed 0.00 mm2, added 0.00 mm2)
+[PASS] column section at z=35.0: identical to original  (removed 0.00 mm2, added 0.00 mm2)
+[PASS] column section at z=60.0: identical to original  (removed 0.00 mm2, added 0.00 mm2)
+[PASS] column section at z=78.0: identical to original  (removed 0.00 mm2, added 0.00 mm2)
+[PASS] cable slot open from the column up into the pocket floor
+volume 125.2 cm3 (original 132.6) -> solid-mass estimate PETG 159 g / ASA 134 g
+bounds (aligned) [[-33.4, -29.99, 0.0], [33.4, 29.99, 142.0]]  faces 10490

@@ -7,7 +7,7 @@ import { ModeTimeline } from './components/ModeTimeline';
 import { NavRail, viewFromHash, type ConsoleView } from './components/NavRail';
 import { OperatorFrame } from './components/OperatorFrame';
 import { ProbingNotice } from './components/ProbingNotice';
-import { ProbingMode } from './components/ProbingMode';
+import { PolicyInference } from './components/PolicyInference';
 import { SafetyPanel } from './components/SafetyPanel';
 import { SensorCalibration } from './components/SensorCalibration';
 import { StatusColumn } from './components/StatusColumn';
@@ -189,7 +189,7 @@ export function App() {
               {view === 'contact' ? (
                 <>
                   <ModeTimeline history={history} contact={contact} />
-                  <ProbingMode
+                  <PolicyInference
                     telemetry={telemetry}
                     available={available}
                     onCommand={sendCommand}

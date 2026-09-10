@@ -351,6 +351,18 @@ class TelemetryBridge(Node):
                 durability=DurabilityPolicy.TRANSIENT_LOCAL,
             ),
         )
+        # 정책 추론 시작/정지 요청. run_policy.py 가 --start-on topic 으로 이 토픽을 본다.
+        # 로봇을 움직이는 명령이 아니라 **추론을 시작해도 된다는 허가**다 — 지령은 정책 쪽
+        # --execute 와 접촉 조건이 따로 가른다. 래치해 두어 나중에 뜬 러너도 현재 요청을 받는다.
+        self.policy_enable_req = self.create_publisher(
+            Bool,
+            f"{ns}/policy_enable",
+            QoSProfile(
+                depth=1,
+                reliability=ReliabilityPolicy.RELIABLE,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            ),
+        )
         self.teleop_frame_req = self.create_publisher(
             Float64,
             f"{ns}/teleop_frame_request",
@@ -1633,6 +1645,22 @@ class TelemetryBridge(Node):
                 f"면내 회전 모드 요청 {'켬' if want else '끔'} → us_diff_ik"
             )
             return ok(enabled=want, appliesOn="contact")
+
+        if command == "policy.enable":
+            # 정책 추론 시작/정지. **접촉 프로빙 전환(안전 로직)과는 별개다** — 접촉력으로
+            # 속도 상한을 가르는 판정은 그대로 두고, 여기서는 정책이 지령을 내도 되는지만
+            # 켠다. 둘을 한 버튼에 묶으면 정책을 끄려고 속도 상한을 풀게 된다.
+            #
+            # 콘솔이 되돌려받는 확인은 아직 없다 (probing_mode 같은 상태 토픽이 정책 쪽에
+            # 없다). 화면은 "요청" 이라고만 말하고 상태라고 주장하지 않는다.
+            want = request.get("enabled")
+            if not isinstance(want, bool):
+                return fail(f"enabled 가 참/거짓이어야 한다: {want!r}")
+            self.policy_enable_req.publish(Bool(data=want))
+            self.get_logger().info(
+                f"정책 추론 요청 {'시작' if want else '정지'} → {self.policy_enable_req.topic_name}"
+            )
+            return ok(enabled=want, confirmed=False)
 
         if command == "teleop.operator_frame":
             # 조작자가 로봇의 어느 쪽에 서 있는가. 로봇을 움직이는 명령이 아니라

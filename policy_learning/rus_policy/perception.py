@@ -157,15 +157,37 @@ class UnetPerception:
         self.checkpoint_id = str(getattr(self.predictor, "checkpoint_identifier", "unknown"))
         self.hold_deadband_px = hold_deadband_px
 
-    def run(self, frames: np.ndarray, progress: bool = True) -> PerceptionResult:
+    def reset(self) -> None:
+        """스트리밍 상태를 버린다. 새 세션이나 영상이 끊겼다 돌아왔을 때 부른다."""
+        self._prev = None
+
+    def step(self, frame: np.ndarray) -> tuple[np.ndarray, float, int, float]:
+        """프레임 한 장 — **직전 프레임 상태를 이어받는다**. (state, quality, token, e_hat)
+
+        ``extract_control_state`` 는 ``previous_state`` 를 받아 시간 의존 특징을 만든다
+        (§10.2 의 temporal warped IoU · centroid jump, 그리고 ``quality`` 자체). 실시간 경로가
+        매 프레임 ``run(frame[None])`` 을 부르면 그 인자가 매번 None 이 되어 **모든 프레임이
+        "첫 프레임" 으로 처리된다** — 학습 때 세션을 순차로 돌린 것과 분포가 달라지고,
+        state 안의 quality 가 직접 틀어진다. 실시간에서는 이 메서드를 쓴다.
+        """
         from rus_perception.data.io import resize_image
 
+        image = np.asarray(frame, np.float32) / 255.0
+        image = resize_image(image, self.image_size)
+        prob, _ = self.predictor.predict_probability(image)
+        cs = self._extract(prob, image=image, previous_state=getattr(self, "_prev", None),
+                           config=self.feature_config, roi_mask=self.roi)
+        self._prev = cs
+        return control_state_to_vector(cs, self.beam_axis_px, self.image_size, self.hold_deadband_px)
+
+    def run(self, frames: np.ndarray, progress: bool = True) -> PerceptionResult:
+        """세션 프레임 전체를 순차로. ``step`` 을 처음부터 다시 돌리는 것과 같다."""
         n = len(frames)
         state = np.zeros((n, STATE_DIM), np.float32)
         quality = np.full(n, np.nan, np.float32)
         token = np.full(n, -1, np.int8)
         e_hat = np.full(n, np.nan, np.float32)
-        prev = None
+        self.reset()
         it = range(n)
         if progress and n > 0:
             try:
@@ -174,14 +196,7 @@ class UnetPerception:
             except ImportError:
                 pass
         for i in it:
-            image = np.asarray(frames[i], np.float32) / 255.0
-            image = resize_image(image, self.image_size)
-            prob, _ = self.predictor.predict_probability(image)
-            cs = self._extract(prob, image=image, previous_state=prev, config=self.feature_config,
-                               roi_mask=self.roi)
-            prev = cs
-            vec, q, tok, e = control_state_to_vector(cs, self.beam_axis_px, self.image_size, self.hold_deadband_px)
-            state[i], quality[i], token[i], e_hat[i] = vec, q, tok, e
+            state[i], quality[i], token[i], e_hat[i] = self.step(frames[i])
         return PerceptionResult(state=state, quality=quality, token=token, e_hat_px=e_hat, backend="unet",
                                 checkpoint_id=self.checkpoint_id, beam_axis_px=self.beam_axis_px,
                                 image_size=self.image_size)

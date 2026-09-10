@@ -212,6 +212,13 @@ class PolicyRunner(Node):
                 self.get_logger().error(f"영상 형식 예상 밖: {msg.width}×{msg.height} {msg.encoding!r} — 버린다")
             return
         raw = a.reshape(msg.height, msg.width)
+        now = time.time()
+        if self.buf and (now - self.buf[-1][0]) > self.cfg.timing.obs_frame_max_age_s:
+            # 끊겼다 돌아왔다. 지각의 시간 상태를 이어 붙이면 끊긴 구간을 건너뛴 것이 된다.
+            self.get_logger().warn("영상이 끊겼다 돌아왔다 — 지각 스트림을 다시 시작한다")
+            self.buf.clear()
+            if self.backend is not None:
+                self.backend.reset()
         if self.conv is None:                            # 첫 프레임에서 변환기 확정
             self.conv = BmodeConverter({}, raw.shape, out_size=max(self.cfg.perception.frame_size))
             self.get_logger().info(f"B-mode 변환: {json.dumps(self.conv.describe(), ensure_ascii=False)}")
@@ -220,8 +227,11 @@ class PolicyRunner(Node):
         if self.backend is None:
             state, q = np.zeros(STATE_DIM, np.float32), float("nan")
         else:
-            r = self.backend.run(bm[None], progress=False)
-            state, q = np.nan_to_num(r.state[0]).astype(np.float32), float(r.quality[0])
+            # step() 이라야 직전 프레임 상태를 이어받는다. run(frame[None]) 을 매번 부르면
+            # 모든 프레임이 "첫 프레임" 이 되어 quality 를 포함한 시간 의존 특징이 학습 때와
+            # 달라진다 (perception.UnetPerception.step 주석 참조).
+            vec, q, _tok, _e = self.backend.step(bm)
+            state, q = np.nan_to_num(vec).astype(np.float32), float(q)
         dt_ms = (time.time() - t0) * 1000
         if dt_ms > 1000.0 / max(self.args.min_perception_fps, 1e-6):
             self.n_drop += 1

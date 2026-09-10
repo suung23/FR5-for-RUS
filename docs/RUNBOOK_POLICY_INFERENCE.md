@@ -84,6 +84,18 @@ python3 scripts/run_policy.py runs/qres2/last.pt --execute --axes rot \
 `/diag/retreating` 구독, 영상은 **BEST_EFFORT**(`qos_profile_sensor_data`) 구독 — 기본 QoS 로 구독하면
 DDS 가 짝을 맺지 않아 프레임이 하나도 오지 않는다.
 
+### ⚠️ `freespace:=false` 는 이제 선택이 아니다
+
+`us_phase0.launch.py` 의 `freespace` 는 **기본값이 true** 이고 그때 접근 상한이 150 mm/s 다.
+2026-09-11 이전에는 접촉력 2 N 트리거가 그 자리에서 10 mm/s 로 내려 주는 안전망이었다.
+**그 트리거를 껐으므로 안전망이 없다** — 정책 버튼을 누르기 전에 프로브가 닿으면 150 mm/s 로 닿는다.
+
+```bash
+ros2 launch fr5_launch us_phase0.launch.py backend:=fairino teleop:=true freespace:=false
+```
+
+`probing_mode` 가 `approach` 인 동안 상한이 무엇인지 로그에서 확인하고 시작할 것.
+
 ### 시작 방식 둘
 
 | `--start-on` | 시작 시점 | 쓰는 곳 |

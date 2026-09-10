@@ -56,3 +56,10 @@
   line-height: 1.45;
   color: var(--ink);
 }
+
+/* 요청은 갔는데 스택이 아직 선언하지 않은 상태. 채우지 않고 테두리로만 말한다 —
+   채우면 "지금 그 상태다" 로 읽히고, 그건 아직 사실이 아니다. */
+.pending {
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
+}

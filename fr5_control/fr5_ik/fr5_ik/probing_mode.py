@@ -79,6 +79,7 @@ class ProbingModeSwitch:
         confirm_s: float = 0.02,
         release_force_n: float | None = None,
         release_confirm_s: float = 0.5,
+        force_trigger_enabled: bool = True,
     ) -> None:
         """전환기를 만든다.
 
@@ -89,6 +90,10 @@ class ProbingModeSwitch:
                 않는다(예전 단방향 거동). 진입 문턱보다 **낮아야** 한다.
             release_confirm_s: 이탈을 확정하기까지 연속으로 아래에 머물러야 하는
                 시간 [s]. 진입보다 길게 둔다.
+            force_trigger_enabled: 접촉력으로 régime 을 가를 것인가. 거짓이면 ``update``
+                가 힘을 보고도 모드를 바꾸지 않는다 — 정책 추론이 régime 을 정하는
+                운용에서 쓴다 (2026-09-11). 문턱 값 자체는 지우지 않는다: 파라미터
+                하나로 예전 거동으로 돌아갈 수 있어야 한다.
 
         Raises:
             ValueError: 문턱이 0 이하이거나, 확인 시간이 음수이거나, 이탈 문턱이
@@ -117,7 +122,12 @@ class ProbingModeSwitch:
             None if release_force_n is None else float(release_force_n)
         )
         self.release_confirm_s = float(release_confirm_s)
+        self.force_trigger_enabled = bool(force_trigger_enabled)
+        #: 힘 판정이 내린 모드. 정책 요청은 여기 섞지 않는다 — 둘을 한 변수에 담으면
+        #: "왜 접촉 régime 인가" 를 되짚을 수 없다.
         self.mode = APPROACH
+        #: 정책 추론이 régime 을 요청했는가. 힘 판정과 **독립**이며 OR 로 합쳐진다.
+        self.policy_requested = False
         #: 접촉이 **한 번이라도** 있었는가. 이탈해도 지워지지 않는다.
         self.has_contacted = False
         self._above_s = 0.0
@@ -140,6 +150,11 @@ class ProbingModeSwitch:
             :data:`APPROACH` 또는 :data:`CONTACT_PROBING`.
         """
         step = max(0.0, float(dt_s))
+        if not self.force_trigger_enabled:
+            # 힘으로는 가르지 않는다. 값을 세지도 않는다 — 꺼 둔 동안 쌓인 창이
+            # 다시 켜는 순간 즉시 전환을 만들면, 켠 사람이 예상하지 못한 일이 된다.
+            self._above_s = self._below_s = 0.0
+            return self.mode
 
         if self.mode == APPROACH:
             if contact_force_n >= self.enter_force_n:
@@ -168,10 +183,26 @@ class ProbingModeSwitch:
             self._below_s = 0.0
         return self.mode
 
+    def request_policy(self, enabled: bool) -> None:
+        """정책 추론이 régime 을 잡는다 / 놓는다.
+
+        힘 판정과 **독립**이다. 정책이 잡고 있는 동안 힘이 이탈 문턱 아래로 내려가도
+        régime 은 유지된다 — 정책이 프로브를 들어 다시 찾는 동작이 régime 을 놓는
+        것으로 읽히면, 그 순간 z 가 조작자에게 돌아가고 정책은 허공에 지령한다.
+        """
+        self.policy_requested = bool(enabled)
+        if self.policy_requested:
+            self.has_contacted = True
+
     @property
     def in_contact_probing(self) -> bool:
-        """접촉 프로빙 모드인가."""
-        return self.mode == CONTACT_PROBING
+        """접촉 régime 인가 — 힘 판정 **또는** 정책 요청."""
+        return self.mode == CONTACT_PROBING or self.policy_requested
+
+    @property
+    def effective_mode(self) -> str:
+        """régime 을 하나의 문자열로. 무엇이 régime 을 잡았는지는 따로 본다."""
+        return CONTACT_PROBING if self.in_contact_probing else APPROACH
 
     @property
     def confirm_progress(self) -> float:
@@ -199,6 +230,7 @@ class ProbingModeSwitch:
                 되돌린다고 그 사실이 사라지지는 않는다.
         """
         self.mode = APPROACH
+        self.policy_requested = False
         self._above_s = 0.0
         self._below_s = 0.0
         if unlatch:

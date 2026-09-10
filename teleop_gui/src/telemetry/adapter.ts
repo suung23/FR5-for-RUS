@@ -7,6 +7,7 @@ import type {
   CommandAck,
   LinkStatus,
   RobotTelemetry,
+  SegmentationFrame,
   Transport,
   TransportSink,
   UltrasoundFrame,
@@ -16,6 +17,7 @@ import type {
 export interface AdapterListeners {
   onTelemetry(frame: RobotTelemetry): void;
   onUltrasound(frame: UltrasoundFrame): void;
+  onSegmentation(frame: SegmentationFrame): void;
   onWrench(sample: WrenchSample): void;
   onStatus(status: LinkStatus): void;
   onAck(ack: CommandAck): void;
@@ -70,6 +72,7 @@ export class RobotTelemetryAdapter {
     const sink: TransportSink = {
       onTelemetry: (frame) => this.listeners.onTelemetry(frame),
       onUltrasound: (frame) => this.listeners.onUltrasound(frame),
+      onSegmentation: (frame) => this.listeners.onSegmentation(frame),
       onWrench: (sample) => this.listeners.onWrench(sample),
       onStatus: (patch) => this.patchStatus(patch),
       onAck: (ack) => this.listeners.onAck(ack),

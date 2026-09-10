@@ -27,7 +27,14 @@ export type RobotState = 'idle' | 'teleop' | 'contact' | 'fault' | 'estop';
  * (the probe's x–z plane) onto itself. Everything else stays at zero, so the
  * beam keeps sweeping the same plane in space while the operator rocks in it.
  */
-export type ProbingMode = 'approach' | 'contact_probing' | 'contact_probing_inplane';
+export type ProbingMode =
+  | 'approach'
+  | 'contact_probing'
+  | 'contact_probing_inplane'
+  /** Contact regime held by the policy runner rather than by the force judgement.
+   *  Keeps the `contact_probing` prefix on purpose: every consumer tests that prefix
+   *  (us_servo_node keeps small commands alive, run_policy reads the handover). */
+  | 'contact_probing_policy';
 
 export type SafetyState =
   | 'normal'
@@ -340,9 +347,93 @@ export interface UltrasoundFrame {
   receivedAt: number;
 }
 
+/**
+ * The perception verdict for one frame, as `run_segmentation` reports it.
+ *
+ * Read, never recomputed. Every number here comes from `ControlState`
+ * (`Unet_seg/rus_perception`), which is the same record the policy's
+ * observation vector is built from — so what the panel prints is what the
+ * network actually said, not a second opinion derived from the picture.
+ *
+ * `quality` is `Q_seg`, and it **presupposes the bladder was found**. When
+ * `hasMask` is false the score is not a low score, it is not a score; the panel
+ * has to say that rather than print a number the operator will read as "poor
+ * image".
+ */
+export interface SegmentationState {
+  seq?: number;
+  checkpointId?: string;
+  /** `Q_seg`, the control quality score. Null when it was not measured. */
+  quality: number | null;
+  /** The observation verdict. **Not** a command and not a claim about the arm. */
+  validForControl: boolean;
+  /** Machine-readable reasons the observation was rejected. Empty when valid. */
+  rejectionReasons: string[];
+  hasMask: boolean;
+  maskAreaPx?: number;
+  /** Mask area over the ROI — the imaged sector, not the whole frame. */
+  maskAreaRatio: number | null;
+  /** Lumen centroid in pixels of the 256² B-mode, `[x, y]`. */
+  centroidPx: [number, number] | null;
+  /** Normalized centroid − 0.5. `+x` right, `+y` down. */
+  centerError: [number, number] | null;
+  /** Horizontal centre of the imaged sector. `eHat` is measured from this, not from the frame centre. */
+  beamAxisPx: number | null;
+  /** `beamAxis − centroid_x`, pixels. Positive = lumen left of the beam axis. */
+  eHatPx: number | null;
+  /** Discrete action token: `check-filling` | `hold` | `move-left` | `move-right`. */
+  token: string | null;
+  segmentationConfidence: number | null;
+  lumenContrast: number | null;
+  borderContactRatio: number | null;
+  largestComponentRatio: number | null;
+  temporalWarpedIou: number | null;
+  centroidJump: number | null;
+  maskThreshold: number | null;
+  roiMode?: string;
+  /** Wall-clock cost of one U-Net pass, measured inside the node. */
+  perceptionMs: number | null;
+  /** Frames the node dropped to stay under its rate cap. */
+  skipped?: number;
+}
+
+/**
+ * One segmented frame: the picture the network saw, and its mask.
+ *
+ * The base image is **not** the sector shown in the Ultrasound panel. That one
+ * is `fr5_vision.scan_convert`'s fan; this one is `rus_policy.bmode`'s 256²
+ * letterbox, which is what the network is actually fed. Laying the mask over
+ * the other picture would put the boundary in the wrong place and look
+ * entirely convincing, so the two travel together and are paired by the ROS
+ * header stamp in the bridge before either is sent.
+ *
+ * The mask arrives binary and uncoloured. Fill, outline and opacity are the
+ * panel's decision, because the operator has to be able to blink the mask off
+ * and check the boundary against the lumen edge underneath it.
+ */
+export interface SegmentationFrame {
+  /** Bridge clock, ms. */
+  timestamp: number;
+  /** Monotonic counter from the bridge. Distinguishes a still image from a dead stream. */
+  seq: number;
+  width: number;
+  height: number;
+  /** base64 JPEG of the B-mode the network saw, no data: prefix. */
+  jpeg: string;
+  /** base64 PNG of the binary mask, no data: prefix. PNG because JPEG ringing would fake a soft edge. */
+  mask: string;
+  /** The perception verdict, when the state message paired with this picture. */
+  state?: SegmentationState;
+  /** How far behind the picture the state was. A large value means they are not the same frame. */
+  stateAgeMs?: number;
+  /** When the renderer received it. */
+  receivedAt: number;
+}
+
 export interface TransportSink {
   onTelemetry(frame: RobotTelemetry): void;
   onUltrasound(frame: UltrasoundFrame): void;
+  onSegmentation(frame: SegmentationFrame): void;
   onWrench(sample: WrenchSample): void;
   onStatus(patch: Partial<LinkStatus>): void;
   onAck(ack: CommandAck): void;

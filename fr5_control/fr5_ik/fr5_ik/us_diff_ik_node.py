@@ -189,6 +189,13 @@ class UsDiffIkNode(Node):
         ns = f"/{self.robot_name}"
         self.create_subscription(JointState, f"{ns}/joint_states", self._on_joints, 10)
         self.create_subscription(Twist, f"{ns}/desired_twist", self._on_twist, 10)
+        # 정책 추론 요청. 콘솔 버튼 하나가 régime 과 러너를 함께 연다 — 러너가 지령을
+        # 내는 동안 z 를 조작자가 쥐고 있으면 정책은 허공에 지령한다. 전환할 때만
+        # 발행되므로 래치해서 구독한다 (나중에 뜬 이 노드도 현재 요청을 받아야 한다).
+        self.create_subscription(
+            Bool, f"{ns}/policy_enable", self._on_policy_enable,
+            QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                       durability=DurabilityPolicy.TRANSIENT_LOCAL))
         wrench_topic = f"{ns}/{self.get_parameter('ft_sensor.wrench_topic').value}"
         self.create_subscription(WrenchStamped, wrench_topic, self._on_wrench, 10)
         self.create_subscription(
@@ -414,6 +421,9 @@ class UsDiffIkNode(Node):
         # 접촉력 크기다 (contact_force_mode). 진입 문턱(1.0)보다 높으므로, 닿는
         # 순간부터 로봇이 스스로 여기까지 파고든다. probe.yaml 이 값의 출처이며
         # 그 근거도 거기 있다.
+        # 접촉력으로 régime 을 가를 것인가. 2026-09-11 부터 기본은 거짓 — 정책 추론이
+        # régime 을 정한다. 문턱 값 자체는 남겨 둔다: 이 한 줄로 예전 거동으로 돌아간다.
+        self.declare_parameter("teleop.contact_probing_force_trigger", False)
         self.declare_parameter("contact_control.target_force_n", 3.0)
         self.declare_parameter("contact_control.deadband_n", 0.5)
         self.declare_parameter("contact_control.admittance_b_z", 1000.0)
@@ -725,6 +735,24 @@ class UsDiffIkNode(Node):
         elif was_contact and not self.mode_switch.in_contact_probing:
             self._leave_contact_probing()
 
+    def _on_policy_enable(self, msg) -> None:
+        """정책 추론이 régime 을 잡는다 / 놓는다. 힘 판정과 독립이다."""
+        want = bool(msg.data)
+        if want == self.mode_switch.policy_requested:
+            return
+        was = self.mode_switch.in_contact_probing
+        self.mode_switch.request_policy(want)
+        now = self.mode_switch.in_contact_probing
+        self.get_logger().warn(
+            f"정책 추론 {'시작' if want else '정지'} 요청 — régime "
+            + ("유지" if was == now else ("진입" if now else "이탈")))
+        if now and not was:
+            self._enter_contact_probing()
+        elif was and not now:
+            self._leave_contact_probing()
+        else:
+            self._publish_mode()
+
     def _enter_contact_probing(self) -> None:
         """접촉 프로빙으로 넘어간다. 상한을 갈아 끼우고 알린다."""
         self.max_linear = self.contact_linear
@@ -787,6 +815,7 @@ class UsDiffIkNode(Node):
         "teleop.contact_probing_release_n",
         "teleop.contact_probing_confirm_s",
         "teleop.contact_probing_release_confirm_s",
+        "teleop.contact_probing_force_trigger",
     )
 
     def _build_regulator(self, overrides=None) -> ForceRegulator:
@@ -817,6 +846,11 @@ class UsDiffIkNode(Node):
             confirm_s=get("teleop.contact_probing_confirm_s"),
             release_force_n=release if release > 0.0 else None,
             release_confirm_s=get("teleop.contact_probing_release_confirm_s"),
+            # bool 이라 위 float 경로(get)로 보내지 않는다.
+            force_trigger_enabled=bool(
+                overrides["teleop.contact_probing_force_trigger"]
+                if overrides and "teleop.contact_probing_force_trigger" in overrides
+                else self.get_parameter("teleop.contact_probing_force_trigger").value),
         )
 
     def _on_set_parameters(self, params):
@@ -960,9 +994,14 @@ class UsDiffIkNode(Node):
         msg = String()
         # 접촉 프로빙 안의 하위 모드까지 알린다. 화면이 "힘은 로봇이 잡고 회전은
         # 내가 한다" 를 알아야 조작자가 손을 움직여도 되는지를 안다.
-        mode = self.mode_switch.mode
-        if mode == CONTACT_PROBING and self.allow_inplane_rotation:
-            mode = "contact_probing_inplane"
+        mode = self.mode_switch.effective_mode
+        if mode == CONTACT_PROBING:
+            # 접두사 ``contact_probing`` 을 지킨다 — us_servo_node 가 그것으로 미소 지령을
+            # 살리고(startswith), run_policy 도 같은 규약으로 인계를 본다.
+            if self.mode_switch.policy_requested:
+                mode = "contact_probing_policy"
+            elif self.allow_inplane_rotation:
+                mode = "contact_probing_inplane"
         msg.data = mode
         self.mode_pub.publish(msg)
 

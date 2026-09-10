@@ -1,0 +1,83 @@
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Same ground as the Ultrasound panel: a grey plate behind a B-mode reads as
+     fog inside the sector, and here it would also wash out the mask tint. */
+  background: #000000;
+  overflow: hidden;
+}
+
+.picture {
+  max-width: 100%;
+  max-height: 100%;
+  /* Nearest, deliberately. The mask is drawn in the network's own pixels, and
+     smoothing them would round off the boundary being inspected — the operator
+     would be checking an interpolation, not a segmentation. */
+  image-rendering: pixelated;
+  display: block;
+}
+
+.controls {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px var(--pad);
+  border-bottom: 1px solid var(--rule);
+}
+
+/* The verdict sits at the far end of the control row rather than in the header:
+   it is about the frame on screen, and it has to be next to the switches that
+   change what is on screen. */
+.verdict {
+  margin-left: auto;
+}
+
+.readout {
+  flex: 0 0 auto;
+  max-height: 45%;
+  overflow: auto;
+  border-top: 1px solid var(--rule);
+}
+
+.note {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 5px var(--pad);
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--ink);
+  border-top: 1px solid var(--rule);
+  border-left: 2px solid var(--ink);
+  background: var(--panel-pale);
+}
+
+.empty {
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.6;
+  text-align: center;
+  padding: var(--pad);
+  max-width: 44ch;
+}
+
+.empty code {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+}
+
+.meta {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+
+.stale {
+  color: var(--critical);
+}

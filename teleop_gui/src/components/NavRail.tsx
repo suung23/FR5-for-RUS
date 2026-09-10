@@ -4,6 +4,7 @@ export type ConsoleView =
   | 'monitoring'
   | 'teleoperation'
   | 'contact'
+  | 'segmentation'
   | 'calibration'
   | 'safety';
 
@@ -11,6 +12,7 @@ export const CONSOLE_VIEWS: ConsoleView[] = [
   'monitoring',
   'teleoperation',
   'contact',
+  'segmentation',
   'calibration',
   'safety',
 ];
@@ -31,9 +33,9 @@ interface Props {
 /**
  * Left navigation rail.
  *
- * Four operational views, not four decorative icons. Selecting one changes the
- * lower workspace panel and the emphasis of the right column; the 3D view is
- * common to all of them because the arm's pose is never irrelevant.
+ * Operational views, not decorative icons. Selecting one changes the lower
+ * workspace panel and the emphasis of the right column; the 3D view is common
+ * to all of them because the arm's pose is never irrelevant.
  *
  * The selected item is the one place a filled navy block appears. Selection is
  * also carried by the left edge weight and by `aria-current`, so it does not
@@ -43,6 +45,7 @@ const ITEMS: { id: ConsoleView; label: string; note: string }[] = [
   { id: 'monitoring', label: 'Monitoring', note: 'Force trend' },
   { id: 'teleoperation', label: 'Teleoperation', note: 'Joint rates' },
   { id: 'contact', label: 'Contact', note: 'Stage timeline' },
+  { id: 'segmentation', label: 'Segmentation', note: 'Bladder mask' },
   { id: 'calibration', label: 'Calibration', note: 'Sensor frames' },
   { id: 'safety', label: 'Safety', note: 'Limits · events' },
 ];

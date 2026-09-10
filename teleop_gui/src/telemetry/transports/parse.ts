@@ -1,4 +1,6 @@
 import type {
+  SegmentationFrame,
+  SegmentationState,
   UltrasoundFrame,
   CommandAck,
   ForceWaveform,
@@ -225,6 +227,82 @@ function vec3(value: unknown): [number, number, number] | undefined {
  * Rejects a frame with no payload rather than handing the view an empty `img`
  * src — a broken picture and "no signal" look the same on screen otherwise.
  */
+/** A finite number, or null. A missing measurement must not arrive as 0. */
+function orNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function pairOrNull(value: unknown): [number, number] | null {
+  const pair = numberArray(value, 2);
+  return pair ? (pair as [number, number]) : null;
+}
+
+function segmentationState(value: unknown): SegmentationState | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const src = value as Record<string, unknown>;
+  const reasons = Array.isArray(src.rejectionReasons)
+    ? src.rejectionReasons.filter((r): r is string => typeof r === 'string')
+    : [];
+  return {
+    seq: orNull(src.seq) ?? undefined,
+    checkpointId: typeof src.checkpointId === 'string' ? src.checkpointId : undefined,
+    quality: orNull(src.quality),
+    // Absent means "not told", and the honest reading of that is "not valid for
+    // control" — never assume a verdict the node did not give.
+    validForControl: src.validForControl === true,
+    rejectionReasons: reasons,
+    hasMask: src.hasMask === true,
+    maskAreaPx: orNull(src.maskAreaPx) ?? undefined,
+    maskAreaRatio: orNull(src.maskAreaRatio),
+    centroidPx: pairOrNull(src.centroidPx),
+    centerError: pairOrNull(src.centerError),
+    beamAxisPx: orNull(src.beamAxisPx),
+    eHatPx: orNull(src.eHatPx),
+    token: typeof src.token === 'string' ? src.token : null,
+    segmentationConfidence: orNull(src.segmentationConfidence),
+    lumenContrast: orNull(src.lumenContrast),
+    borderContactRatio: orNull(src.borderContactRatio),
+    largestComponentRatio: orNull(src.largestComponentRatio),
+    temporalWarpedIou: orNull(src.temporalWarpedIou),
+    centroidJump: orNull(src.centroidJump),
+    maskThreshold: orNull(src.maskThreshold),
+    roiMode: typeof src.roiMode === 'string' ? src.roiMode : undefined,
+    perceptionMs: orNull(src.perceptionMs),
+    skipped: orNull(src.skipped) ?? undefined,
+  };
+}
+
+/**
+ * One segmented frame.
+ *
+ * Both images are required. A frame carrying the picture but not the mask is
+ * dropped rather than shown, because a B-mode with no mask on it is
+ * indistinguishable from a B-mode the network found no bladder in — and those
+ * are opposite facts.
+ */
+export function parseSegmentation(
+  raw: unknown,
+  receivedAt: number,
+): SegmentationFrame | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const src = raw as Record<string, unknown>;
+  const jpeg = src.jpeg;
+  const mask = src.mask;
+  if (typeof jpeg !== 'string' || jpeg.length === 0) return null;
+  if (typeof mask !== 'string' || mask.length === 0) return null;
+  return {
+    timestamp: typeof src.timestamp === 'number' ? src.timestamp : receivedAt,
+    seq: typeof src.seq === 'number' ? src.seq : 0,
+    width: typeof src.width === 'number' ? src.width : 0,
+    height: typeof src.height === 'number' ? src.height : 0,
+    jpeg,
+    mask,
+    state: segmentationState(src.state),
+    stateAgeMs: orNull(src.stateAgeMs) ?? undefined,
+    receivedAt,
+  };
+}
+
 export function parseUltrasound(raw: unknown, receivedAt: number): UltrasoundFrame | null {
   if (!raw || typeof raw !== 'object') return null;
   const src = raw as Record<string, unknown>;

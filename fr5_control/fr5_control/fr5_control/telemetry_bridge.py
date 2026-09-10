@@ -146,6 +146,17 @@ class TelemetryBridge(Node):
         #: 보내는 그림의 세로 상한 [px]. 소켓 대역과 렌더 비용을 여기서 정한다.
         self.declare_parameter("us.max_height", 384)
 
+        # 방광 세그멘테이션 중계. 브리지는 **추론하지 않는다** — `run_segmentation.py`
+        # (policy_learning) 가 U-Net 을 돌려 세 토픽으로 내고, 여기서는 그것을 GUI 로
+        # 접어 보내기만 한다. 브리지에 torch 를 들이면 이 노드가 못 뜰 때 힘·자세까지
+        # 같이 사라진다 — 영상 하나 때문에 콘솔 전체를 걸 이유가 없다.
+        self.declare_parameter("seg.enabled", True)
+        self.declare_parameter("seg.bmode_topic", "/us/seg/bmode")
+        self.declare_parameter("seg.mask_topic", "/us/seg/mask")
+        self.declare_parameter("seg.state_topic", "/us/seg/state")
+        self.declare_parameter("seg.stream_hz", 10.0)
+        self.declare_parameter("seg.jpeg_quality", 80)
+
         # 로봇 관절각을 컨트롤러에서 **읽기로만** 가져온다. bridge.px6d_port 와
         # 대칭인 기능이다.
         #
@@ -294,6 +305,32 @@ class TelemetryBridge(Node):
             self.create_subscription(_Image, us_topic, self._on_us_image,
                                      qos_profile_sensor_data)
             self.get_logger().info(f"초음파 구독: {us_topic}")
+
+        # 세그멘테이션 중계 상태. B-mode 와 마스크는 **따로 오는 두 메시지**라
+        # `header.stamp` 으로 짝을 맞춘다 — 짝이 어긋난 마스크는 어긋난 줄 모르고
+        # 그려지므로, 시각이 같은 쌍이 모이기 전에는 아무것도 보내지 않는다.
+        self._seg_bmode = None          # (stamp_ns, ndarray)
+        self._seg_mask = None           # (stamp_ns, ndarray)
+        self._seg_state = None          # (수신시각, dict)
+        self._seg_at = 0.0
+        self._seg_seq = 0
+        self._seg_sent_seq = -1
+        self._seg_warned = False
+        if bool(self.get_parameter("seg.enabled").value):
+            from rclpy.qos import qos_profile_sensor_data
+            from sensor_msgs.msg import Image as _Image
+            bmode_topic = str(self.get_parameter("seg.bmode_topic").value)
+            mask_topic = str(self.get_parameter("seg.mask_topic").value)
+            state_topic = str(self.get_parameter("seg.state_topic").value)
+            self.create_subscription(_Image, bmode_topic, self._on_seg_bmode,
+                                     qos_profile_sensor_data)
+            self.create_subscription(_Image, mask_topic, self._on_seg_mask,
+                                     qos_profile_sensor_data)
+            self.create_subscription(String, state_topic, self._on_seg_state,
+                                     qos_profile_sensor_data)
+            self.get_logger().info(
+                f"세그멘테이션 구독: {bmode_topic} · {mask_topic} · {state_topic} "
+                "(발행자는 policy_learning/scripts/run_segmentation.py — 없으면 패널이 비어 있다)")
 
         self._mode = None
         # 발행자가 TRANSIENT_LOCAL 이므로 구독도 맞춘다. 안 맞추면 QoS 불일치로
@@ -728,6 +765,121 @@ class TelemetryBridge(Node):
             "latencyNote": "us latency ~200 ms, not compensated",
             "jpeg": base64.b64encode(encoded.tobytes()).decode("ascii"),
         }
+
+    # -- 방광 세그멘테이션 (중계만) ----------------------------------------
+
+    def _seg_image(self, msg) -> tuple[int, "np.ndarray"] | None:
+        """mono8 한 장 → (stamp_ns, 배열). 형식이 다르면 None."""
+        buf = np.frombuffer(bytes(msg.data), dtype=np.uint8)
+        if buf.size != msg.height * msg.width:
+            if not self._seg_warned:
+                self._seg_warned = True
+                self.get_logger().error(
+                    f"세그 영상 형식이 예상과 다르다: {msg.width}×{msg.height} "
+                    f"encoding={msg.encoding!r} step={msg.step} bytes={buf.size}")
+            return None
+        stamp = int(msg.header.stamp.sec) * 1_000_000_000 + int(msg.header.stamp.nanosec)
+        return stamp, buf.reshape(msg.height, msg.width).copy()
+
+    def _on_seg_bmode(self, msg) -> None:
+        got = self._seg_image(msg)
+        if got is None:
+            return
+        with self._lock:
+            self._seg_bmode = got
+            self._seg_pair_ready()
+
+    def _on_seg_mask(self, msg) -> None:
+        got = self._seg_image(msg)
+        if got is None:
+            return
+        with self._lock:
+            self._seg_mask = got
+            self._seg_pair_ready()
+
+    def _seg_pair_ready(self) -> None:
+        """짝이 맞은 순간에만 seq 를 올린다. 락 안에서 부른다."""
+        if self._seg_bmode is None or self._seg_mask is None:
+            return
+        if self._seg_bmode[0] != self._seg_mask[0]:
+            return
+        if self._seg_bmode[1].shape != self._seg_mask[1].shape:
+            # 크기가 다르면 겹칠 수 없다. 늘려서 맞추지 않는다 — 늘린 마스크는
+            # 경계가 실제와 다른데 화면에서는 구별되지 않는다.
+            if not self._seg_warned:
+                self._seg_warned = True
+                self.get_logger().error(
+                    f"B-mode {self._seg_bmode[1].shape} 와 마스크 {self._seg_mask[1].shape} 의 "
+                    "크기가 다르다 — 겹치지 않는다")
+            return
+        self._seg_at = time.time()
+        self._seg_seq += 1
+
+    def _on_seg_state(self, msg) -> None:
+        """`run_segmentation` 의 ControlState 요약. 브리지는 해석하지 않고 나른다."""
+        try:
+            payload = json.loads(msg.data)
+        except (ValueError, TypeError):
+            return
+        if isinstance(payload, dict):
+            with self._lock:
+                self._seg_state = (time.time(), payload)
+
+    def segmentation_frame(self) -> dict | None:
+        """B-mode·마스크 한 쌍을 GUI 로. 새 쌍이 없으면 ``None``.
+
+        B-mode 는 JPEG, 마스크는 **PNG** 다. 마스크에 JPEG 를 쓰면 경계에 링잉이
+        생겨 0/255 가 아닌 값이 섞이고, 화면에서는 그것이 "망이 애매해한 가장자리"
+        처럼 보인다 — 실제로는 압축이 만든 것이다. 이진 마스크는 PNG 로 잘 줄어든다.
+
+        마스크를 색칠하지 않고 그대로 보낸다. 채우기·윤곽선·투명도는 GUI 가 정하고,
+        조작자는 마스크를 껐다 켜서 경계를 눈으로 확인할 수 있어야 한다.
+        """
+        with self._lock:
+            if self._seg_bmode is None or self._seg_mask is None:
+                return None
+            if self._seg_seq == self._seg_sent_seq:
+                return None
+            stamp, bmode = self._seg_bmode
+            mask = self._seg_mask[1]
+            at = self._seg_at
+            seq = self._seg_seq
+            state = self._seg_state
+        self._seg_sent_seq = seq
+
+        try:
+            import cv2
+        except ImportError:
+            if not self._seg_warned:
+                self._seg_warned = True
+                self.get_logger().error("cv2 가 없어 세그멘테이션을 보내지 못한다")
+            return None
+
+        ok_b, jpeg = cv2.imencode(
+            ".jpg", bmode,
+            [int(cv2.IMWRITE_JPEG_QUALITY), int(self.get_parameter("seg.jpeg_quality").value)])
+        ok_m, png = cv2.imencode(".png", mask, [int(cv2.IMWRITE_PNG_COMPRESSION), 9])
+        if not (ok_b and ok_m):
+            return None
+
+        payload = {
+            "type": "segmentation",
+            "timestamp": int(at * 1000),
+            "seq": seq,
+            "width": int(bmode.shape[1]),
+            "height": int(bmode.shape[0]),
+            # 이 그림은 **망이 실제로 본 것**이다. Ultrasound 패널의 부채꼴과는 다른
+            # 변환이므로(§`run_segmentation` 도크스트링) 마스크는 이 위에만 얹는다.
+            "jpeg": base64.b64encode(jpeg.tobytes()).decode("ascii"),
+            "mask": base64.b64encode(png.tobytes()).decode("ascii"),
+            "latencyNote": "us latency ~200 ms, not compensated",
+        }
+        if state is not None:
+            # 상태는 그림과 **다른 메시지**로 온다. 짝이 어긋났을 수 있으므로 나이를
+            # 같이 보낸다 — 오래된 숫자가 새 그림 위에 붙어 있으면 그것을 알아야 한다.
+            payload["state"] = state[1]
+            payload["stateAgeMs"] = max(0, int((at - state[0]) * 1000))
+        return payload
 
     def _write_profile(self, registration, note: str):
         """지금 세션 상태로 프로파일을 쓴다.
@@ -1760,7 +1912,10 @@ class TelemetryBridge(Node):
             us_hz = max(1.0, float(self.get_parameter("us.stream_hz").value))
             us_dt = 1.0 / us_hz
             us_on = bool(self.get_parameter("us.enabled").value)
-            next_tele = next_read = next_stream = next_us = 0.0
+            seg_hz = max(1.0, float(self.get_parameter("seg.stream_hz").value))
+            seg_dt = 1.0 / seg_hz
+            seg_on = bool(self.get_parameter("seg.enabled").value)
+            next_tele = next_read = next_stream = next_us = next_seg = 0.0
             try:
                 while True:
                     now = time.monotonic()
@@ -1782,7 +1937,12 @@ class TelemetryBridge(Node):
                         picture = self.ultrasound_frame()
                         if picture is not None:
                             await connection.send(json.dumps(picture))
-                    await asyncio.sleep(min(tele_dt, stream_dt, us_dt) / 2.0)
+                    if seg_on and now >= next_seg:
+                        next_seg = now + seg_dt
+                        overlay = self.segmentation_frame()
+                        if overlay is not None:
+                            await connection.send(json.dumps(overlay))
+                    await asyncio.sleep(min(tele_dt, stream_dt, us_dt, seg_dt) / 2.0)
             except Exception:
                 pass
             finally:

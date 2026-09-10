@@ -22,10 +22,15 @@ interface Props {
  * So the stack keeps deciding when contact happened. This panel only decides
  * whether the policy may drive within whatever limits the stack has set.
  *
- * **Nothing here is a confirmation.** Unlike the probing mode, the runner
- * publishes no state the console can read back, so the panel prints what it
- * asked for and says so. A lit button that meant "inferring" would be a claim
- * the console cannot support — the runner may not be up at all.
+ * **The fill follows the mode that came back, not the button.** When the request
+ * reaches the control stack it takes the contact regime and declares
+ * `contact_probing_policy` on `probing_mode` — the same rule the operator
+ * station and the in-plane toggle follow. A request that never arrives leaves
+ * the panel unlit, which is the honest reading: the stack may not be up.
+ *
+ * The sub-mode keeps the `contact_probing` prefix on purpose. Every consumer
+ * tests that prefix — `us_servo_node` stops discarding the small commands the
+ * policy produces, and the runner reads the same string as its handover.
  *
  * Commanding stays inside the force envelope the stack owns: the hold target is
  * 3 N, rising is refused at 4.5 N, and 5 N (`safety.max_contact_force_n`) forces
@@ -35,7 +40,9 @@ export function PolicyInference({ telemetry, available, onCommand }: Props) {
   const [requested, setRequested] = useState<boolean | null>(null);
   const mode = telemetry.probingMode;
   const known = mode !== undefined;
-  const probing = mode === 'contact_probing' || mode === 'contact_probing_inplane';
+  // The stack declares this when the policy holds the regime. That is the confirmation.
+  const held = mode === 'contact_probing_policy';
+  const contact = known && mode !== 'approach';
 
   const send = (enabled: boolean) => {
     if (onCommand({ command: 'policy.enable', enabled })) setRequested(enabled);
@@ -46,16 +53,24 @@ export function PolicyInference({ telemetry, available, onCommand }: Props) {
       <div className="plate__head">
         <span className="plate__title">Policy inference</span>
         <span className="plate__aside">
-          {requested === null ? 'no request sent' : requested ? 'start requested' : 'stop requested'}
+          {held
+            ? 'policy holds the contact regime'
+            : requested === null
+              ? 'no request sent'
+              : requested
+                ? 'start requested \u2014 not confirmed'
+                : 'stopped'}
         </span>
       </div>
       <div className={`plate__body ${styles.body}`}>
         <div className={styles.choices} role="group" aria-label="Policy inference">
           <button
             type="button"
-            aria-pressed={requested === true}
+            aria-pressed={held}
             disabled={!available}
-            className={`${styles.choice} ${requested === true ? styles.applied : ''}`}
+            className={`${styles.choice} ${held ? styles.applied : ''} ${
+              requested === true && !held ? styles.pending : ''
+            }`}
             onClick={() => send(true)}
           >
             <span className={styles.choiceLabel}>Start inference</span>
@@ -63,9 +78,9 @@ export function PolicyInference({ telemetry, available, onCommand }: Props) {
           </button>
           <button
             type="button"
-            aria-pressed={requested === false}
+            aria-pressed={known && !held}
             disabled={!available}
-            className={`${styles.choice} ${requested === false ? styles.applied : ''}`}
+            className={`${styles.choice} ${known && !held ? styles.applied : ''}`}
             onClick={() => send(false)}
           >
             <span className={styles.choiceLabel}>Stop</span>
@@ -74,21 +89,27 @@ export function PolicyInference({ telemetry, available, onCommand }: Props) {
         </div>
 
         <p className={styles.state} role="status">
-          {requested === true ? (
+          {held ? (
             <>
-              <span className="tag tag--strong">REQUESTED</span> the console cannot confirm the
-              runner is up — it publishes no state to read back. If it is running and there is
-              contact, <strong>let go of the stylus</strong>: one publisher per command channel.
+              <span className="tag tag--strong">HANDOVER</span> the stack holds the beam axis for
+              the policy and the operator&rsquo;s axes are zeroed.{' '}
+              <strong>Let go of the stylus</strong> — one publisher per command channel.
+            </>
+          ) : requested === true ? (
+            <>
+              <span className="tag tag--strong">PENDING</span> the request went out but the stack
+              has not declared <code>contact_probing_policy</code>. Either it is not up, or it
+              refused. Nothing has changed on the robot.
             </>
           ) : !known ? (
             <>
               The control stack has not declared a mode. Starting is still allowed — the runner
               holds its own contact condition and the stack owns the force envelope.
             </>
-          ) : probing ? (
+          ) : contact ? (
             <>
-              Contact probing — the robot holds the beam axis and the contact velocity limits
-              apply. This is the window the policy is meant to run in.
+              Contact regime, held by the force judgement rather than the policy. Starting here
+              hands the same regime to the policy.
             </>
           ) : (
             <>

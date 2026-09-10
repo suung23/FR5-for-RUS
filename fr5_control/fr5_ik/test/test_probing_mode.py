@@ -264,3 +264,77 @@ def test_replay_is_deterministic():
         sw = _reversible()
         runs.append([sw.update(f, dt) for f, dt in trace])
     assert runs[0] == runs[1]
+
+
+# --- 정책이 régime 을 잡는 경로 (2026-09-11) ------------------------------------
+
+
+def _switch(**kw):
+    from fr5_ik.probing_mode import ProbingModeSwitch
+    kw.setdefault("enter_force_n", 2.0)
+    kw.setdefault("confirm_s", 0.02)
+    kw.setdefault("release_force_n", 0.3)
+    return ProbingModeSwitch(**kw)
+
+
+def test_force_trigger_can_be_switched_off():
+    """꺼 두면 힘이 문턱을 한참 넘어도 régime 이 바뀌지 않는다."""
+    s = _switch(force_trigger_enabled=False)
+    for _ in range(100):
+        s.update(10.0, 0.01)
+    assert s.mode == APPROACH and not s.in_contact_probing
+
+
+def test_force_trigger_off_does_not_bank_progress():
+    """꺼 둔 동안 창이 쌓였다가 켜는 순간 즉시 전환되면 켠 사람이 놀란다."""
+    s = _switch(force_trigger_enabled=False)
+    for _ in range(100):
+        s.update(10.0, 0.01)
+    s.force_trigger_enabled = True
+    s.update(10.0, 0.01)                     # confirm_s=0.02 → 한 표본으로는 부족
+    assert not s.in_contact_probing
+    s.update(10.0, 0.01)
+    assert s.in_contact_probing
+
+
+def test_policy_request_enters_regime_without_force():
+    s = _switch(force_trigger_enabled=False)
+    assert not s.in_contact_probing
+    s.request_policy(True)
+    assert s.in_contact_probing and s.effective_mode == CONTACT_PROBING
+    assert s.has_contacted                    # 걸쇠는 régime 진입으로 선다
+    assert s.mode == APPROACH                 # 힘 판정 자체는 건드리지 않는다
+
+
+def test_policy_holds_regime_when_force_drops():
+    """정책이 프로브를 들어 다시 찾는 동안 z 가 조작자에게 돌아가면 안 된다."""
+    s = _switch()
+    s.request_policy(True)
+    for _ in range(200):
+        s.update(0.0, 0.01)                   # 이탈 문턱 한참 아래로 오래
+    assert s.in_contact_probing
+
+
+def test_policy_release_returns_to_approach():
+    s = _switch(force_trigger_enabled=False)
+    s.request_policy(True)
+    s.request_policy(False)
+    assert not s.in_contact_probing and s.effective_mode == APPROACH
+
+
+def test_force_judgement_still_holds_after_policy_releases():
+    """힘 트리거가 켜져 있고 실제로 눌리고 있으면, 정책이 놓아도 régime 은 유지된다."""
+    s = _switch()
+    for _ in range(10):
+        s.update(5.0, 0.01)
+    assert s.in_contact_probing
+    s.request_policy(True)
+    s.request_policy(False)
+    assert s.in_contact_probing               # 힘이 여전히 잡고 있다
+
+
+def test_reset_clears_the_policy_request():
+    s = _switch(force_trigger_enabled=False)
+    s.request_policy(True)
+    s.reset()
+    assert not s.in_contact_probing and not s.policy_requested

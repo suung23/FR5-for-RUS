@@ -63,6 +63,16 @@
   min-width: 240px;
 }
 
+/* The segmentation plate is not square: the picture is, but a readout hangs
+   below it and the rejection reasons are the point of that readout. It takes a
+   share of the row rather than a fixed box, with a floor wide enough that the
+   256px picture is never shown smaller than the network's own pixels. */
+.segPanel {
+  flex: 1 1 0;
+  min-width: 300px;
+  max-width: 560px;
+}
+
 .lower {
   flex: 0 0 auto;
   max-height: 52%;

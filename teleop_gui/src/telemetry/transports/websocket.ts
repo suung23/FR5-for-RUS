@@ -1,13 +1,24 @@
 import type { Transport, TransportSink } from '../types';
-import { parseAck, parseTelemetry, parseUltrasound, parseWrench } from './parse';
+import {
+  parseAck,
+  parseSegmentation,
+  parseTelemetry,
+  parseUltrasound,
+  parseWrench,
+} from './parse';
 
-type FrameKind = 'telemetry' | 'wrench' | 'unknown' | 'ultrasound';
+type FrameKind = 'telemetry' | 'wrench' | 'unknown' | 'ultrasound' | 'segmentation';
 
 /** Declared frame type, or an inference from the payload's shape. */
 function frameKind(payload: unknown): FrameKind {
   if (payload && typeof payload === 'object') {
     const declared = (payload as Record<string, unknown>).type;
-    if (declared === 'telemetry' || declared === 'wrench' || declared === 'ultrasound') {
+    if (
+      declared === 'telemetry' ||
+      declared === 'wrench' ||
+      declared === 'ultrasound' ||
+      declared === 'segmentation'
+    ) {
       return declared;
     }
     if ('force' in (payload as object) && !('jointPositions' in (payload as object))) {
@@ -112,6 +123,16 @@ export class WebSocketTransport implements Transport {
       if (kind === 'ultrasound') {
         const picture = parseUltrasound(payload, now);
         if (picture) sink.onUltrasound(picture);
+        sink.onStatus({ lastFrameAt: now });
+        return;
+      }
+
+      // Same reason as the picture above: a segmentation frame carries no robot
+      // state, and `parseTelemetry` would happily turn it into a frame with
+      // every field absent.
+      if (kind === 'segmentation') {
+        const overlay = parseSegmentation(payload, now);
+        if (overlay) sink.onSegmentation(overlay);
         sink.onStatus({ lastFrameAt: now });
         return;
       }

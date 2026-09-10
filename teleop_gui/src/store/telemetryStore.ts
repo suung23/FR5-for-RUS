@@ -3,7 +3,13 @@ import { RobotTelemetryAdapter } from '../telemetry/adapter';
 import { config } from '../telemetry/config';
 import { solveChain } from '../telemetry/fr5Model';
 import { ContactDetector, type ContactSnapshot } from '../telemetry/contactState';
-import type { LinkStatus, RobotTelemetry, UltrasoundFrame, WrenchSample } from '../telemetry/types';
+import type {
+  LinkStatus,
+  RobotTelemetry,
+  SegmentationFrame,
+  UltrasoundFrame,
+  WrenchSample,
+} from '../telemetry/types';
 import { logEvent, TransitionWatcher } from './events';
 
 /** One point in the rolling chart buffer. */
@@ -93,6 +99,15 @@ interface TelemetryState {
   wrench: WrenchSample | null;
   /** Latest ultrasound picture, or null before the first one arrives. */
   ultrasound: UltrasoundFrame | null;
+  /**
+   * Latest segmented frame, or null while `run_segmentation` is not running.
+   *
+   * Kept beside `ultrasound` rather than folded into it because they are two
+   * different pictures of the same probe: the fan the operator reads, and the
+   * 256² letterbox the network is fed. Null here means nobody is running the
+   * network — not that the network found nothing.
+   */
+  segmentation: SegmentationFrame | null;
   contact: ContactSnapshot;
   /**
    * Contact-point force `[Fx, Fy, Fz]` in the probe frame, `+z` compressing.
@@ -212,6 +227,7 @@ export const useTelemetryStore = create<TelemetryState>((set) => ({
   telemetry: { timestamp: 0, connected: false },
   wrench: null,
   ultrasound: null,
+  segmentation: null,
   contact: detector.snapshot(),
   contactForce: null,
   contactJudged: false,
@@ -294,6 +310,12 @@ const adapter = new RobotTelemetryAdapter({
     // arriving; only what is drawn is held — same rule as the other panels.
     if (useTelemetryStore.getState().paused) return;
     useTelemetryStore.setState({ ultrasound: frame });
+  },
+
+  onSegmentation(frame) {
+    // Same rule as the picture: HOLD freezes what is drawn, not what arrives.
+    if (useTelemetryStore.getState().paused) return;
+    useTelemetryStore.setState({ segmentation: frame });
   },
 
   onWrench(sample) {

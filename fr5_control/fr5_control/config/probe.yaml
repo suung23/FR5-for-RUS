@@ -623,6 +623,12 @@
       #
       # 저울 보정을 뺐으므로 이 2.0 은 **파이프라인이 내는 값 그대로 2.0** 이다.
       # 보정이 있던 동안에는 참 접촉력 1.71 N 에서 걸렸다.
+      # 🔁 2026-09-11: **접촉력으로 régime 을 가르지 않는다.** 정책 추론이 régime 을
+      # 정한다 — 콘솔의 policy.enable 버튼 하나가 러너와 régime 을 함께 연다.
+      # 문턱 값들은 지우지 않는다: 이 한 줄을 true 로 되돌리면 예전 거동 그대로다.
+      # 속도 상한은 이 전환에 걸려 있지 않다 — approach 와 contact 가 둘 다
+      # 10 mm/s · 0.2 rad/s 로 같다 (위 safety 절). 150 mm/s 는 freespace 오버라이드뿐이다.
+      contact_probing_force_trigger: false
       contact_probing_force_n: 2.0
 
       # 연속으로 문턱을 넘어야 하는 시간. 100 Hz 에서 두 표본이다.

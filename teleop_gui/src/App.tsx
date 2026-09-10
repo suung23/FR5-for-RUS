@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { BladderSegmentation } from './components/BladderSegmentation';
 import { EventLog } from './components/EventLog';
 import { GuidanceGate } from './components/GuidanceGate';
 import { ForceTrend } from './components/ForceTrend';
@@ -25,6 +26,7 @@ export function App() {
   const telemetry = useTelemetryStore((s) => s.telemetry);
   const wrench = useTelemetryStore((s) => s.wrench);
   const ultrasound = useTelemetryStore((s) => s.ultrasound);
+  const segmentation = useTelemetryStore((s) => s.segmentation);
   const contact = useTelemetryStore((s) => s.contact);
   const contactForce = useTelemetryStore((s) => s.contactForce);
   const contactJudged = useTelemetryStore((s) => s.contactJudged);
@@ -151,8 +153,15 @@ export function App() {
               {/* The picture leads. It is what the operator is actually reading
                   while probing; the arm beside it is context. On the frame views
                   it stands down — the triads need that width. */}
-              {view === 'monitoring' || view === 'contact' ? (
+              {view === 'monitoring' || view === 'contact' || view === 'segmentation' ? (
                 <Ultrasound frame={ultrasound} className={styles.usPanel} />
+              ) : null}
+              {/* Beside the sector, never instead of it. The two are different
+                  scan conversions of the same probe, and the operator has to be
+                  able to look from one to the other — a mask that disagrees
+                  with the picture next to it is the thing worth catching. */}
+              {view === 'segmentation' ? (
+                <BladderSegmentation frame={segmentation} className={styles.segPanel} />
               ) : null}
               <Workspace
                 jointPositions={telemetry.jointPositions}

@@ -64,6 +64,15 @@ class UsFrameNode(Node):
         self.declare_parameter("us.orientation", "none")
         self.declare_parameter("us.reconnect_period_s", 2.0)
         self.declare_parameter("us.stale_timeout_s", 2.0)
+        # 프레임이 이만큼 끊기면 **세션을 다시 연다.**
+        #
+        # 프로브를 켠 뒤 첫 세션이 이전 세션의 잔여 상태를 물고 열리는 일이 있다:
+        # `scanner_active` 가 start_scan 을 보내기도 전에 참으로 오고, 프레임은
+        # 한 장 오다 만다 (2026-09-11, 재현됨). 다시 열면 깨끗하게 붙는다.
+        #
+        # 경고용 stale_timeout(2 s) 보다 넉넉히 잡는다 — 10 fps 스트림이 잠깐
+        # 더듬는 것으로 세션을 끊으면 그게 더 나쁘다.
+        self.declare_parameter("us.reconnect_after_stale_s", 8.0)
         self.declare_parameter("us.report_period_s", 5.0)
 
         orientation = self.get_parameter("us.orientation").value
@@ -79,6 +88,7 @@ class UsFrameNode(Node):
         self._frame_id = self.get_parameter("us.frame_id").value
         self._reconnect_period = float(self.get_parameter("us.reconnect_period_s").value)
         self._stale_timeout = float(self.get_parameter("us.stale_timeout_s").value)
+        self._stale_reconnect = float(self.get_parameter("us.reconnect_after_stale_s").value)
         self._report_period = float(self.get_parameter("us.report_period_s").value)
 
         topic = self.get_parameter("us.topic").value
@@ -138,6 +148,7 @@ class UsFrameNode(Node):
         # 것으로만 보인다.
         opened_at = time.monotonic()
         commanded_scan = False
+        connect_fails = 0
 
         while not self._stop.is_set():
             if not session.is_open:
@@ -148,12 +159,26 @@ class UsFrameNode(Node):
                 try:
                     session.open()
                 except OSError as error:
+                    connect_fails += 1
+                    hint = ""
+                    # 프로브는 클라이언트를 하나만 받고, **곱게 닫히지 않은 세션을 한동안
+                    # 붙들고 있다.** 그 상태에서는 TCP 가 그냥 시간 초과하며, 재시도로는
+                    # 절대 풀리지 않는다 — Wi-Fi 를 다시 붙여야 프로브가 세션을 버린다.
+                    # 그 사실을 말해 주지 않으면 조작자는 재시도 로그만 보며 기다린다.
+                    if connect_fails == 3:
+                        hint = ("\n  프로브가 죽은 세션을 붙들고 있는 것으로 보인다. "
+                                "재시도로는 풀리지 않는다 — Wi-Fi 를 다시 붙여라:\n"
+                                "    python3 imu_bench/host/probe_wifi_linux.py --disconnect\n"
+                                "    python3 imu_bench/host/probe_wifi_linux.py\n"
+                                "  (다음부터는 세션을 Ctrl-C 로 끝내라. 강제 종료하면 "
+                                "세션이 닫히지 않아 이 상태가 된다)")
                     self.get_logger().warn(
                         f"scanner connect failed ({type(error).__name__}: {error}); "
-                        f"retrying in {self._reconnect_period:.1f}s",
+                        f"retrying in {self._reconnect_period:.1f}s" + hint,
                         throttle_duration_sec=10.0,
                     )
                     continue
+                connect_fails = 0
                 self.get_logger().info(
                     f"connected to scanner {self._host} (profile {self._profile.name})")
                 last_frame_at = time.monotonic()
@@ -166,6 +191,19 @@ class UsFrameNode(Node):
             # 다 나간 뒤(ready_after_s) 한 번만 보낸다 — 그 전에 보내면 무시된다.
             if (session.can_command_scan and not commanded_scan
                     and time.monotonic() - opened_at > self._profile.ready_after_s):
+                # 우리가 명령하기 **전에** 이미 스캔 중이라고 답하면, 직전 클라이언트가
+                # 스캔을 켜둔 채 떠난 것이다 (곱게 닫히지 않은 세션). 그 상태로 start 를
+                # 보내면 프로브는 한 장 흘리고 만다 — 2026-09-11 에 두 번 재현됐다.
+                # 먼저 끄고 켜서 상태를 확실히 만든다. 8 s 뒤 재접속으로도 풀리지만
+                # 그때까지 화면이 비어 있고, 조작자는 그 이유를 알 수 없다.
+                if session.scanner_active:
+                    self.get_logger().warn(
+                        "명령 전에 이미 스캔 상태다 — 직전 세션의 잔여로 본다. "
+                        "정지 후 다시 시작한다")
+                    session.stop_scan()
+                    deadline = time.monotonic() + 1.5
+                    while time.monotonic() < deadline and not self._stop.is_set():
+                        session.poll(0.05)      # 정지 바이트가 나가도록 세션을 돌린다
                 session.start_scan()
                 commanded_scan = True
                 self.get_logger().info("스캔 시작을 명령했다 (클라이언트 주도 프로브)")
@@ -206,6 +244,18 @@ class UsFrameNode(Node):
                     f"(scanner_active={session.scanner_active}); "
                     "장비가 실제 스캔/스트리밍 상태인지, Windows 앱이 AP 를 점유하고 있지 않은지 확인"
                 )
+
+            # 조용한 세션을 붙들고 있어 봐야 저절로 돌아오지 않는다 — 다시 연다.
+            if self._stale_reconnect > 0.0 and now - last_frame_at > self._stale_reconnect:
+                self.get_logger().warn(
+                    f"{now - last_frame_at:.1f}s 동안 프레임이 없다 — 세션을 다시 연다 "
+                    "(프로브가 이전 세션의 잔여 상태를 물고 열렸을 때 이렇게 풀린다)"
+                )
+                session.close()
+                last_connect_attempt = 0.0      # 재접속 주기를 기다리지 않는다
+                last_frame_at = time.monotonic()
+                warned_stale = False
+                continue
 
             if self._report_period > 0.0 and now - last_report_at >= self._report_period:
                 elapsed = now - last_report_at

@@ -69,6 +69,19 @@ def measure_contact(out: Path) -> None:
              100 * (allr <= 0.15).mean(), out))
 
 
+def parse_frame_id(frame_id: str) -> tuple[str, int]:
+    """추론 결과의 frame_id → (세션, 프레임 번호).
+
+    매니페스트로 돌린 추론은 "<세션>/S00/000123", --input 폴더로 돌린 추론은 파일 이름
+    "<세션>_00123" 이다. 두 경우 모두 받는다.
+    """
+    if "/" in frame_id:
+        pid, _, fi = frame_id.split("/")
+        return pid, int(fi)
+    pid, fi = frame_id.rsplit("_", 1)
+    return pid, int(fi)
+
+
 def neighbour_iou(run: Path, pid: str, indices: list[int]) -> dict[int, float]:
     """이웃 프레임 마스크와의 IoU — 사람 라벨 87 장에서 Dice 와 r=0.69 로 검증된 오류 지표."""
     import cv2
@@ -97,8 +110,7 @@ def build_sets(run: Path, out: Path, pos_per_session: int, neg_per_session: int)
 
     states = {}
     for r in csv.DictReader(open(run / "control_states.csv", encoding="utf-8")):
-        pid, _, fi = r["frame_id"].split("/")
-        states[(pid, int(fi))] = r
+        states[parse_frame_id(r["frame_id"])] = r
     if len(states) != len(rows):
         raise SystemExit(f"{run}/control_states.csv 가 {len(states)} 행 — 매니페스트 {len(rows)} 행과 다르다. "
                          "다른 프로세스가 같은 폴더에 쓰고 있지 않은지 확인할 것.")
@@ -184,7 +196,8 @@ def build_sets(run: Path, out: Path, pos_per_session: int, neg_per_session: int)
     print("→ %s" % out)
 
 
-def export_masks(run: Path, out_dir: Path, manifest_out: Path, area_floor: float) -> None:
+def export_masks(run: Path, out_dir: Path, manifest_out: Path, area_floor: float,
+                 data: Path = DATA, mask_name: str = "%s_S00_%06d_mask.png") -> None:
     """최종 마스크 내보내기: 사람 라벨 우선, 나머지는 의사라벨, 접촉 물리로 걸러낸다.
 
     거르는 것 세 가지 — 모두 사람 라벨과 모순되지 않는 선에서만:
@@ -198,18 +211,17 @@ def export_masks(run: Path, out_dir: Path, manifest_out: Path, area_floor: float
     _sys.path.insert(0, str(HERE.parent.parent / "policy_learning"))
     from rus_policy.bmode import BmodeConverter
 
-    cov = dict(np.load(DATA / "contact_alines.npz"))
+    cov = dict(np.load(data / "contact_alines.npz"))
     meta = json.loads((LOGS / "us_imu_20260909_161540" / "session.meta.json").read_text(encoding="utf-8"))
     conv = BmodeConverter(meta, (160, 512), out_size=256)
     idx_map = conv(np.repeat(np.arange(160, dtype=np.uint8)[:, None], 512, axis=1)).astype(np.int16)
     fan = conv(np.full((160, 512), 255, np.uint8)) > 127
 
-    rows = list(csv.DictReader(open(DATA / "manifest.csv", encoding="utf-8")))
+    rows = list(csv.DictReader(open(data / "manifest.csv", encoding="utf-8")))
     manual = {(r["patient_id"], int(r["frame_index"])): r["mask_path"] for r in rows if r["mask_path"]}
     states = {}
     for r in csv.DictReader(open(run / "control_states.csv", encoding="utf-8")):
-        pid, _, fi = r["frame_id"].split("/")
-        states[(pid, int(fi))] = r
+        states[parse_frame_id(r["frame_id"])] = r
 
     shutil.rmtree(out_dir, ignore_errors=True)
     out_dir.mkdir(parents=True)
@@ -220,10 +232,10 @@ def export_masks(run: Path, out_dir: Path, manifest_out: Path, area_floor: float
         contact = float(cov[key[0]][key[1]].mean())
         st = states[key]
         if key in manual:
-            mask = cv2.imread(str(DATA / manual[key]), cv2.IMREAD_GRAYSCALE)
+            mask = cv2.imread(str(data / manual[key]), cv2.IMREAD_GRAYSCALE)
             source, reason = "manual", ""
         else:
-            mask = cv2.imread(str(run / "masks" / ("%s_S00_%06d_mask.png" % key)), cv2.IMREAD_GRAYSCALE)
+            mask = cv2.imread(str(run / "masks" / (mask_name % key)), cv2.IMREAD_GRAYSCALE)
             source, reason = "pseudo", ""
             binary = mask > 127
             if contact < 0.10:
@@ -268,13 +280,16 @@ def main() -> int:
     e.add_argument("--out-dir", type=Path, default=DATA / "masks_final")
     e.add_argument("--manifest-out", type=Path, default=DATA / "manifest_masked.csv")
     e.add_argument("--area-floor", type=float, default=0.008, help="사람이 그린 최소 면적 0.0101 아래")
+    e.add_argument("--data", type=Path, default=DATA, help="데이터셋 폴더 (manifest.csv + contact_alines.npz)")
+    e.add_argument("--mask-name", default="%s_S00_%06d_mask.png",
+                   help="추론 폴더의 마스크 파일명 규칙. --input 으로 돌린 추론은 '%s_%05d_mask.png'")
     a = ap.parse_args()
     if a.cmd == "contact":
         measure_contact(a.out)
     elif a.cmd == "sets":
         build_sets(a.run, a.out, a.pos_per_session, a.neg_per_session)
     else:
-        export_masks(a.run, a.out_dir, a.manifest_out, a.area_floor)
+        export_masks(a.run, a.out_dir, a.manifest_out, a.area_floor, a.data, a.mask_name)
     return 0
 
 

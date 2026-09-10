@@ -98,7 +98,21 @@
    넓을수록 읽히고, 버튼 둘은 넓어질 이유가 없다 — 그래서 고정 폭을 주고 나머지를 그래프에
    남긴다. 그래프 아래로 접히면 292 px 안에서 둘 다 잘린다. */
 .lowerChart > :last-child {
-  flex: 0 0 300px;
+  flex: 0 0 320px;
+}
+
+/* 오른쪽 기둥. 292 px 안에 품질 눈금과 인계 버튼이 함께 서야 하므로 세로로 쌓고, 넘치면
+   각자 스크롤하게 둔다 — 잘려서 안 보이는 것보다 낫다. */
+.lowerRight {
+  display: flex;
+  flex-direction: column;
+  gap: var(--panel-gap);
+  min-height: 0;
+}
+
+.lowerRight > * {
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 /* Dense reference pages get more of the column; the workspace keeps a floor. */

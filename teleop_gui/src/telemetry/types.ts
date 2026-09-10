@@ -71,6 +71,24 @@ export interface RobotTelemetry {
    * warning, and at that moment the operator's hand is on the stylus.
    */
   inplaneRotation?: boolean;
+  /**
+   * Image quality, in two independent readings — never collapse them into one.
+   *
+   * `qualitySeg` is segmentation-based: *is the bladder properly shown*. It is
+   * the material of the success criterion, and it is blind whenever the network
+   * produces nothing.
+   *
+   * `qualityRaw` is classical image processing with no segmentation: *is the
+   * probe properly coupled*. It drives the force axis — the search moves the
+   * force setpoint to maximise it — and it keeps working in the regime where
+   * the segmentation has nothing to say.
+   *
+   * They disagree on purpose, and the disagreement is the diagnosis: good
+   * coupling with no bladder means move, bad coupling means press differently.
+   * Absent means **not measured**, which is not the same as zero.
+   */
+  qualitySeg?: number;
+  qualityRaw?: number;
   /** How the control stack is mapping the operator's hand onto the robot. */
   teleopFrame?: TeleopFrameState;
   /** Sensor calibration state, forwarded by the bridge. */

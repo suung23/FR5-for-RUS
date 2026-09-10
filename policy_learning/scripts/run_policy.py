@@ -133,7 +133,16 @@ class PolicyRunner(Node):
         # 실시간 지각이 도는 곳이 여기뿐이라 Q_raw 의 유일한 출처다. force_search 노드가
         # 이걸 받아 힘 설정값을 품질 경사 방향으로 옮긴다 (DESIGN_NOTES §8.4).
         # 지령과 무관하게 항상 낸다 — 정책이 멈춰 있어도 힘 탐색은 품질을 봐야 한다.
-        self.quality_pub = self.create_publisher(Float32, f"{ns}/image_quality", 10)
+        # Q_seg 와 Q_raw 는 **다른 신호**다 (DESIGN_NOTES §6.2 · §5.3).
+        #   Q_seg  분할 기반. "방광을 제대로 보이게" — 영상 축, 성공 판정의 재료.
+        #   Q_raw  고전 영상처리, 세그 비의존. "일단 제대로 닿게" — **힘 축**.
+        # 힘 탐색은 Q_raw 를 최대화하는 최소 F_n* 를 찾는다. 둘을 한 토픽에 담으면
+        # 어느 쪽으로 힘이 움직였는지 되짚을 수 없다.
+        self.q_seg_pub = self.create_publisher(Float32, f"{ns}/image_quality_seg", 10)
+        self.q_raw_pub = self.create_publisher(Float32, f"{ns}/image_quality_raw", 10)
+        # 힘 설정값이 실제로 Q_raw 를 따라 움직이는가. force_search 가 없으면 설정값이
+        # 출발값에 **고정**되는데, 그것은 설계가 아니라 사고다.
+        self.create_subscription(Float32, f"{ns}/force_setpoint_bar", self._on_f_bar, 10)
         self.create_subscription(Pose, f"{ns}/ee_wrt_base", self._on_pose, 10)
         self.create_subscription(WrenchStamped, f"{ns}/wrench_px6d", self._on_wrench, 10)
         self.create_subscription(Bool, args.enable_topic, self._on_enable, 10)
@@ -175,6 +184,10 @@ class PolicyRunner(Node):
         self.finished = False
         self._warned = False
         self._uncompensated = ""    # 보상 안 된 렌치가 오고 있으면 그 frame_id
+        self.q_raw = float("nan")   # 최근 Q_raw (힘 축)
+        self.f_bar = None           # 힘 탐색이 알리는 설정값
+        self.f_bar_t = 0.0
+        self._warned_no_search = False
         self._idle_reason = ""      # 왜 지령하지 않는가. 바뀔 때와 5 s 마다 알린다.
         self._idle_logged = 0.0
         self.create_timer(1.0 / cfg.timing.policy_hz, self._tick)
@@ -232,6 +245,9 @@ class PolicyRunner(Node):
         if not want:
             self._stop()
 
+    def _on_f_bar(self, msg: Float32):
+        self.f_bar, self.f_bar_t = float(msg.data), time.time()
+
     def _on_retreat(self, msg: Bool):
         if msg.data and not self.retreating:
             self.get_logger().error("후퇴 신호 — 지령 중단")
@@ -273,7 +289,10 @@ class PolicyRunner(Node):
         self.buf.append((now_t, bm, state, q))
         self.state_t.append(now_t)
         self.states.append(state)
-        self.quality_pub.publish(Float32(data=float(q)))     # NaN 도 그대로 — "측정 안 됨"
+        q_raw = self.backend.raw_quality(bm) if self.backend is not None else float("nan")
+        self.q_seg_pub.publish(Float32(data=float(q)))       # NaN 도 그대로 — "측정 안 됨"
+        self.q_raw_pub.publish(Float32(data=float(q_raw)))
+        self.q_raw = q_raw
         self.n_img += 1
         if self.n_img % 50 == 0:
             self.get_logger().info(f"프레임 {self.n_img} 장, 지각 {dt_ms:.0f} ms/장, 느림 {self.n_drop} 회")
@@ -375,6 +394,12 @@ class PolicyRunner(Node):
                 # 아직 지연만큼 안 쌓였다 — 위약이 성립하지 않는다
                 return self._idle(f"위약 관측 버퍼 채우는 중 ({self.placebo.n_buffered} 장)")
             obs = past
+        if not self._warned_no_search and (t - self.f_bar_t) > 5.0:
+            self._warned_no_search = True
+            self.get_logger().warn(
+                f"⚠️ 힘 탐색이 보이지 않는다 ({self.args.robot_namespace}/force_setpoint_bar 무음) — "
+                "힘 설정값이 출발값에 고정된 채 돈다. "
+                "`ros2 run fr5_control force_search --ros-args -p execute:=true` 를 띄웠는가")
         if self._idle_reason:
             # 여기까지 왔다는 것은 실제로 지령을 낸다는 뜻이다. 관측을 얻은 자리에서 지우면
             # 시작 조건에서 막히는 동안 매 tick "해제 → 대기" 가 번갈아 찍힌다.
@@ -407,10 +432,12 @@ class PolicyRunner(Node):
             "margin": float(sel["mode_margin"][0].mean()) if sel["mode_margin"].ndim else float("nan"),
             "n_frames": len(self.buf), "enabled": int(self.enabled),
             "condition": self.condition, "t_episode": t - self.t_start,
+            "Q_raw": self.q_raw,
+            "f_bar": self.f_bar if self.f_bar is not None else float("nan"),
         })
         if len(self.rows) % 10 == 0:
             self.get_logger().info(
-                f"F={fn:4.1f}N  Q={qn:.3f} Q̂={qhat:.3f}  "
+                f"F={fn:4.1f}N  Q_seg={qn:.3f} Q_raw={self.q_raw:.3f} Q̂={qhat:.3f}  "
                 f"ω=({ang[0]:+5.2f},{ang[1]:+5.2f},{ang[2]:+5.2f})°/s  v=({lin[0]:+5.2f},{lin[1]:+5.2f})mm/s")
 
     def save(self, out: Path):

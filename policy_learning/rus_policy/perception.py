@@ -161,6 +161,25 @@ class UnetPerception:
         """스트리밍 상태를 버린다. 새 세션이나 영상이 끊겼다 돌아왔을 때 부른다."""
         self._prev = None
 
+    def raw_quality(self, frame: np.ndarray) -> float:
+        """``Q_raw`` — 세그멘테이션에 기대지 않는 접촉·에코 품질 (DESIGN_NOTES §6.2).
+
+        ``Q_seg`` 와 **다른 신호**다. Q_seg 는 "방광을 제대로 보이게" (영상 축), Q_raw 는
+        "일단 제대로 닿게" (힘 축) 이고, 힘 탐색은 Q_raw 를 최대화하는 최소 F_n* 를 찾는다
+        (§333). 분할이 아무것도 못 내놓는 구간에서도 돌아야 하므로 신경망도 이전 프레임도
+        쓰지 않는다.
+
+        Returns:
+            [0, 1] 의 점수. **측정 불가면 NaN** 이다 — 0.0 이 아니다. A-line 이 부족하면
+            "나쁘다" 가 아니라 "재지 못했다" 이고, 그것을 0 으로 적으면 힘 탐색이 없는
+            열화를 쫓는다.
+        """
+        from rus_perception.control.raw_quality import compute_raw_quality
+
+        img = np.asarray(frame, np.float32) / 255.0
+        r = compute_raw_quality(img, roi_mask=self.roi)
+        return float("nan") if r.score is None else float(r.score)
+
     def step(self, frame: np.ndarray) -> tuple[np.ndarray, float, int, float]:
         """프레임 한 장 — **직전 프레임 상태를 이어받는다**. (state, quality, token, e_hat)
 

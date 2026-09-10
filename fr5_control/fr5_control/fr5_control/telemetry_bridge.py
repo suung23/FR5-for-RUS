@@ -44,7 +44,7 @@ import numpy as np
 import rclpy
 from ament_index_python.packages import get_package_share_directory
 from geometry_msgs.msg import Pose, WrenchStamped
-from std_msgs.msg import Bool, Float64, String
+from std_msgs.msg import Bool, Float32, Float64, String
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSPresetProfiles, QoSProfile, ReliabilityPolicy
@@ -388,6 +388,19 @@ class TelemetryBridge(Node):
                 durability=DurabilityPolicy.TRANSIENT_LOCAL,
             ),
         )
+        # 영상 품질 두 갈래 (DESIGN_NOTES §6.2). 정책 러너가 낸다 — 실시간 지각이 거기서만
+        # 돌기 때문이다. **한 숫자로 합치지 않는다**: Q_seg 는 "방광을 제대로 보이게"(영상 축),
+        # Q_raw 는 "일단 제대로 닿게"(힘 축) 라서 둘이 갈라질 때가 진단의 핵심이다
+        # (§398 의 Q_raw × Q_seg 표).
+        self._q_seg = None
+        self._q_raw = None
+        self.create_subscription(
+            Float32, f"{ns}/image_quality_seg",
+            lambda m: setattr(self, "_q_seg", float(m.data)), 10)
+        self.create_subscription(
+            Float32, f"{ns}/image_quality_raw",
+            lambda m: setattr(self, "_q_raw", float(m.data)), 10)
+
         # 정책 추론 시작/정지 요청. run_policy.py 가 --start-on topic 으로 이 토픽을 본다.
         # 로봇을 움직이는 명령이 아니라 **추론을 시작해도 된다는 허가**다 — 지령은 정책 쪽
         # --execute 와 접촉 조건이 따로 가른다. 래치해 두어 나중에 뜬 러너도 현재 요청을 받는다.
@@ -1309,6 +1322,11 @@ class TelemetryBridge(Node):
 
         if self._teleop_frame is not None:
             frame["teleopFrame"] = self._teleop_frame
+
+        # NaN 은 JSON 이 못 싣고 "측정 안 됨" 과 0 은 다르므로 **키를 빼서** 없음을 말한다.
+        for key, val in (("qualitySeg", self._q_seg), ("qualityRaw", self._q_raw)):
+            if val is not None and math.isfinite(val):
+                frame[key] = val
 
         # 모드 문자열과 **따로** 낸다. probingMode 는 지금 실제 속도 상한이 무엇인가
         # 이고, 이쪽은 접촉하면 그렇게 될 것인가다. 접근 중에 걸어 둔 상태를

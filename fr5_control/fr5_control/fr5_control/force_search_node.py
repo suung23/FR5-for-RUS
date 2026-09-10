@@ -11,7 +11,9 @@
 
 품질 신호
 --------
-``{ns}/image_quality`` (Float32) 를 받는다. 지금 이 토픽을 내는 것은 policy_learning 의
+``{ns}/image_quality_raw`` (Float32) 를 받는다. **Q_seg 가 아니다** — 힘 축은 Q_raw 이고
+(DESIGN_NOTES §333: "Q_raw 최대화하는 최소 F_n*"), Q_seg 는 분할 기반이라 분할이 아무것도
+못 내놓는 구간에서 힘을 고를 수 없다. 지금 이 토픽을 내는 것은 policy_learning 의
 ``run_policy.py`` 뿐이다 — 실시간 지각이 거기서만 돌기 때문이다. 값은 **Q_raw** 다.
 NaN 은 "측정 안 됨" 으로 그대로 넘긴다 (게이트가 닫힌 프레임). adapter 가 세기만 하고
 쓰지 않는다.
@@ -79,7 +81,7 @@ class ForceSearchNode(Node):
         self._param_client: Optional[rclpy.client.Client] = None
         self._n_q = 0
 
-        topic = str(g("quality_topic")) or f"{ns}/image_quality"
+        topic = str(g("quality_topic")) or f"{ns}/image_quality_raw"
         self.create_subscription(Float32, topic, self._on_quality, 10)
         self.create_subscription(Bool, "/diag/retreating", self._on_retreat, 10)
         self.f_bar_pub = self.create_publisher(Float32, f"{ns}/force_setpoint_bar", 10)

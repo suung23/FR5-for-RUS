@@ -3,14 +3,14 @@
 import numpy as np
 import pytest
 
-from rus_policy.episode import (AREA, COMPONENT, HAS_MASK, QUALITY, PlaceboBuffer, StartGate,
-                                Thresholds, judge, longest_run_s)
+from rus_policy.episode import (AREA, CENTROID_DX, COMPONENT, HAS_MASK, QUALITY, PlaceboBuffer,
+                                StartGate, Thresholds, judge, longest_run_s, randomize_direction)
 from rus_policy.perception import STATE_DIM
 
 
-def _state(area=0.0, comp=0.0, q=0.0, mask=1.0):
+def _state(area=0.0, comp=0.0, q=0.0, mask=1.0, dx=0.0):
     s = np.zeros(STATE_DIM, np.float32)
-    s[AREA], s[COMPONENT], s[QUALITY], s[HAS_MASK] = area, comp, q, mask
+    s[AREA], s[COMPONENT], s[QUALITY], s[HAS_MASK], s[CENTROID_DX] = area, comp, q, mask, dx
     return s
 
 
@@ -126,3 +126,57 @@ def test_placebo_drops_what_it_will_never_use():
 def test_placebo_rejects_a_non_positive_delay():
     with pytest.raises(ValueError):
         PlaceboBuffer(delay_s=0.0)
+
+
+# ---- 사전 등록 판정 (EVAL_PLAN_POLICY_RESCUE §4) --------------------------------
+
+def test_edge_views_are_rejected_by_the_centroid_criterion():
+    """면적·연결성분이 충분해도 가장자리에 걸친 뷰는 진단 가능 뷰가 아니다."""
+    thr = Thresholds(area_min=0.08, component_min=0.8, centroid_max=0.30, hold_s=1.0)
+    t = np.arange(0.0, 6.0, 0.5)
+    centred = np.stack([_state(area=0.2, comp=0.9, dx=0.05) for _ in t])
+    edged = np.stack([_state(area=0.2, comp=0.9, dx=0.45) for _ in t])
+    assert judge(t, centred, thr)["success"]
+    assert not judge(t, edged, thr)["success"]
+
+
+def test_centroid_criterion_is_symmetric():
+    thr = Thresholds(area_min=0.08, component_min=0.8, centroid_max=0.30, hold_s=1.0)
+    t = np.arange(0.0, 6.0, 0.5)
+    for dx in (-0.29, 0.29):
+        assert judge(t, np.stack([_state(area=0.2, comp=0.9, dx=dx) for _ in t]), thr)["success"]
+    for dx in (-0.31, 0.31):
+        assert not judge(t, np.stack([_state(area=0.2, comp=0.9, dx=dx) for _ in t]), thr)["success"]
+
+
+# ---- 위약: 같은 크기, 무작위 방향 (§5) -----------------------------------------
+
+def test_placebo_preserves_the_magnitudes_exactly():
+    """'같은 속도·같은 지속시간' 이 성립해야 '움직임의 양' 이 조건 사이에서 같다."""
+    rng = np.random.default_rng(0)
+    a = np.array([1.0, 2.0, 3.0, 0.4, -0.7, 1.1])
+    for _ in range(50):
+        b = randomize_direction(a, rng)
+        assert sorted(np.abs(b[3:6])) == pytest.approx(sorted(np.abs(a[3:6])))
+        assert np.linalg.norm(b[3:6]) == pytest.approx(np.linalg.norm(a[3:6]))
+
+
+def test_placebo_leaves_translation_alone():
+    """정책이 병진을 지령하지 않으므로 위약도 건드릴 것이 없다."""
+    rng = np.random.default_rng(0)
+    a = np.array([1.0, 2.0, 3.0, 0.4, -0.7, 1.1])
+    assert np.array_equal(randomize_direction(a, rng)[:3], a[:3])
+
+
+def test_placebo_actually_changes_direction():
+    rng = np.random.default_rng(0)
+    a = np.array([0.0, 0.0, 0.0, 0.4, -0.7, 1.1])
+    seen = {tuple(np.sign(randomize_direction(a, rng)[3:6])) for _ in range(200)}
+    assert len(seen) > 4                      # 부호 조합이 실제로 돌아다닌다
+
+
+def test_placebo_does_not_mutate_its_input():
+    rng = np.random.default_rng(0)
+    a = np.array([1.0, 2.0, 3.0, 0.4, -0.7, 1.1])
+    randomize_direction(a, rng)
+    assert np.array_equal(a, [1.0, 2.0, 3.0, 0.4, -0.7, 1.1])

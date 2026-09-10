@@ -57,7 +57,8 @@ from _common import setup_logging
 
 from rus_policy.bmode import BmodeConverter
 from rus_policy.dataset import OBS_VEC_DIM, _resize_frames
-from rus_policy.episode import CONDITIONS, PlaceboBuffer, StartGate, Thresholds, judge
+from rus_policy.episode import (CONDITIONS, PlaceboBuffer, StartGate, Thresholds, judge,
+                                randomize_direction)
 from rus_policy.model import ACTION_DIM
 from rus_policy.perception import STATE_DIM, apply_frame_transform, build_backend
 from rus_policy.train import load_policy
@@ -162,7 +163,12 @@ class PolicyRunner(Node):
         self.condition = args.condition
         self.gate = StartGate(area_max=args.gate_area_max, quality_min=args.gate_quality_min,
                               confirm_s=args.gate_confirm_s)
-        self.placebo = PlaceboBuffer(args.placebo_delay_s) if self.condition == "placebo" else None
+        # 사전 등록된 위약(EVAL_PLAN §5)은 "같은 속도·같은 지속시간의 무작위 회전" 이다.
+        # stale-obs 는 더 강한 통제지만 계획서에 없으므로 기본이 아니다.
+        self.placebo = (PlaceboBuffer(args.placebo_delay_s)
+                        if (self.condition == "placebo" and args.placebo_mode == "stale-obs")
+                        else None)
+        self.rng = np.random.default_rng(args.placebo_seed)
         self.t_start: Optional[float] = None      # 게이트가 열린 시각 = 에피소드 시작
         self.states: list = []                    # 판정에 쓸 상태 이력
         self.state_t: list = []
@@ -335,6 +341,10 @@ class PolicyRunner(Node):
         a = sel["a"][0, 0].cpu().numpy()                    # 첫 스텝 속도 (B,k,6) → (6,)
         net = sel["net"][0].cpu().numpy()
         qhat = float(sel["Q_hat"][0].mean())
+        if self.condition == "placebo" and self.placebo is None:
+            # 크기는 정책이 고른 그대로, 방향만 무의미하게. 크기를 다시 뽑으면 조건 사이에서
+            # "움직임의 양" 이 어긋나고, 그것이 이 대조군이 통제하려던 변수다.
+            a = randomize_direction(a, self.rng)
         if self.condition in ("hold", "expert"):
             # hold 는 바닥선, expert 는 사람이 지령한다. 둘 다 러너는 **기록만** 한다.
             self._stop()
@@ -369,6 +379,7 @@ class PolicyRunner(Node):
             if m:
                 thr = Thresholds(area_min=self.args.success_area_min,
                                  component_min=self.args.success_component_min,
+                                 centroid_max=self.args.success_centroid_max,
                                  hold_s=self.args.success_hold_s)
                 verdict = judge([self.state_t[i] for i in m],
                                 np.stack([self.states[i] for i in m]), thr)
@@ -389,7 +400,9 @@ class PolicyRunner(Node):
                      "confirm_s": self.args.gate_confirm_s, "held_s": self.gate.held_s},
             "thresholds": {"area_min": self.args.success_area_min,
                            "component_min": self.args.success_component_min,
+                           "centroid_max": self.args.success_centroid_max,
                            "hold_s": self.args.success_hold_s},
+            "placebo_mode": self.args.placebo_mode, "placebo_seed": self.args.placebo_seed,
             "verdict": verdict,
             "n_ticks": len(self.rows), "n_frames": self.n_img, "n_slow_perception": self.n_drop,
             "bmode": self.conv.describe() if self.conv else None,
@@ -417,13 +430,22 @@ def main() -> int:
                         "policy=학습된 정책 · expert=숙련자(러너는 기록만)")
     p.add_argument("--duration", type=float, default=0.0,
                    help="에피소드 길이 [s]. 0 이면 무제한 (예전 거동)")
+    p.add_argument("--placebo-mode", default="random-direction",
+                   choices=["random-direction", "stale-obs"],
+                   help="random-direction=사전 등록된 위약 (같은 크기, 무작위 방향) · "
+                        "stale-obs=지연 관측 (더 강한 통제이나 계획서 밖)")
+    p.add_argument("--placebo-seed", type=int, default=0, help="위약 방향 난수 — 세션을 재현한다")
     p.add_argument("--placebo-delay-s", type=float, default=30.0,
-                   help="위약이 쓰는 관측 지연 [s]. 풍선 변형의 시간 규모보다 길어야 한다")
+                   help="stale-obs 일 때의 관측 지연 [s]")
     p.add_argument("--gate-area-max", type=float, default=0.02, help="시작: 면적비 < 이 값")
     p.add_argument("--gate-quality-min", type=float, default=0.6, help="시작: Q_raw ≥ 이 값")
-    p.add_argument("--gate-confirm-s", type=float, default=1.0, help="시작 조건 확인 창 [s]")
+    p.add_argument("--gate-confirm-s", type=float, default=2.0,
+                   help="시작 조건 판정 창 [s]. 계획서 §3 은 10 s 정지 후 마지막 2 s 를 쓴다 — "
+                        "10 s 정지는 조작자의 절차이고 여기 값은 그 판정 창이다")
     p.add_argument("--success-area-min", type=float, default=0.08, help="성공: 면적비 ≥ (파일럿이 확정)")
     p.add_argument("--success-component-min", type=float, default=0.80, help="성공: 연결성분 ≥")
+    p.add_argument("--success-centroid-max", type=float, default=0.30,
+                   help="성공: |중심 − 0.5| ≤ (0.30 = 중앙 60 % 폭). 가장자리 뷰를 배제한다")
     p.add_argument("--success-hold-s", type=float, default=3.0, help="성공: 연속 유지 [s]")
     p.add_argument("--axes", default="rot", choices=["rot", "all"], help="rot=회전만 (기본), all=병진까지")
     p.add_argument("--execute", action="store_true", help="실제로 지령한다 (기본은 계산만)")

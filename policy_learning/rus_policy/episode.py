@@ -40,6 +40,7 @@ CONDITIONS = ("hold", "placebo", "policy", "expert")
 
 _IDX = {name: i for i, name in enumerate(STATE_FEATURE_NAMES)}
 AREA = _IDX["area_ratio"]
+CENTROID_DX = _IDX["centroid_dx"]      # 정규화 중심 − 0.5 → |dx| ≤ 0.30 이면 중앙 60 % 안
 COMPONENT = _IDX["largest_component_ratio"]
 QUALITY = _IDX["quality"]
 HAS_MASK = _IDX["has_mask"]
@@ -83,11 +84,13 @@ class StartGate:
 
 @dataclass
 class Thresholds:
-    """성공 판정. **파일럿이 확정할 값이다** — 여기 숫자는 자리표시자다."""
+    """진단 가능 뷰 (EVAL_PLAN_POLICY_RESCUE §4). **수치는 예비 촬영으로 고정**한다 —
+    결과를 보고 고치면 그 순간 사전 등록이 아니다."""
 
     area_min: float = 0.08          # 마스크 면적비 ≥ 8 %
-    component_min: float = 0.80     # 가장 큰 연결성분 ≥ 80 %
-    hold_s: float = 3.0             # 이 조건이 연속으로 유지돼야 한다
+    component_min: float = 0.80     # 가장 큰 연결성분 ≥ 80 % (조각난 오검출 배제)
+    centroid_max: float = 0.30      # |중심 − 0.5| ≤ 0.30 → 중앙 60 % 폭 (가장자리 뷰 배제)
+    hold_s: float = 3.0             # 셋을 **동시에** 연속 3 s
 
 
 def longest_run_s(t: Sequence[float], ok: Sequence[bool]) -> float:
@@ -117,7 +120,8 @@ def judge(t: Sequence[float], state: np.ndarray, thr: Thresholds) -> dict:
         raise ValueError(f"state 는 (N, {len(STATE_FEATURE_NAMES)}) 여야 한다: {state.shape}")
     good = ((state[:, HAS_MASK] > 0.5)
             & (state[:, AREA] >= thr.area_min)
-            & (state[:, COMPONENT] >= thr.component_min))
+            & (state[:, COMPONENT] >= thr.component_min)
+            & (np.abs(state[:, CENTROID_DX]) <= thr.centroid_max))
     best = longest_run_s(t, good)
     q = state[:, QUALITY]
     finite = np.isfinite(q)
@@ -139,6 +143,22 @@ def _tail_mean(t: Sequence[float], v: Sequence[float], window_s: float) -> float
         return float("nan")
     m = (t >= t[-1] - window_s) & np.isfinite(v)
     return float(v[m].mean()) if m.any() else float("nan")
+
+
+def randomize_direction(action: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    """회전 성분의 **크기는 그대로, 방향만 무의미하게** (EVAL_PLAN §5).
+
+    축을 섞고 부호를 무작위로 뒤집는다 — 크기의 다중집합이 정확히 보존되므로 "같은 속도·
+    같은 지속시간" 이 성립하고, 정책이 고른 것은 방향뿐이라는 것이 통제된다. 병진은 건드리지
+    않는다 (정책이 애초에 지령하지 않는다, 런북 §4).
+
+    스케일을 다시 뽑거나 정규분포에서 새로 그리지 않는다. 그러면 위약의 **속도 분포가 달라져**
+    "움직임의 양" 이 조건 사이에서 어긋난다 — 그것이 이 대조군이 통제하려던 바로 그 변수다.
+    """
+    out = np.array(action, dtype=float, copy=True)
+    rot = out[3:6]
+    out[3:6] = rng.permutation(rot) * rng.choice([-1.0, 1.0], size=rot.shape)
+    return out
 
 
 class PlaceboBuffer:

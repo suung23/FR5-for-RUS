@@ -107,6 +107,9 @@ def run_episode(args, ep: dict, ep_dir: Path) -> dict:
            "--gate-quality-min", str(args.gate_quality_min),
            "--success-area-min", str(args.success_area_min),
            "--success-component-min", str(args.success_component_min),
+           "--success-centroid-max", str(args.success_centroid_max),
+           "--placebo-mode", args.placebo_mode,
+           "--placebo-seed", str(args.seed * 1000 + ep["index"]),
            "--success-hold-s", str(args.success_hold_s),
            "--placebo-delay-s", str(args.placebo_delay_s)]
     if args.execute and ep["condition"] in ("policy", "placebo"):
@@ -134,6 +137,9 @@ def main() -> int:
     p.add_argument("--gate-quality-min", type=float, default=0.6)
     p.add_argument("--success-area-min", type=float, default=0.08)
     p.add_argument("--success-component-min", type=float, default=0.80)
+    p.add_argument("--success-centroid-max", type=float, default=0.30)
+    p.add_argument("--placebo-mode", default="random-direction",
+                   choices=["random-direction", "stale-obs"])
     p.add_argument("--success-hold-s", type=float, default=3.0)
     p.add_argument("--placebo-delay-s", type=float, default=30.0)
     p.add_argument("extra", nargs="*", help="run_policy.py 에 그대로 넘길 인자")

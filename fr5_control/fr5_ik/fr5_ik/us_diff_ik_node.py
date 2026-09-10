@@ -754,24 +754,32 @@ class UsDiffIkNode(Node):
             self._publish_mode()
 
     def _enter_contact_probing(self) -> None:
-        """접촉 프로빙으로 넘어간다. 상한을 갈아 끼우고 알린다."""
+        """접촉 régime 으로 넘어간다. 상한을 갈아 끼우고 알린다.
+
+        **무엇이 열었는지 함께 말한다.** 2026-09-11 부터 기본 경로는 정책 요청이고 힘 판정은
+        꺼져 있다 — 그런데도 "문턱 2 N 을 넘었다" 고 찍으면 로그가 거짓말을 한다.
+        """
+        by_policy = self.mode_switch.policy_requested
         self.max_linear = self.contact_linear
         self.max_angular = self.contact_angular
         self.get_logger().warn(
-            f"접촉 프로빙 전환 — F {self._control_force():.2f} N "
-            f"({self.contact_force_mode}, 문턱 {self.mode_switch.enter_force_n:.1f} N; "
-            f"F_n {self.normal_force:+.2f} · ‖F‖ {self.contact_force_mag:.2f}). "
-            f"속도 상한 {self.approach_linear * 1000:.0f} → "
+            (f"정책 추론 régime 진입 — F {self._control_force():.2f} N "
+             f"(‖F‖ {self.contact_force_mag:.2f}). "
+             if by_policy else
+             f"접촉 프로빙 전환 — F {self._control_force():.2f} N "
+             f"({self.contact_force_mode}, 문턱 {self.mode_switch.enter_force_n:.1f} N; "
+             f"F_n {self.normal_force:+.2f} · ‖F‖ {self.contact_force_mag:.2f}). ")
+            + f"속도 상한 {self.approach_linear * 1000:.0f} → "
             f"{self.contact_linear * 1000:.0f} mm/s · "
             f"{self.approach_angular:.2f} → {self.contact_angular:.2f} rad/s. "
             f"힘 유지 시작 — 목표 {self.regulator.target_force_n:.1f} ± "
             f"{self.regulator.deadband_n:.1f} N."
-            + (
-                f" {self.mode_switch.release_force_n:.1f} N 아래로 "
+            + (" 정책이 놓을 때까지 유지된다 — 힘으로는 되돌아가지 않는다."
+               if by_policy else
+               (f" {self.mode_switch.release_force_n:.1f} N 아래로 "
                 f"{self.mode_switch.release_confirm_s:.1f} s 지속되면 접근으로 되돌아간다."
                 if self.mode_switch.reversible
-                else " 되돌아가지 않는다 — 접근 속도가 다시 필요하면 세션을 새로 시작하라."
-            )
+                else " 되돌아가지 않는다 — 접근 속도가 다시 필요하면 세션을 새로 시작하라."))
         )
         self._publish_mode()
 
@@ -789,10 +797,12 @@ class UsDiffIkNode(Node):
         self.max_angular = self.approach_angular
         self.regulator_reason = ""
         self.get_logger().warn(
-            f"접근 전환 — F {self._control_force():.2f} N 이 "
-            f"{self.mode_switch.release_force_n:.1f} N 아래로 "
-            f"{self.mode_switch.release_confirm_s:.1f} s 지속됐다. "
-            f"속도 상한 {self.contact_linear * 1000:.0f} → "
+            ("정책 추론 régime 이탈 — 정책이 놓았다. "
+             if not self.mode_switch.in_contact_probing and not self.mode_switch.force_trigger_enabled else
+             f"접근 전환 — F {self._control_force():.2f} N 이 "
+             f"{self.mode_switch.release_force_n:.1f} N 아래로 "
+             f"{self.mode_switch.release_confirm_s:.1f} s 지속됐다. ")
+            + f"속도 상한 {self.contact_linear * 1000:.0f} → "
             f"{self.approach_linear * 1000:.0f} mm/s · "
             f"{self.contact_angular:.2f} → {self.approach_angular:.2f} rad/s. "
             f"힘 유지 해제 — z 축이 조작자에게 돌아갔다."

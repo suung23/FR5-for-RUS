@@ -184,24 +184,24 @@ python3 scripts/diag_quality.py runs/qres2/last.pt --dataset /data4/seong/policy
 
 조작자의 자리는 콘솔이다. 터미널은 에피소드 사이 Enter 말고는 볼 일이 없다.
 
-### 속도 상한과 정책 인계는 **다른 것**이다
+### 모드는 하나다 — 정책 추론 모드
 
-힘 트리거(`teleop.contact_probing_force_trigger`)를 켜 두는 것이 실사용에 맞다.
+접촉력으로 régime 을 가르지 않는다 (`contact_probing_force_trigger: false`).
 
-* `in_contact_probing` 은 **힘 판정 OR 정책 요청** 이다. 트리거를 켜도 정책 진입에는
-  영향이 없다 — 힘은 속도 상한만 맡고 버튼은 정책만 맡는다.
-* 끄면 `freespace:=false` 로 기동해야 하는데, 그러면 **접근 단계도 10 mm/s** 라 자세를
-  잡는 데만 한참 걸린다 (probe.yaml 은 접근·접촉 상한이 둘 다 10 mm/s 이고 150 mm/s 는
-  freespace 오버라이드에서만 나온다).
-* 켜면 계획서 §3 의 "조작자가 teleop 으로 접촉을 만든다(접촉 프로빙 진입, 힘 유지 3.0 N)"
-  가 그대로 성립한다.
+| 상태 | 속도 상한 | z | 조작자 축 |
+|---|---|---|---|
+| **기본 (teleop)** | freespace (빠름) | 조작자 | 여섯 축 |
+| **정책 추론** (버튼) | 접촉 상한 10 mm/s | **로봇 (힘 유지)** | 0 |
 
-```bash
-# 재빌드 없이 지금 바꾼다
-ros2 param set /us_diff_ik_node teleop.contact_probing_force_trigger true
-```
+힘은 régime 을 여는 것이 아니라 **그 안의 안전 규약**이다 — `safety.max_contact_force_n`
+5 N 초과 시 강제 후퇴, 그리고 régime 안에서는 Q_raw 극값 탐색이 설정값을 옮긴다 (§8.4).
 
-굳히려면 `probe.yaml` 의 같은 키를 `true` 로.
+> ⚠️ **버튼을 누르기 전 teleop 구간에는 접촉 시 자동 감속이 없다.** 5 N 후퇴가 유일한
+> 보호다. 예전에는 ‖F‖ 2 N 에서 자동으로 접촉 상한으로 내려갔다. 이것은 의도된 설계이며
+> (조작자 결정, 2026-09-11), `contact_probing_force_trigger: true` 로 되돌릴 수 있다.
+> 문턱 값들을 지우지 않고 남겨 둔 이유가 이것이다.
+
+`freespace` 는 **기본값(true)으로 둔다** — 기본 상태가 teleop 접근이므로 빠른 편이 맞다.
 
 ### 기동
 

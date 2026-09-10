@@ -628,8 +628,16 @@
       # 문턱 값들은 지우지 않는다: 이 한 줄을 true 로 되돌리면 예전 거동 그대로다.
       # 속도 상한은 이 전환에 걸려 있지 않다 — approach 와 contact 가 둘 다
       # 10 mm/s · 0.2 rad/s 로 같다 (위 safety 절). 150 mm/s 는 freespace 오버라이드뿐이다.
-      # ⚠️ 이걸 끄면 launch 의 freespace:=true (기본값!) 에서 접촉 순간 10 mm/s 로
-      # 내려 주던 안전망이 사라진다. 정책 운용은 **freespace:=false 로 기동**할 것.
+      # 🔁 2026-09-11: **모드는 하나다 — 정책 추론 모드.** 접촉력으로 régime 을 가르지
+      # 않는다. 기본 상태(teleop)는 freespace 상한이고, 콘솔의 policy.enable 버튼이
+      # 접촉 상한 + 힘 유지로 들어가는 유일한 문이다. 힘은 régime 을 여는 것이 아니라
+      # **그 안의 안전 규약**이다: safety.max_contact_force_n(5.0) 초과 시 강제 후퇴.
+      #
+      # ⚠️ 그래서 버튼을 누르기 전 teleop 구간에는 접촉 시 자동 감속이 없다. 5 N 후퇴가
+      # 유일한 보호다. 이것은 의도된 설계이지 빠뜨린 것이 아니다 (조작자 결정, 2026-09-11).
+      #
+      # true 로 두면 예전 거동: ‖F‖ 2 N 에서 자동으로 접촉 상한·힘 유지로 넘어간다.
+      # 문턱 값들을 지우지 않고 남겨 둔 이유가 이것이다.
       contact_probing_force_trigger: false
       contact_probing_force_n: 2.0
 

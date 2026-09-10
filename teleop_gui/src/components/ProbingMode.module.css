@@ -1,0 +1,58 @@
+.body {
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+/* Two blocks rather than a switch: arming and disarming are different acts with
+   different consequences, and a toggle hides which one the next click performs. */
+.choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  padding: var(--pad);
+  background: var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+
+.choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 6px 8px;
+  text-transform: none;
+  letter-spacing: 0;
+  text-align: left;
+  border: 1px solid var(--rule);
+}
+
+.choiceLabel {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.choiceNote {
+  font-size: 9.5px;
+  font-weight: 400;
+  color: var(--ink);
+}
+
+/* One filled block per region means "this is the state you are in" — and the
+   fill follows the mode that came back, not the button that was pressed. */
+.applied {
+  background: var(--ink);
+  color: var(--white);
+}
+
+.applied .choiceNote {
+  color: var(--white);
+}
+
+.state {
+  margin: 0;
+  padding: var(--pad);
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--ink);
+}

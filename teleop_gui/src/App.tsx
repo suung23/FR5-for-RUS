@@ -7,6 +7,7 @@ import { ModeTimeline } from './components/ModeTimeline';
 import { NavRail, viewFromHash, type ConsoleView } from './components/NavRail';
 import { OperatorFrame } from './components/OperatorFrame';
 import { ProbingNotice } from './components/ProbingNotice';
+import { ProbingMode } from './components/ProbingMode';
 import { SafetyPanel } from './components/SafetyPanel';
 import { SensorCalibration } from './components/SensorCalibration';
 import { StatusColumn } from './components/StatusColumn';
@@ -185,7 +186,16 @@ export function App() {
                   <JointRates telemetry={telemetry} available={available} />
                 </>
               ) : null}
-              {view === 'contact' ? <ModeTimeline history={history} contact={contact} /> : null}
+              {view === 'contact' ? (
+                <>
+                  <ModeTimeline history={history} contact={contact} />
+                  <ProbingMode
+                    telemetry={telemetry}
+                    available={available}
+                    onCommand={sendCommand}
+                  />
+                </>
+              ) : null}
               {view === 'calibration' ? (
               <SensorCalibration
                 telemetry={telemetry}

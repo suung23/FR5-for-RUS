@@ -64,12 +64,29 @@ from __future__ import annotations
 import math
 from typing import Dict, List, Optional
 
-__all__ = ["ForceSetpointAdapter", "quality_degraded"]
+__all__ = ["ForceSetpointAdapter", "SetpointPusher", "quality_degraded"]
 
 
 def _clamp(x: float, lo: float, hi: float) -> float:
     return lo if x < lo else hi if x > hi else x
 
+
+class SetpointPusher:
+    """같은 값을 반복해 밀지 않는다. 파라미터 set 은 조절기를 다시 만드는 일이라 싸지 않다."""
+
+    def __init__(self, eps_n: float = 0.01) -> None:
+        self.eps = float(eps_n)
+        self.last: Optional[float] = None
+
+    def should_push(self, setpoint: float) -> bool:
+        if not math.isfinite(setpoint):
+            return False
+        if self.last is None:
+            return True
+        return abs(setpoint - self.last) > self.eps
+
+    def mark(self, setpoint: float) -> None:
+        self.last = float(setpoint)
 
 class ForceSetpointAdapter:
     """구형파 디더 극값 탐색으로 힘 설정값을 적응시킨다.

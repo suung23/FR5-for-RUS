@@ -48,7 +48,7 @@ try:
     from rclpy.node import Node
     from rclpy.qos import qos_profile_sensor_data
     from sensor_msgs.msg import Image
-    from std_msgs.msg import Bool, String
+    from std_msgs.msg import Bool, Float32, String
 except ImportError:                                   # ROS 없이 --help 는 되게 한다
     rclpy = None
     Node = object
@@ -128,6 +128,10 @@ class PolicyRunner(Node):
         # `policy_enable` 을 켜도 아무 일이 없다 (2026-09-10 확인).
         ns = args.robot_namespace
         self.twist_pub = self.create_publisher(Twist, f"{ns}/desired_twist", 10)
+        # 실시간 지각이 도는 곳이 여기뿐이라 Q_raw 의 유일한 출처다. force_search 노드가
+        # 이걸 받아 힘 설정값을 품질 경사 방향으로 옮긴다 (DESIGN_NOTES §8.4).
+        # 지령과 무관하게 항상 낸다 — 정책이 멈춰 있어도 힘 탐색은 품질을 봐야 한다.
+        self.quality_pub = self.create_publisher(Float32, f"{ns}/image_quality", 10)
         self.create_subscription(Pose, f"{ns}/ee_wrt_base", self._on_pose, 10)
         self.create_subscription(WrenchStamped, f"{ns}/wrench_px6d", self._on_wrench, 10)
         self.create_subscription(Bool, args.enable_topic, self._on_enable, 10)
@@ -236,6 +240,7 @@ class PolicyRunner(Node):
         if dt_ms > 1000.0 / max(self.args.min_perception_fps, 1e-6):
             self.n_drop += 1
         self.buf.append((time.time(), bm, state, q))
+        self.quality_pub.publish(Float32(data=float(q)))     # NaN 도 그대로 — "측정 안 됨"
         self.n_img += 1
         if self.n_img % 50 == 0:
             self.get_logger().info(f"프레임 {self.n_img} 장, 지각 {dt_ms:.0f} ms/장, 느림 {self.n_drop} 회")

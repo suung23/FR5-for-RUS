@@ -33,6 +33,8 @@ setup(
         'console_scripts': [
             # --- 초음파 (RUS) ---
             'us_servo = fr5_control.us_servo_node:main',
+            # 힘 설정값을 영상 품질의 경사 방향으로 옮기는 감독 (§8.4). 기본은 관찰만.
+            'force_search = fr5_control.force_search_node:main',
             # PX6D F/T 센서 시리얼 점검. 제어 경로가 아니라 배선·축 확인용이다.
             'px6d_probe = fr5_control.px6d_probe:main',
             # 같은 시리얼 경로를 실시간 그래프로. 축 배정 실측에 쓴다.

@@ -44,6 +44,27 @@ VIDEO_PORT, CONTROL_PORT = 5002, 5003
 CONN_NAME = "us-probe"
 
 
+
+#: NetworkManager 는 프로필 생성·활성에 polkit 인증을 요구한다
+#: (`settings.modify.own`, `network-control` 이 `auth`). 그래픽 좌석에 로그인한
+#: 세션은 에이전트가 있어 그냥 통과하지만, SSH·tty 세션에는 에이전트가 없어 거부된다.
+#: 이 실패를 "비밀번호가 틀렸다" 로 보고하면 엉뚱한 곳을 찾게 된다.
+PRIVILEGE_HINT = (
+    "  → 이것은 비밀번호 문제가 아니라 **권한** 문제다. NetworkManager 가 polkit 인증을\n"
+    "    요구하는데 이 세션(tty/SSH)에는 인증 에이전트가 없다.\n"
+    "    이 PC 화면에 로그인한 터미널에서 실행하거나, sudo 로 감싸라:\n"
+    "      sudo -E python3 imu_bench/host/probe_wifi_linux.py\n"
+    "    권한 상태는 `nmcli general permissions` 로 볼 수 있다 (auth = 인증 필요)."
+)
+
+
+def _is_privilege_error(text: str) -> bool:
+    """polkit 거부인가. nmcli 는 로케일에 따라 다른 문구를 낸다."""
+    low = (text or "").lower()
+    return any(k in low for k in
+               ("insufficient privileges", "not authorized", "권한", "authorization"))
+
+
 def _nmcli(*args: str, check: bool = False, timeout: float = 60.0) -> tuple[int, str]:
     """nmcli 를 돌리고 (반환코드, stdout+stderr) 를 준다."""
     proc = subprocess.run(["nmcli", *args], capture_output=True, text=True, timeout=timeout)
@@ -99,10 +120,14 @@ def connect(iface: str, ssid: str, password: str, timeout: float = 30.0) -> bool
     )
     if rc != 0:
         print(f"  프로필 생성 실패: {out.strip()}")
+        if _is_privilege_error(out):
+            print(PRIVILEGE_HINT)
         return False
     rc, out = _nmcli("connection", "up", CONN_NAME, "ifname", iface, timeout=timeout)
     if rc != 0:
         print(f"  접속 실패: {out.strip().splitlines()[-1] if out.strip() else rc}")
+        if _is_privilege_error(out):
+            print(PRIVILEGE_HINT)
         _nmcli("connection", "delete", CONN_NAME)
         return False
     return True

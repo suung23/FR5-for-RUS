@@ -9,11 +9,13 @@ import type {
   RobotTelemetry,
   Transport,
   TransportSink,
+  UltrasoundFrame,
   WrenchSample,
 } from './types';
 
 export interface AdapterListeners {
   onTelemetry(frame: RobotTelemetry): void;
+  onUltrasound(frame: UltrasoundFrame): void;
   onWrench(sample: WrenchSample): void;
   onStatus(status: LinkStatus): void;
   onAck(ack: CommandAck): void;
@@ -67,6 +69,7 @@ export class RobotTelemetryAdapter {
     if (!this.transport) return;
     const sink: TransportSink = {
       onTelemetry: (frame) => this.listeners.onTelemetry(frame),
+      onUltrasound: (frame) => this.listeners.onUltrasound(frame),
       onWrench: (sample) => this.listeners.onWrench(sample),
       onStatus: (patch) => this.patchStatus(patch),
       onAck: (ack) => this.listeners.onAck(ack),

@@ -1,13 +1,15 @@
 import type { Transport, TransportSink } from '../types';
-import { parseAck, parseTelemetry, parseWrench } from './parse';
+import { parseAck, parseTelemetry, parseUltrasound, parseWrench } from './parse';
 
-type FrameKind = 'telemetry' | 'wrench' | 'unknown';
+type FrameKind = 'telemetry' | 'wrench' | 'unknown' | 'ultrasound';
 
 /** Declared frame type, or an inference from the payload's shape. */
 function frameKind(payload: unknown): FrameKind {
   if (payload && typeof payload === 'object') {
     const declared = (payload as Record<string, unknown>).type;
-    if (declared === 'telemetry' || declared === 'wrench') return declared;
+    if (declared === 'telemetry' || declared === 'wrench' || declared === 'ultrasound') {
+      return declared;
+    }
     if ('force' in (payload as object) && !('jointPositions' in (payload as object))) {
       return 'wrench';
     }
@@ -103,6 +105,16 @@ export class WebSocketTransport implements Transport {
       }
 
       const kind = frameKind(payload);
+
+      // Pictures carry no robot state, so they must not fall through to the
+      // parsers below — `parseTelemetry` accepts almost anything and would
+      // publish a frame with every field absent, wiping the joint state.
+      if (kind === 'ultrasound') {
+        const picture = parseUltrasound(payload, now);
+        if (picture) sink.onUltrasound(picture);
+        sink.onStatus({ lastFrameAt: now });
+        return;
+      }
 
       if (kind !== 'telemetry') {
         const wrench = parseWrench(payload, now);

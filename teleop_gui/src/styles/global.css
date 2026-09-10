@@ -23,31 +23,42 @@
  */
 
 :root {
-  color-scheme: light;
+  color-scheme: dark;
 
   /* Pale green surface → muted green divider → medium green selection →
-     deep green active control. The interface stays a bright clinical white;
+     deep green active control. The interface stays a single dark ground;
      green carries hierarchy, never mood, and nothing is coloured that is not
      also stated in words or numbers somewhere on the same panel. */
-  /* Every glyph on this screen is black. Colour is carried by rules, marks,
+  /* Every glyph on this screen is the same ink. Colour is carried by rules, marks,
      fills and tag borders — never by the text itself. An operator reading a
      value under a bright lamp, or on a panel someone has turned the contrast
      down on, should never have a reading that is harder to see than its
      neighbour because of what it means. */
-  --ink: #000000;
-  --white: #ffffff;
-  --panel-pale: #f1f8f2;
-  --sidebar: #f6fbf7;
-  --nav-selected: #d9ecdc;
-  --rule: #b9d0be;
-  --accent: #4b8b5a;
-  --green: #17683a;
-  --critical: #8b1e1e;
+  /* Dark console (2026-09-10). The *structure* of the original palette is kept
+     and only its ground is moved: one ink for every glyph, hierarchy carried by
+     rules and fills, one alarm colour, and the green and blue ramps matched
+     step for step in contrast so a mode change moves hue and nothing else.
+
+     `--white` keeps its name though it is now the darkest surface. Renaming it
+     would touch every stylesheet in the app for no behavioural gain; read it as
+     "the ground", which is what every rule already uses it for. */
+  --ink: #e9ede9;
+  --white: #0f1210;
+  --panel-pale: #171d18;
+  --sidebar: #131813;
+  --nav-selected: #26382b;
+  --rule: #35493b;
+  --accent: #74b184;
+  --green: #93d1a4;
+  /* The alarm stays the one colour that means something is wrong, and it has to
+     survive the darker ground — the deep red of the light console disappears
+     against it, so the same hue is lifted rather than replaced. */
+  --critical: #ff6f6f;
 
   /* Kept as a name so the intent of a rule stays readable, but it is black
      too. De-emphasis is done with size and weight, which survive a bad
      screen; a grey does not. */
-  --ink-soft: #000000;
+  --ink-soft: #e9ede9;
 
   /* Density. An operator glances at this while looking at the patient, so rows
      are tight and type is small but never below legibility. */
@@ -86,12 +97,12 @@
    were, because those two are what the operator reads when something is wrong,
    and the mode they are in must not change how a fault looks. */
 :root[data-probing='on'] {
-  --panel-pale: #eef4fc;
-  --sidebar: #f4f8fd;
-  --nav-selected: #d5e4f6;
-  --rule: #b2c8e5;
-  --accent: #3f77b0;
-  --green: #144a82;
+  --panel-pale: #161c24;
+  --sidebar: #121821;
+  --nav-selected: #243449;
+  --rule: #35485e;
+  --accent: #74a0d1;
+  --green: #93b9e6;
 }
 
 * {

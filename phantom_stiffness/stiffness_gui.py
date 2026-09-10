@@ -9,6 +9,10 @@
     python3 phantom_stiffness/stiffness_gui.py --label phantom_b --no-us      # 힘만
     python3 phantom_stiffness/stiffness_gui.py --us-host 192.168.1.1 --probe c10ur
 
+초음파를 쓰면 **GUI 가 프로브 AP 접속까지 한다** (동글 자동 선택, 인터넷은 내장 Wi-Fi 가
+계속 쥔다). 이미 붙여 두었으면 손대지 않는다 — 프로브는 클라이언트를 하나만 받는다.
+따로 붙이려면 `--no-connect-probe` 와 `imu_bench/host/probe_wifi_linux.py`.
+
 세 입력은 서로 독립이다 — **하나가 없어도 나머지는 돈다.** 프로브 전원이 꺼져 있으면
 초음파 패널만 비고, 제어 스택이 없으면 깊이를 손으로 넣는다 (`[` / `]`).
 
@@ -43,11 +47,38 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-from sources import Px6dReader, UsReader, PoseReader          # noqa: E402
+from sources import (Px6dReader, UsReader, PoseReader, RpcPoseReader,   # noqa: E402
+                     RosWrenchReader)
 from stiffness import StiffnessPoint, StiffnessRun            # noqa: E402
 from korean_font import use_korean_font                        # noqa: E402
 
 import matplotlib                                              # noqa: E402
+
+
+def _ensure_display() -> str:
+    """창을 띄울 화면을 찾는다. 없으면 이 PC 의 좌석(seat) 을 빌린다.
+
+    SSH 나 편집기 터미널에는 ``DISPLAY`` 가 없다. 그대로 두면 matplotlib 이
+    ``headless`` 로 판정해 Tk 백엔드를 못 올리고, 창을 만드는 순간 죽는다
+    (2026-09-10 실제로 core dump 로 나갔다). 저장소의 `teleop_gui/scripts/
+    run-on-console.sh` 가 Electron 에 하는 일과 같은 것을 여기서 한다 —
+    좌석의 X 소켓과 인증 파일이 있으면 그것을 쓴다. 창은 이 PC 모니터에 뜬다.
+
+    Returns:
+        진단용 한 줄. 화면을 못 찾았으면 빈 문자열.
+    """
+    if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
+        return ""
+    for display in (":1", ":0"):
+        if not os.path.exists(f"/tmp/.X11-unix/X{display[1:]}"):
+            continue
+        os.environ["DISPLAY"] = display
+        if not os.environ.get("XAUTHORITY"):
+            xauth = f"/run/user/{os.getuid()}/gdm/Xauthority"
+            if os.access(xauth, os.R_OK):
+                os.environ["XAUTHORITY"] = xauth
+        return f"DISPLAY 가 없어 좌석 {display} 을 쓴다 — 창은 이 PC 모니터에 뜬다"
+    return ""
 
 
 def _pick_backend() -> str:
@@ -60,6 +91,14 @@ def _pick_backend() -> str:
     forced = os.environ.get("MPLBACKEND")
     if forced:
         return forced
+    note = _ensure_display()
+    if note:
+        print(note, file=sys.stderr)
+    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        print("화면을 찾지 못했다 — 창 없이 돈다. 이 PC 모니터에 띄우려면:\n"
+              "  DISPLAY=:1 XAUTHORITY=/run/user/$(id -u)/gdm/Xauthority python3 ...",
+              file=sys.stderr)
+        return "Agg"
     for backend, module in (("QtAgg", "PyQt6"), ("TkAgg", "tkinter")):
         try:
             __import__(module)
@@ -77,18 +116,77 @@ from matplotlib.gridspec import GridSpec                       # noqa: E402
 AXIS_NAMES = ("Fx", "Fy", "Fz", "Mx", "My", "Mz")
 
 
+def ensure_probe_link(host: str, iface: str | None = None,
+                      ssid: str | None = None, password: str | None = None) -> tuple[bool, str]:
+    """프로브 AP 에 붙어 있는지 보고, 아니면 붙인다.
+
+    접속 로직은 `imu_bench/host/probe_wifi_linux.py` 를 그대로 쓴다 — 같은 일을 하는
+    코드가 두 벌 생기면 언젠가 갈라지고, 그때 어느 쪽이 실제로 쓰인 경로인지 알 수 없다.
+
+    **이미 닿으면 손대지 않는다.** 프로브는 클라이언트를 하나만 받고, 멀쩡한 링크를
+    다시 만들면 한동안 접속을 거부한다.
+
+    Returns:
+        ``(붙었는가, 사람이 읽을 한 줄)``.
+    """
+    try:
+        import probe_wifi_linux as pw
+    except ImportError as exc:
+        return False, f"probe_wifi_linux 를 못 불러왔다: {exc}"
+
+    if pw.ping(host):
+        return True, f"AP 이미 연결됨 ({host})"
+
+    ifaces = pw.wifi_interfaces()
+    if not ifaces:
+        return False, "무선 인터페이스가 없다 — 동글이 꽂혀 있는지 확인하십시오"
+    default_iface = pw.default_route_iface()
+    if iface is None:
+        # 기본 경로가 걸린 인터페이스는 피한다. 프로브 AP 에는 인터넷이 없다.
+        candidates = [n for n in ifaces if n != default_iface]
+        if not candidates:
+            return False, f"동글을 못 찾았다 (무선 {ifaces}, 기본 경로도 여기 있다)"
+        iface = candidates[0]
+
+    if ssid is None:
+        hits = pw.scan(iface)
+        if not hits:
+            return False, ("프로브 AP('US-…') 가 스캔에 없다 — "
+                           "배터리 전원을 켜고 USB 는 뽑은 상태인지 확인하십시오")
+        ssid = hits[0]
+
+    for pwd in ([password] if password else list(pw.CANDIDATE_PASSWORDS)):
+        if pw.connect(iface, ssid, pwd):
+            time.sleep(2.0)
+            ip, gw = pw.iface_ipv4(iface)
+            target = gw or host
+            for _ in range(5):
+                if pw.ping(target, iface):
+                    return True, f"AP {ssid} 연결됨 · {iface} {ip} → 프로브 {target}"
+                time.sleep(2.0)
+            return False, f"AP {ssid} 는 붙었으나 {target} 에 ping 이 안 된다"
+    return False, (f"AP {ssid} 접속 실패 — 비밀번호가 다르거나 "
+                   "다른 클라이언트(윈도우 뷰어)가 점유 중이다")
+
+
 class StiffnessApp:
     """창 하나 — 초음파, 힘 시계열, 강성 곡선, 상태줄."""
 
     def __init__(self, args) -> None:
         self.args = args
-        self.force = Px6dReader(args.force_port, rate_hz=args.force_rate,
-                                history_s=max(30.0, args.settle * 4))
+        hist = max(30.0, args.settle * 4)
+        # teleop 중에는 telemetry_bridge 가 /dev/ttyACM0 을 쥐고 있어 같은 포트를 두 번
+        # 열 수 없다. 그때는 스택이 내는 보상된 렌치를 구독한다.
+        if args.force_ros:
+            self.force = RosWrenchReader(args.force_ros, history_s=hist)
+        else:
+            self.force = Px6dReader(args.force_port, rate_hz=args.force_rate, history_s=hist)
         self.us = None
         self.pose = None
         self.manual_depth_mm = 0.0
         self.phase = "load"
         self.saved_path: str | None = None
+        self.link_note: str | None = None
         self.message = ""
         self.message_until = 0.0
 
@@ -99,11 +197,14 @@ class StiffnessApp:
 
         self.run = StiffnessRun(args.label, args.out_dir, meta={
             "purpose": "phantom stiffness by stepwise indentation (PX6D)",
-            "force": {"port": args.force_port, "rate_hz": args.force_rate,
+            "force": {"source": f"ros:{args.force_ros}" if args.force_ros else f"serial:{args.force_port}",
+                      "compensated": bool(args.force_ros),
+                      "rate_hz": args.force_rate,
                       "axis": AXIS_NAMES[args.force_axis], "sign": args.force_sign,
                       "settle_s": args.settle,
                       "axis_caveat": "PX6D AXIS_ORDER 는 매뉴얼 §5.3/§5.4 불일치로 잠정값이다"},
-            "depth": {"source": "ros_fk" if not args.no_pose else "manual",
+            "depth": {"source": ("manual" if args.no_pose else
+                                 (f"fr5_rpc:{args.pose_rpc}" if args.pose_rpc else "ros_fk")),
                       "convention": "probe z axis projection, positive = into tissue",
                       "manual_step_mm": args.manual_step},
         })
@@ -256,25 +357,39 @@ class StiffnessApp:
         use_korean_font()
         self.fig = plt.figure(figsize=(15.5, 8.6))
         self.fig.canvas.manager.set_window_title(f"팬텀 강성 · 힘/초음파 모니터 — {self.args.label}")
-        gs = GridSpec(2, 2, figure=self.fig, width_ratios=[1.15, 1.0],
-                      left=0.045, right=0.985, top=0.94, bottom=0.10, wspace=0.20, hspace=0.30)
-
-        self.ax_us = self.fig.add_subplot(gs[:, 0])
-        self.ax_us.set_title("초음파 B-mode (candidate 부채꼴)")
-        self.ax_us.set_xticks([]); self.ax_us.set_yticks([])
-        self.im = self.ax_us.imshow(np.zeros((512, 591), np.uint8), cmap="gray", vmin=0, vmax=255)
-        self.us_note = self.ax_us.text(0.5, 0.5, "초음파 없음", transform=self.ax_us.transAxes,
-                                       ha="center", va="center", color="0.6", fontsize=13)
-
-        self.ax_force = self.fig.add_subplot(gs[0, 1])
+        # 초음파가 없으면 그 패널을 아예 만들지 않는다. 빈 검은 칸이 창의 절반을
+        # 차지하면 정작 봐야 할 힘·강성 곡선이 좁아진다 (3D 프린팅 프로브처럼
+        # 영상이 나올 수 없는 구성에서 늘 그렇다).
+        if self.us is None:
+            gs = GridSpec(1, 2, figure=self.fig, width_ratios=[1.0, 1.0],
+                          left=0.055, right=0.985, top=0.92, bottom=0.13, wspace=0.20)
+            self.ax_us = None
+            self.im = self.us_note = None
+            self.ax_force = self.fig.add_subplot(gs[0, 0])
+            self.ax_k_pos = gs[0, 1]
+        else:
+            gs = GridSpec(2, 2, figure=self.fig, width_ratios=[1.15, 1.0],
+                          left=0.045, right=0.985, top=0.94, bottom=0.10, wspace=0.20, hspace=0.30)
+            self.ax_us = self.fig.add_subplot(gs[:, 0])
+            self.ax_us.set_title("초음파 B-mode (candidate 부채꼴)")
+            self.ax_us.set_xticks([]); self.ax_us.set_yticks([])
+            self.im = self.ax_us.imshow(np.zeros((512, 591), np.uint8), cmap="gray", vmin=0, vmax=255)
+            self.us_note = self.ax_us.text(0.5, 0.5, "초음파 없음", transform=self.ax_us.transAxes,
+                                           ha="center", va="center", color="0.6", fontsize=13)
+            self.ax_k_pos = gs[1, 1]
+            self.ax_force = self.fig.add_subplot(gs[0, 1])
         self.ax_force.set_title("접촉력 (정착 창 회색)")
         self.ax_force.set_xlabel("시간 [s]"); self.ax_force.set_ylabel("F [N]")
         self.ax_force.grid(alpha=0.3)
         (self.ln_force,) = self.ax_force.plot([], [], lw=1.4, color="#1f77b4")
         self.settle_band = self.ax_force.axvspan(-self.args.settle, 0, color="0.85", zorder=0)
         self.warn_line = self.ax_force.axhline(self.args.warn_force, color="#d62728", ls="--", lw=1.0)
+        # 표본이 오기 전에도 축이 제 폭으로 서 있어야 한다. 안 그러면 정착 창 하나가
+        # 화면을 다 채워, 센서가 죽었을 때 "그래프가 이상하다" 로 보인다.
+        self.ax_force.set_xlim(-self.args.plot_seconds, 0.5)
+        self.ax_force.set_ylim(-0.3, self.args.warn_force * 1.1)
 
-        self.ax_k = self.fig.add_subplot(gs[1, 1])
+        self.ax_k = self.fig.add_subplot(self.ax_k_pos)
         self.ax_k.set_title("강성 곡선  F(δ)")
         self.ax_k.set_xlabel("압입 깊이 δ [mm]"); self.ax_k.set_ylabel("F [N]")
         self.ax_k.grid(alpha=0.3)
@@ -300,7 +415,7 @@ class StiffnessApp:
 
     def update(self, _frame) -> tuple:
         # -- 초음파
-        if self.us is not None:
+        if self.us is not None and self.ax_us is not None:
             polar, _t = self.us.current()
             if polar is not None:
                 img = self._fan(polar) if self.args.display == "fan" else polar
@@ -310,9 +425,11 @@ class StiffnessApp:
                 self.ax_us.set_ylim(img.shape[0] - 0.5, -0.5)
                 self.us_note.set_text("")
             elif self.us.error:
-                self.us_note.set_text(f"초음파 오류\n{self.us.error}")
+                self.us_note.set_text(f"초음파 오류\n{self.us.error}\n"
+                                      f"{self.link_note or ''}")
             elif not self.us.scanning:
-                self.us_note.set_text("스캔 대기 — 창을 클릭하고 f")
+                self.us_note.set_text("스캔 대기 — 창을 클릭하고 f\n"
+                                      f"{self.link_note or ''}")
 
         # -- 힘 시계열
         t, w = self.force.history()
@@ -350,10 +467,12 @@ class StiffnessApp:
         parts = [
             f"F={fn:+7.3f} N" if np.isfinite(fn) else "F=   —   ",
             f"δ={depth:+7.3f} mm [{self.depth_source()}]" if depth is not None else "δ=   —   ",
-            f"힘 {self.force.rate:5.1f} Hz" + (f" fw {self.force.version}" if self.force.version else ""),
+            f"힘 {self.force.rate:5.1f} Hz" + (f" fw {self.force.version}" if self.force.version
+                                              else (" [스택·보상됨]" if self.args.force_ros else "")),
         ]
         if self.us is not None:
-            parts.append(f"US {self.us.rate:4.1f} fps {'스캔중' if self.us.scanning else '대기'}")
+            state = "스캔중" if self.us.scanning else ("연결됨" if self.us.connected else "끊김")
+            parts.append(f"US {self.us.rate:4.1f} fps {state} @{self.args.us_host}")
         if self.pose is not None and self.pose.available:
             parts.append(f"자세 {self.pose.messages}")
         parts.append(f"구간 {self.phase}")
@@ -370,6 +489,17 @@ class StiffnessApp:
         a = self.args
         self.force.start()
         if not a.no_us:
+            if a.connect_probe:
+                print("프로브 AP 확인 중 …", file=sys.stderr, flush=True)
+                ok, note = ensure_probe_link(a.us_host, a.wifi_iface, a.ssid, a.ap_password)
+                self.link_note = note
+                print(("  " if ok else "  ⚠ ") + note, file=sys.stderr)
+                if not ok:
+                    print("  초음파 없이 계속한다. 프로브를 켠 뒤 GUI 를 다시 띄우거나,\n"
+                          "  python3 imu_bench/host/probe_wifi_linux.py 로 따로 붙이십시오.",
+                          file=sys.stderr)
+            # 링크 확보에 실패했어도 열어는 본다 — 조작자가 다른 경로로 이미 붙여
+            # 두었을 수 있고, 그 판단을 여기서 대신하지 않는다.
             try:
                 self.us = UsReader(a.us_host, a.probe)
                 self.us.start()
@@ -377,14 +507,20 @@ class StiffnessApp:
                 print(f"초음파를 열 수 없다: {exc} — 힘만으로 계속한다", file=sys.stderr)
                 self.us = None
         if not a.no_pose:
-            self.pose = PoseReader(a.namespace, a.wrench_topic)
+            if a.pose_rpc:
+                self.pose = RpcPoseReader(a.pose_rpc, a.pose_rate)
+            else:
+                self.pose = PoseReader(a.namespace, a.wrench_topic)
             self.pose.start()
 
         time.sleep(1.2)     # 센서 핸드셰이크가 끝난 뒤 상태를 보여 준다
         if self.force.error:
-            print(f"⚠ 힘 센서: {self.force.error}", file=sys.stderr)
-            if "dialout" not in (self.force.error or "") and "Permission" in (self.force.error or ""):
+            print(f"⚠ 힘: {self.force.error}", file=sys.stderr)
+            if not a.force_ros and "Permission" in (self.force.error or ""):
                 print('   sg dialout -c "…" 로 감싸십시오.', file=sys.stderr)
+        elif not a.force_ros and self.force.frames == 0:
+            print("⚠ 힘: 포트는 열렸는데 프레임이 없다. telemetry_bridge 가 이미 "
+                  "/dev/ttyACM0 을 쥐고 있으면 --force-ros 를 쓰십시오.", file=sys.stderr)
         if self.pose is not None and self.pose.error:
             print(f"· 자세: {self.pose.error}", file=sys.stderr)
 
@@ -413,6 +549,9 @@ def parse_args(argv=None):
     g = ap.add_argument_group("힘 (PX6D)")
     g.add_argument("--force-port", default="/dev/ttyACM0",
                    help="PX6D 시리얼. 이 셀에서는 %(default)s (IMU 는 ttyACM1)")
+    g.add_argument("--force-ros", nargs="?", const="/fr5_right/wrench_px6d", default=None, metavar="TOPIC",
+                   help="시리얼 대신 스택의 렌치 토픽에서 힘을 받는다 (기본 %(const)s). "
+                        "teleop 중에는 telemetry_bridge 가 포트를 쥐고 있으므로 **이쪽을 써야 한다**")
     g.add_argument("--force-rate", type=int, default=1000,
                    help="회신 주기 Hz 요청값, 4 의 배수. ⚠ 펌웨어 v1.0.2 는 이 명령을 무시하고 늘 ~1 kHz 로 보낸다")
     g.add_argument("--force-axis", type=int, default=2, choices=range(6),
@@ -424,6 +563,12 @@ def parse_args(argv=None):
 
     g = ap.add_argument_group("초음파")
     g.add_argument("--no-us", action="store_true", help="초음파 없이 힘만")
+    g.add_argument("--no-connect-probe", dest="connect_probe", action="store_false",
+                   help="AP 접속을 GUI 가 하지 않는다 (이미 붙여 두었을 때)")
+    g.add_argument("--wifi-iface", default=None,
+                   help="프로브 AP 에 쓸 무선 인터페이스 (기본: 기본 경로가 아닌 동글)")
+    g.add_argument("--ssid", default=None, help="프로브 SSID (기본: 'US-' 로 시작하는 것을 스캔)")
+    g.add_argument("--ap-password", default=None, help="AP 비밀번호 (기본: 알려진 후보를 차례로)")
     g.add_argument("--us-host", default="192.168.1.1")
     g.add_argument("--probe", default="c10ur", help="프로브 프로파일 (기본 %(default)s)")
     g.add_argument("--display", default="fan", choices=("fan", "polar"))
@@ -433,8 +578,12 @@ def parse_args(argv=None):
     g.add_argument("--fan-flip", action="store_true", help="라인 좌우 반전 (검증 전 candidate)")
 
     g = ap.add_argument_group("깊이 (자세)")
-    g.add_argument("--no-pose", action="store_true", help="ROS 자세를 쓰지 않고 수동 깊이만")
-    g.add_argument("--namespace", default="/fr5_right")
+    g.add_argument("--no-pose", action="store_true", help="자세를 쓰지 않고 수동 깊이만")
+    g.add_argument("--pose-rpc", nargs="?", const="192.168.58.3", default=None, metavar="IP",
+                   help="ROS 없이 FR5 에서 TCP 자세를 직접 읽는다 (기본 IP %(const)s). "
+                        "강성만 잴 때는 제어 스택이 필요 없다 — 읽기 전용이다")
+    g.add_argument("--pose-rate", type=float, default=30.0, help="RPC 자세 읽기 주기 Hz")
+    g.add_argument("--namespace", default="/fr5_right", help="ROS 자세를 쓸 때의 네임스페이스")
     g.add_argument("--wrench-topic", default=None,
                    help="제어가 쓰는 렌치도 함께 볼 때 (예: /fr5_right/wrench_px6d)")
     g.add_argument("--manual-step", type=float, default=0.5, help="[ ] 한 번의 수동 깊이 [mm]")

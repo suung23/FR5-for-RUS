@@ -30,7 +30,7 @@ from std_msgs.msg import Bool, Float32MultiArray, Float64, String
 
 from fr5_ik.dls_solver import DlsSolver
 from fr5_ik.force_regulator import ForceRegulator, RegulatorOutput
-from fr5_ik.probing_mode import CONTACT_PROBING, ProbingModeSwitch
+from fr5_ik.probing_mode import APPROACH, CONTACT_PROBING, ProbingModeSwitch
 from fr5_ik.teleop_frame import TeleopFrameMapper
 
 JOINT_NAMES = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
@@ -851,6 +851,33 @@ class UsDiffIkNode(Node):
                     f"힘은 팬텀이 정하는 대로 흐른다. 한계 "
                     f"{self.regulator.max_force_n:.1f} N 후퇴는 그대로 살아 있다."
                 )
+
+        # 접촉 프로빙 전환 on/off. 조작자가 GUI 에서 régime 을 직접 고르는 길이며,
+        # **동작 명령이 아니다** — 켜면 접촉이 잡힐 때 로봇이 z 를 가져가도 된다는
+        # 허가이고, 끄면 그 허가를 거둔다.
+        #
+        # 예전에는 이 파라미터를 기동 때 한 번만 읽어 `self.contact_probing_enabled`
+        # 에 넣어 두어서, `ros2 param set` 이 값만 바꾸고 거동은 그대로였다 —
+        # 조용히. 위 force_hold_enabled 와 같은 종류의 함정이다.
+        for p in params:
+            if p.name != "teleop.contact_probing_enabled":
+                continue
+            self.contact_probing_enabled = bool(p.value)
+            if self.contact_probing_enabled:
+                self.get_logger().warn(
+                    "접촉 프로빙 전환 켜짐 — 접촉이 잡히면 로봇이 z 를 가져간다")
+            else:
+                # **끄는 쪽은 지금 상태에서 빠져나와야 한다.** 아래 판정 루프는
+                # 꺼져 있으면 곧바로 return 하므로, 이미 프로빙 중이면 거기 갇힌다 —
+                # 조작자는 껐다고 믿는데 로봇은 접촉 상한과 힘 유지를 그대로 쥔다.
+                if self.mode_switch.in_contact_probing:
+                    self.mode_switch.mode = APPROACH
+                    self._leave_contact_probing()
+                    self.get_logger().warn(
+                        "접촉 프로빙 전환 꺼짐 — 접근으로 되돌리고 z 를 놓는다")
+                else:
+                    self.get_logger().warn(
+                        "접촉 프로빙 전환 꺼짐 — 접촉이 잡혀도 접근 상한을 유지한다")
 
         if not touched and not switched:
             return SetParametersResult(successful=True)

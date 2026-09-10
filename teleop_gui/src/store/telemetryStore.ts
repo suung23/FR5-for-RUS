@@ -3,7 +3,7 @@ import { RobotTelemetryAdapter } from '../telemetry/adapter';
 import { config } from '../telemetry/config';
 import { solveChain } from '../telemetry/fr5Model';
 import { ContactDetector, type ContactSnapshot } from '../telemetry/contactState';
-import type { LinkStatus, RobotTelemetry, WrenchSample } from '../telemetry/types';
+import type { LinkStatus, RobotTelemetry, UltrasoundFrame, WrenchSample } from '../telemetry/types';
 import { logEvent, TransitionWatcher } from './events';
 
 /** One point in the rolling chart buffer. */
@@ -91,6 +91,8 @@ const CHART_HZ = 5;
 interface TelemetryState {
   telemetry: RobotTelemetry;
   wrench: WrenchSample | null;
+  /** Latest ultrasound picture, or null before the first one arrives. */
+  ultrasound: UltrasoundFrame | null;
   contact: ContactSnapshot;
   /**
    * Contact-point force `[Fx, Fy, Fz]` in the probe frame, `+z` compressing.
@@ -209,6 +211,7 @@ const frameStamps: number[] = [];
 export const useTelemetryStore = create<TelemetryState>((set) => ({
   telemetry: { timestamp: 0, connected: false },
   wrench: null,
+  ultrasound: null,
   contact: detector.snapshot(),
   contactForce: null,
   contactJudged: false,
@@ -284,6 +287,13 @@ const adapter = new RobotTelemetryAdapter({
     }
 
     useTelemetryStore.setState(patch);
+  },
+
+  onUltrasound(frame) {
+    // HOLD freezes the display, and the picture is display. The stream keeps
+    // arriving; only what is drawn is held — same rule as the other panels.
+    if (useTelemetryStore.getState().paused) return;
+    useTelemetryStore.setState({ ultrasound: frame });
   },
 
   onWrench(sample) {

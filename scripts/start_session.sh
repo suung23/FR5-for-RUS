@@ -9,6 +9,8 @@
 #   ./scripts/start_session.sh --px6d /dev/ttyACM1   # 센서 포트 지정
 #   ./scripts/start_session.sh --no-px6d             # 센서 없이
 #   ./scripts/start_session.sh --no-gui              # GUI 없이
+#   ./scripts/start_session.sh --no-us               # 초음파 없이 (영상 패널은 비어 있다)
+#   ./scripts/start_session.sh --no-ap               # AP 는 이미 붙여 두었을 때
 #   ./scripts/start_session.sh --calib               # 교정 모드 (teleop 없이)
 #   ./scripts/start_session.sh --dry-run             # 무엇을 할지만 출력
 #
@@ -63,6 +65,15 @@ source "$WORKSPACE/scripts/fr5_nodes.sh"
 PX6D_PORT="/dev/ttyACM0"
 USE_PX6D=1
 USE_GUI=1
+# 초음파 영상. `us_frame_node` 가 프로브의 **유일한 클라이언트**이고, 그것이 내는
+# /us/image 를 브리지가 GUI 로, capture_sweep·정책 노드가 각자 구독한다. 프로브는
+# 클라이언트를 하나만 받으므로 이 노드를 여기서 소유해 두 번 뜨는 일을 막는다.
+USE_US=1
+US_PROBE="c10ur"
+US_HOST="192.168.1.1"
+# AP 접속까지 할 것인가. NetworkManager 는 polkit 인증을 요구하므로 tty/SSH 세션에서는
+# 거부된다 — 그 경우 안내만 하고 세션은 계속 간다 (영상이 없다고 teleop 을 막을 이유가 없다).
+CONNECT_AP=1
 DRY_RUN=0
 # 교정 모드. 브리지와 GUI 만 띄우고 제어 스택은 띄우지 않는다.
 #
@@ -79,6 +90,10 @@ while (( $# )); do
   case "$1" in
     --px6d)     PX6D_PORT="${2:-}"; shift 2 ;;
     --no-px6d)  USE_PX6D=0; shift ;;
+    --no-us)    USE_US=0; shift ;;
+    --no-ap)    CONNECT_AP=0; shift ;;
+    --probe)    US_PROBE="${2:-c10ur}"; shift 2 ;;
+    --us-host)  US_HOST="${2:-192.168.1.1}"; shift 2 ;;
     --no-gui)   USE_GUI=0; shift ;;
     --calib)    CALIB=1; shift ;;
     --ip)       ROBOT_IP="${2:-}"; shift 2 ;;
@@ -112,6 +127,7 @@ BRIDGE_LOG="$WORKSPACE/log/telemetry_bridge.log"
 GUI_LOG="$WORKSPACE/log/teleop_gui.log"
 BRIDGE_PID=""
 GUI_PGID=""
+US_PID=""
 
 # 나가는 길은 하나뿐이다. Ctrl-C 든 오류든 여기를 지난다.
 cleanup() {
@@ -125,6 +141,9 @@ cleanup() {
   fi
   if [[ -n "$BRIDGE_PID" ]]; then
     kill -TERM "$BRIDGE_PID" 2>/dev/null || true
+  fi
+  if [[ -n "$US_PID" ]]; then
+    kill -TERM "$US_PID" 2>/dev/null || true
   fi
   fr5_stop_all || true
   if [[ -n "$GUI_PGID" ]] && kill -0 -- "-$GUI_PGID" 2>/dev/null; then
@@ -351,6 +370,10 @@ fi
 if (( DRY_RUN )); then
   echo
   echo "--- dry run, 실행하지 않는다 ---"
+  if (( USE_US )); then
+    echo "  초음파: ros2 run fr5_vision us_frame_node --ros-args -p us.probe:=$US_PROBE -p us.host:=$US_HOST"
+    (( CONNECT_AP )) && echo "          AP: python3 imu_bench/host/probe_wifi_linux.py"
+  fi
   if (( NEEDS_SG )); then
     echo "  브리지: sg dialout -c \"$(sg_wrap "${BRIDGE_CMD[@]}")\"   > $BRIDGE_LOG"
   else
@@ -371,6 +394,35 @@ if (( DRY_RUN )); then
 fi
 
 mkdir -p "$(dirname "$BRIDGE_LOG")"
+# 초음파를 브리지보다 **먼저** 띄운다. 순서가 기능을 가르지는 않지만(ROS 는 늦게 붙어도
+# 된다), 프레임이 안 올 때 브리지 로그가 아니라 이 노드 로그를 먼저 보게 된다.
+if (( USE_US )); then
+  echo
+  echo "초음파  us_frame_node (probe=$US_PROBE host=$US_HOST)"
+  if (( CONNECT_AP )); then
+    # **프로브가 없으면 여기서 멈춘다.** 예전에는 경고만 하고 계속 갔는데, 그러면
+    # 영상 없는 콘솔이 떠서 조작자가 한참 쓴 뒤에야 알아차린다 — 그리고 그때는
+    # 이미 세션을 다시 띄워야 한다. 영상이 목적인 세션이면 영상부터 세운다.
+    # 영상 없이 쓸 작정이면 `--no-us` 로 그 뜻을 밝히면 된다.
+    if /usr/bin/python3 "$WORKSPACE/imu_bench/host/probe_wifi_linux.py"; then
+      echo "  AP 접속됨"
+    else
+      echo >&2
+      echo "✗ 프로브 AP 에 붙지 못했다 — 세션을 띄우지 않는다." >&2
+      echo "  · 프로브 배터리 전원을 켜고 USB 는 뽑은 상태인지" >&2
+      echo "  · NetworkManager 가 polkit 인증을 요구하므로, 이 PC 화면에 로그인한" >&2
+      echo "    터미널에서 실행하고 있는지 (tty/SSH 세션은 거부된다)" >&2
+      echo "  영상 없이 진행하려면:  $0 --no-us $*" >&2
+      exit 1
+    fi
+  fi
+  US_LOG="$(mktemp -t us_frame_node.XXXXXX.log)"
+  ros2 run fr5_vision us_frame_node --ros-args \
+    -p us.probe:="$US_PROBE" -p us.host:="$US_HOST" >>"$US_LOG" 2>&1 &
+  US_PID=$!
+  echo "  로그: $US_LOG"
+fi
+
 : > "$BRIDGE_LOG"
 if (( NEEDS_SG )); then
   sg dialout -c "$(sg_wrap "${BRIDGE_CMD[@]}")" >>"$BRIDGE_LOG" 2>&1 &

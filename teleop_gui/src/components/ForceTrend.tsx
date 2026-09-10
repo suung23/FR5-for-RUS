@@ -32,7 +32,11 @@ interface Props {
 type Series = 'normal' | 'components';
 type Scale = 'fit' | 'full';
 
-const AXIS_STYLE = { fontSize: 9.5, fill: '#4a4a4a', fontFamily: 'Arial, Helvetica, sans-serif' };
+/** Built from the palette rather than fixed: the console has a dark ground, and
+ *  a chart axis that keeps a light-theme grey goes invisible on it. */
+function axisStyle(ink: string) {
+  return { fontSize: 9.5, fill: ink, fontFamily: 'Arial, Helvetica, sans-serif' };
+}
 
 /**
  * Narrowest window the fitted scale will open to, in newtons.
@@ -167,6 +171,7 @@ function ForceTrendView({ history, waveformHz }: Props) {
   // rest, blue in contact probing — and the trace, the hold band and the grid
   // all follow it so the plot does not stay green inside a blue console.
   const palette = usePalette();
+  const AXIS_STYLE = axisStyle(palette['--ink']);
   const accent = palette['--green'];
   const rule = palette['--rule'];
   const [series, setSeries] = useState<Series>('normal');
@@ -343,33 +348,33 @@ function ForceTrendView({ history, waveformHz }: Props) {
                 domain={[-20, 0]}
                 ticks={[-20, -15, -10, -5, 0]}
                 tickFormatter={(v: number) => (v === 0 ? 'now' : `${-v}s`)}
-                stroke="#4a4a4a"
+                stroke={palette['--rule']}
                 tick={AXIS_STYLE}
                 tickLine={false}
-                axisLine={{ stroke: '#111111' }}
+                axisLine={{ stroke: palette['--ink'] }}
               />
               <YAxis
                 domain={domain}
                 ticks={ticks}
                 width={52}
-                stroke="#4a4a4a"
+                stroke={palette['--rule']}
                 tick={AXIS_STYLE}
                 tickLine={false}
                 axisLine={false}
                 tickFormatter={(v: number) => v.toFixed(decimals)}
-                label={{ value: 'N', position: 'insideTopLeft', offset: -2, fill: '#4a4a4a', fontSize: 9 }}
+                label={{ value: 'N', position: 'insideTopLeft', offset: -2, fill: palette['--ink'], fontSize: 9 }}
               />
               <Tooltip
                 isAnimationActive={false}
-                cursor={{ stroke: '#111111', strokeWidth: 1 }}
+                cursor={{ stroke: palette['--ink'], strokeWidth: 1 }}
                 contentStyle={{
-                  background: '#ffffff',
+                  background: palette['--panel-pale'],
                   border: `1px solid ${accent}`,
                   fontSize: 11,
                   fontFamily: 'Arial, Helvetica, sans-serif',
                   padding: '4px 7px',
                 }}
-                labelStyle={{ color: '#111111' }}
+                labelStyle={{ color: palette['--ink'] }}
                 labelFormatter={(v) => `${Math.abs(Number(v)).toFixed(1)} s ago`}
                 formatter={(value: number | [number, number], name: string) =>
                   Array.isArray(value)
@@ -413,19 +418,19 @@ function ForceTrendView({ history, waveformHz }: Props) {
                   {inView(config.warnForceN) ? (
                     <ReferenceLine
                       y={config.warnForceN}
-                      stroke="#111111"
+                      stroke={palette['--ink']}
                       strokeDasharray="5 3"
                       strokeWidth={1}
-                      label={{ value: 'Warn', position: 'right', fill: '#111111', fontSize: 9 }}
+                      label={{ value: 'Warn', position: 'right', fill: palette['--ink'], fontSize: 9 }}
                     />
                   ) : null}
                   {inView(config.maxForceN) ? (
                     <ReferenceLine
                       y={config.maxForceN}
-                      stroke="#111111"
+                      stroke={palette['--ink']}
                       strokeDasharray="2 2"
                       strokeWidth={1.6}
-                      label={{ value: 'Limit', position: 'right', fill: '#111111', fontSize: 9 }}
+                      label={{ value: 'Limit', position: 'right', fill: palette['--ink'], fontSize: 9 }}
                     />
                   ) : null}
                   {/* The excursion inside each bin, drawn under the mean.
@@ -458,10 +463,10 @@ function ForceTrendView({ history, waveformHz }: Props) {
                 </>
               ) : (
                 <>
-                  <ReferenceLine y={0} stroke="#111111" strokeWidth={1} />
-                  <Line type="linear" dataKey="fx" name="Fx" stroke="#111111" strokeWidth={1.1}
+                  <ReferenceLine y={0} stroke={palette['--ink']} strokeWidth={1} />
+                  <Line type="linear" dataKey="fx" name="Fx" stroke={palette['--ink']} strokeWidth={1.1}
                         dot={false} isAnimationActive={false} />
-                  <Line type="linear" dataKey="fy" name="Fy" stroke="#4a4a4a" strokeWidth={1.1}
+                  <Line type="linear" dataKey="fy" name="Fy" stroke={palette['--rule']} strokeWidth={1.1}
                         dot={false} isAnimationActive={false} />
                   <Line type="linear" dataKey="fz" name="Fz" stroke={accent} strokeWidth={1.5}
                         dot={false} isAnimationActive={false} />

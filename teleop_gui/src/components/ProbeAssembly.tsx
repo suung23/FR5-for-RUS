@@ -6,32 +6,39 @@ import { useMemo } from 'react';
 import { usePalette } from '../telemetry/theme';
 
 /**
- * The stack below the flange, in metres.
+ * The stack below the flange, in metres. **Mount v2 build, 2026-09-11.**
  *
  * Two sources, deliberately. `adapter` and `sensor` are measured — there is no
  * solid for either, so a tape is the only thing there is. `mount` is the CAD
- * (본체3.stl, 152.0 mm), which supersedes the 161 mm first taped for it: where
- * a solid exists, the solid wins.
+ * (`hardware/probe_mount_v2`, 142.0 mm read off the solid), which supersedes
+ * anything taped for it: where a solid exists, the solid wins.
  *
- * That leaves the tool at 234 mm, not the 243 first written down. The number
- * matters beyond the drawing — it is `tool.j6_to_probe_xyz`, the point the arm
- * rotates about, and the lever arm the moment correction uses.
+ * The two numbers that leave this file are `probe.yaml`'s, and they were
+ * measured on the assembled arm rather than added up from here:
  *
- * ⏳ `probe` is the exposed length, and it stays measured (49 mm) because the
- * CAD cannot supply it: the clamp is a smooth channel, so the probe slides in
- * it. The only hard stop in the solid is the cable tail against the Ø11 mm
- * bore, and that would leave 72 mm exposed — 23 mm more than the tape says.
- * Worth checking whether 본체3.stl is the revision now on the arm.
+ *   flange → sensor top   35.2 mm    `ft_sensor.j6_to_sensor_xyz`
+ *   flange → array face  234.11 mm   `tool.j6_to_probe_xyz`
+ *   ⇒ lever arm          198.91 mm   what the moment correction rides on
+ *
+ * `adapter` carries the 2.2 mm the stack grew over the v1 build (33.0 → 35.2).
+ * It is put there rather than in `sensor` because the PX6D body is a fixed
+ * 23 mm part and the adapter is the un-solid, measured spacer — but the split
+ * is an attribution, not a measurement. Only the sum is measured.
+ *
+ * `probe` is what is left over (56.91 mm), and with v2 that number finally
+ * means something: the v1 clamp was a smooth channel the probe slid in, so the
+ * exposed length was whatever it happened to be. v2 grips the handle between
+ * two flexure plates pulled by four M4 screws, so it is repeatable once tight.
  */
 export const STACK = {
-  /** Flange to the sensor's lower face. Measured. */
-  adapter: 0.010,
+  /** Flange to the sensor's lower face. Measured — see the note above. */
+  adapter: 0.0122,
   /** PX6D body. Measured. */
   sensor: 0.023,
-  /** Bracket, from the supplied solid. */
-  mount: 0.152,
-  /** Clamp face to the array face. Measured — see the note above. */
-  probe: 0.049,
+  /** Bracket, from the v2 solid (142.0 mm). */
+  mount: 0.142,
+  /** Clamp face to the array face. The remainder of the measured 234.11 mm. */
+  probe: 0.05691,
   get sensorFace() {
     return this.adapter;
   },
@@ -85,15 +92,18 @@ const PROBE_YAW_DEG = 90;
 const SENSOR_YAW_DEG = PROBE_YAW_DEG - 43;
 
 /**
- * The clamp's long axis in the bracket's own CAD frame — exactly 45.00°.
+ * The clamp's long axis in the bracket mesh's own frame — **0° for v2**.
  *
- * Measured off the supplied solid, not assumed. It is also a quiet
- * cross-check on the sensor registration: the as-built push test put the
- * probe at 43° from the sensor's +x, and the bracket is drawn at 45°. The 2°
- * is the assembly, not a disagreement about the design — which is what the
- * `probe.yaml` note "육안 추정 45°" already suspected.
+ * The v1 solid was drawn with the clamp at exactly 45.00°, so the console had
+ * to take it back out. The v2 asset here is the *aligned* export
+ * (`ultrasound_probe_mount_v2_aligned.stl`, converted mm → m), whose clamp
+ * walls are already on the axes — so there is nothing to take out.
+ *
+ * The cross-check the 45° used to give is not lost, it just moved: the
+ * as-built push test put the probe at 43° from the sensor's +x, and that 43°
+ * still lives in `SENSOR_YAW_DEG` and in `probe.yaml`'s `j6_to_sensor_rpy`.
  */
-const MOUNT_CLAMP_CAD_DEG = 45;
+const MOUNT_CLAMP_CAD_DEG = 0;
 
 /**
  * The convex face, as fitted to the CAD (R = 82.6 mm, residual 0.14 mm).
@@ -219,7 +229,7 @@ function Px6dSensor({ opacity }: { opacity: number }) {
  * strain relief does not collide with anything at 90 mm from the flange.
  */
 function ProbeMount({ opacity }: { opacity: number }) {
-  const geometry = useLoader(STLLoader, MESH_URL('probe_mount')) as BufferGeometry;
+  const geometry = useLoader(STLLoader, MESH_URL('probe_mount_v2')) as BufferGeometry;
   return (
     <mesh
       geometry={geometry}

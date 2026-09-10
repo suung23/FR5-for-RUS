@@ -1,4 +1,5 @@
 import type {
+  UltrasoundFrame,
   CommandAck,
   ForceWaveform,
   ForceWaveformBin,
@@ -215,4 +216,27 @@ function vec3(value: unknown): [number, number, number] | undefined {
     return xyz as [number, number, number];
   }
   return undefined;
+}
+
+
+/**
+ * Ultrasound picture from the bridge.
+ *
+ * Rejects a frame with no payload rather than handing the view an empty `img`
+ * src — a broken picture and "no signal" look the same on screen otherwise.
+ */
+export function parseUltrasound(raw: unknown, receivedAt: number): UltrasoundFrame | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const src = raw as Record<string, unknown>;
+  const jpeg = src.jpeg;
+  if (typeof jpeg !== 'string' || jpeg.length === 0) return null;
+  return {
+    timestamp: typeof src.timestamp === 'number' ? src.timestamp : receivedAt,
+    seq: typeof src.seq === 'number' ? src.seq : 0,
+    width: typeof src.width === 'number' ? src.width : 0,
+    height: typeof src.height === 'number' ? src.height : 0,
+    display: typeof src.display === 'string' ? src.display : 'fan',
+    jpeg,
+    receivedAt,
+  };
 }

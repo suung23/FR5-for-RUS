@@ -59,14 +59,14 @@ export type Palette = Record<Token, string>;
  * "looks normal while probing", never "looks like probing while approaching".
  */
 const FALLBACK: Palette = {
-  '--accent': '#4b8b5a',
-  '--green': '#17683a',
-  '--rule': '#b9d0be',
-  '--panel-pale': '#f1f8f2',
-  '--nav-selected': '#d9ecdc',
-  '--sidebar': '#f6fbf7',
-  '--critical': '#8b1e1e',
-  '--ink': '#000000',
+  '--accent': '#74b184',
+  '--green': '#93d1a4',
+  '--rule': '#35493b',
+  '--panel-pale': '#171d18',
+  '--nav-selected': '#26382b',
+  '--sidebar': '#131813',
+  '--critical': '#ff6f6f',
+  '--ink': '#e9ede9',
 };
 
 function read(): Palette {

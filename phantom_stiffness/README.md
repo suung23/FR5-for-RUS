@@ -13,6 +13,129 @@ korean_font.py     그림 폰트
 
 ---
 
+## 빠른 길 — 영상 없이 힘만 (3D 프린팅 프로브)
+
+프린팅된 프로브에는 트랜스듀서가 없으므로 영상이 나올 수 없다. 강성만 재는 데에는
+**초음파도 ROS 제어 스택도 필요 없다.** 필요한 것은 둘뿐이다 — 힘(PX6D)과 깊이(FK).
+
+```bash
+python3 phantom_stiffness/stiffness_gui.py --label phantom_b --no-us --pose-rpc
+```
+
+`--pose-rpc` 는 FR5(`192.168.58.3`) 에서 TCP 자세를 **직접, 읽기 전용으로** 가져온다
+(`GetActualTCPPose` → UDP 실시간 스트림의 `tl_cur_pos`, XML-RPC 왕복 없음).
+`us_diff_ik_node` 도 `us_servo` 도 띄우지 않는다. 창은 초음파 패널 없이 힘 시계열과
+강성 곡선 두 개로 뜬다.
+
+**로봇은 조작자가 움직인다** — 펜던트 조그나 드래그 교시. 이 도구는 어떤 동작 명령도
+내지 않는다.
+
+측정 잡음 (2026-09-10 실측):
+
+| | |
+|---|---|
+| 힘 | sd ≈ **0.015 N** (PX6D, 1 kHz) |
+| 깊이 | 정지 시 **0.4 µm** (FR5 FK) |
+
+깊이는 제약이 아니다. `k ≈ 0.4 N/mm` 라면 힘 잡음 0.015 N 이 깊이 0.04 mm 에 해당하므로,
+**스텝을 0.5–1 mm 로 잡으면 신호 대 잡음이 10:1 을 넘는다.**
+
+### 3D 프린팅 프로브로 재도 되는가
+
+**기울기는 된다. 절대 힘은 그 프로브의 값이다.**
+
+* **중력 보상 불일치는 문제가 안 된다.** 교정 프로파일(`~/.ros/fr5_px6d_calibration.json`,
+  2026-09-07, `mass_kg` 0.203, `mountingNote` 비어 있음) 이 어느 프로브로 맞춘 것인지
+  기록이 없다. 지금 프린팅 프로브를 달았으면 자중이 달라 보상에 잔차가 남는다.
+  그런데 강성은 **기울기** `ΔF/Δδ` 이고, 압입 몇 mm 동안 자세는 거의 안 변하므로 그
+  잔차는 상수다 — 접촉 직전에 `z`(소프트 영점) 를 누르면 통째로 빠진다. 그래서
+  **자세를 고정한 채 축 방향으로만 파고드는 것**이 이 측정의 전제다. 손목을 돌리면
+  중력 항이 같이 변해 기울기에 섞인다.
+* **접촉 기하는 결과에 들어간다.** `k` 는 재료 상수가 아니라 **팬텀 + 그 팁 형상**의
+  값이다. 프린팅 팁의 접촉면이 실제 C10UR 과 다르면 같은 팬텀이라도 `k` 가 다르게
+  나온다 (평평할수록 크고, 뾰족할수록 작다). 나중에 실제 프로브로 다시 재면 값이
+  달라지는 것이 정상이니, 세션 `--label` 에 **어느 프로브인지 적어 둔다**
+  (`--label phantom_b_printed`). `session.meta.json` 에 자동으로 남지는 않는다.
+* 그래도 지금 재는 값은 쓸모가 있다 — 팬텀끼리의 **상대 비교**와 admittance 대역을
+  잡는 **자릿수** 로는 충분하다.
+
+### 절차 (영상 없이)
+
+1. 프로브를 팬텀 **위 공중**에 두고 `z` — 힘 영점.
+2. 접촉이 막 잡히는 순간 (0.1–0.2 N) `c` — 깊이 0.
+3. 펜던트로 **축 방향으로만** 0.5–1 mm 내리고, 힘이 앉으면 `space`.
+4. 목표 상한(예 4–5 N)까지 반복 → `p` 로 제하 전환 → 되돌아 나오며 다시 `space`.
+5. `s` 저장 → `fit_stiffness.py` 로 적합.
+
+---
+
+## teleop 으로 재기 — 최종 절차 (권장)
+
+Touch 로 프로브를 팬텀에 가져다 대고, **힘 목표를 바꿔 가며 로봇이 앉는 자리를 읽는다.**
+
+### 왜 깊이를 직접 안 주는가
+
+접촉 프로빙 모드에서 **빔축(z) 은 힘 조절기가 잡는다** (`contact_control.force_hold_enabled`,
+기본 켜짐). 조작자가 z 를 밀어도 조절기가 목표 힘으로 되돌린다 — 이 구성에서 조작자가
+정할 수 있는 것은 깊이가 아니라 **힘**이다. 그래서 목표 힘을 계단으로 올리고 각
+평형점의 (F, δ) 를 찍는다. `force_hold_validation` 이 0.3739 N/mm 를 얻은 것과 같은 경로이고,
+안전층(힘 한계·후퇴)이 그대로 살아 있다는 것이 이 방법의 가장 큰 장점이다.
+
+### 터미널 네 개
+
+```bash
+# ① 스택 — us_servo + us_diff_ik + touch_teleop
+cd ~/FR5-for-RUS && ./scripts/start_teleop.sh
+
+# ② 힘 브리지 — PX6D 시리얼을 **이쪽이 독점한다**. wrench_px6d 를 ~1 kHz 로 낸다
+cd ~/FR5-for-RUS && source /opt/ros/jazzy/setup.bash && source install/setup.bash
+sg dialout -c "LD_LIBRARY_PATH=$LD_LIBRARY_PATH ros2 run fr5_control telemetry_bridge --ros-args \
+  --params-file $(ros2 pkg prefix fr5_control)/share/fr5_control/config/probe.yaml \
+  -p bridge.px6d_port:=/dev/ttyACM0"
+
+# ③ 강성 GUI — 시리얼이 아니라 **토픽**에서 힘을 받는다
+cd ~/FR5-for-RUS && source /opt/ros/jazzy/setup.bash && source install/setup.bash
+python3 phantom_stiffness/stiffness_gui.py --label phantom_b_printed --no-us --force-ros
+
+# ④ 목표 힘 계단
+cd ~/FR5-for-RUS && source /opt/ros/jazzy/setup.bash && source install/setup.bash
+./phantom_stiffness/step_targets.sh 0.5 1.0 1.5 2.0 3.0 4.0
+./phantom_stiffness/step_targets.sh --down 3.0 2.0 1.0 0.5      # 제하 (이력)
+```
+
+> ⚠️ **`--force-ros` 를 빼면 안 된다.** 브리지가 `/dev/ttyACM0` 을 이미 쥐고 있어 GUI 가
+> 같은 포트를 두 번 열 수 없다. 게다가 토픽의 값은 **중력·레버암이 보상된, 제어가 실제로
+> 쓰는 그 값**이라 강성을 그것으로 재는 편이 맞다. 시리얼로 열면 포트는 열리는데 프레임이
+> 0 인 상태가 되고, GUI 가 그 경우를 감지해 안내를 찍는다.
+
+### 순서
+
+1. ①②③ 을 띄운다. GUI 상태줄에 `힘 … Hz [스택·보상됨]` 과 `자세 …` 가 둘 다 올라오는지 본다.
+2. 프로브가 **공중에 있을 때** GUI 에서 `z` — 힘 영점.
+3. Touch 로 프로브를 팬텀에 가져다 댄다. 접촉이 잡히면 (`teleop.contact_probing_force_n` 을
+   넘으면) 모드가 접촉 프로빙으로 바뀐다.
+4. 접촉 직후 `c` — 깊이 0. `p` 로 구간이 `load` 인지 확인.
+5. ④ 를 돌린다. 목표마다 힘이 앉으면 스크립트가 멈추고 알려 준다 → **GUI 창을 눌러
+   포커스를 주고 `space`** → 터미널에서 Enter.
+6. 상단까지 끝나면 `--down` 으로 제하 구간을 받는다. GUI 에서 먼저 `p` 를 눌러 `unload` 로.
+7. GUI 에서 `s` 저장 → `fit_stiffness.py`.
+8. **프로브를 떼었다 다시 붙여 3 회 이상 반복한다.** 접촉 위치·각도가 k 를 바꾼다.
+
+### 이 구성에서의 주의
+
+* **`space` 는 GUI 창이 포커스를 가진 상태에서만 먹는다.** matplotlib 키 이벤트라 터미널에
+  포커스가 있으면 아무 일도 안 일어난다.
+* **`wait_settled.py` 의 판정은 밴드 ±0.08 N 에 2 s 연속**이다. 이 팬텀에서 잘 안 앉으면
+  감쇠를 올린다 (`contact_control.admittance_b_z`). 한계주기가 돌면 조용한 창이 주기마다
+  2~3 s 씩만 열려 시간 초과가 난다 — `DESIGN_NOTES` §8.1 의 `B_z` 1000→3000 논의와 같은 증상.
+* **힘 영점을 잊어도 k 는 맞다.** 상수 오프셋은 절편으로만 가고 기울기에는 안 간다.
+  `z` 는 화면을 읽기 쉽게 하려는 것이다.
+* **접촉을 놓치면 그 회차는 거기서 끝난다.** 이탈 문턱(0.10 N) 아래로 0.5 s 지속되면
+  접근 모드로 돌아가고, 다시 붙여도 진입 문턱에서 다시 잡힌다 — 깊이 기준이 어긋나므로
+  `c` 를 다시 누르고 새 `--label` 로 받는 편이 낫다.
+
+---
+
 ## 이 셀의 배선 (2026-09-10 실측)
 
 | 것 | 어디 | 확인 |
@@ -70,8 +193,9 @@ DISPLAY=:1 XAUTHORITY=/run/user/$(id -u)/gdm/Xauthority \
 source ~/FR5-for-RUS/install/setup.bash
 ```
 
-세 입력은 서로 독립이다 — **프로브가 꺼져 있어도 힘만으로 뜬다** (`--no-us`),
-제어 스택이 없으면 깊이를 손으로 넣는다 (`--no-pose`, `[` / `]`).
+세 입력은 서로 독립이다 — **프로브가 꺼져 있어도 힘만으로 뜬다** (`--no-us`).
+깊이는 세 갈래다: `--pose-rpc`(FR5 직접, ROS 불필요) · 기본값(ROS `ee_wrt_base`) ·
+`--no-pose`(수동, `[` / `]`).
 
 | 키 | |
 |---|---|

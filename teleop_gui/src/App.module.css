@@ -51,6 +51,18 @@
   min-width: 0;
 }
 
+/* The ultrasound plate is square: a B-mode sector is as tall as it is wide, and
+   letting the panel stretch put black bars on either side of it. Height comes
+   from the row, width follows — so the picture grows with the window instead of
+   sitting in a fixed box.
+
+   Same specificity as the rule above, so it has to come after it to win. */
+.usPanel {
+  flex: 0 0 auto;
+  aspect-ratio: 1 / 1;
+  min-width: 240px;
+}
+
 .lower {
   flex: 0 0 auto;
   max-height: 52%;

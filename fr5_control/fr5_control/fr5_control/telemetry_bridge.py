@@ -32,6 +32,7 @@ Phase 0 스택의 토픽을 구독해 GUI 의 계약 형식(JSON)으로 밀어 �
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import math
 import os
@@ -123,6 +124,27 @@ class TelemetryBridge(Node):
         # 파형만 갈아 끼우므로, 조작자가 보는 자릿수는 여전히 1 초에 한 번 바뀐다.
         self.declare_parameter("bridge.wrench_stream_hz", 10.0)
         self.declare_parameter("bridge.px6d_port", "")
+
+        # ---- 초음파 영상 중계 -------------------------------------------------
+        # 프로브는 클라이언트를 **하나만** 받는다. 그 하나는 `us_frame_node` 이고,
+        # 브리지는 그 노드가 내는 `/us/image` 를 구독해 GUI 로 넘긴다. 브리지가
+        # 프로브에 직접 붙으면 capture_sweep 같은 다른 구독자가 영상을 못 본다.
+        #: 파라미터를 바꿀 제어 노드. 모드 전환 요청이 여기로 간다.
+        self.declare_parameter("bridge.control_node", "/us_diff_ik_node")
+
+        self.declare_parameter("us.enabled", True)
+        self.declare_parameter("us.topic", "/us/image")
+        #: 화면 갱신 주기. 프로브 자체가 10 fps 라 그보다 높일 이유가 없다.
+        self.declare_parameter("us.stream_hz", 10.0)
+        self.declare_parameter("us.jpeg_quality", 70)
+        #: fan = 부채꼴로 펴서 보낸다 (조작자가 읽는 그림). polar = 원본 배치 그대로.
+        self.declare_parameter("us.display", "fan")
+        self.declare_parameter("us.fan_radius_mm", 59.0)
+        self.declare_parameter("us.fan_half_angle_deg", 28.0)
+        self.declare_parameter("us.fan_depth_mm", 220.0)
+        self.declare_parameter("us.fan_flip", False)
+        #: 보내는 그림의 세로 상한 [px]. 소켓 대역과 렌더 비용을 여기서 정한다.
+        self.declare_parameter("us.max_height", 384)
 
         # 로봇 관절각을 컨트롤러에서 **읽기로만** 가져온다. bridge.px6d_port 와
         # 대칭인 기능이다.
@@ -251,6 +273,27 @@ class TelemetryBridge(Node):
         )
         self._normal_sign = float(self.get_parameter("ft_sensor.normal_force_sign").value)
         self.profile = self._load_profile()
+
+        # 초음파: 최신 프레임 한 장만 들고 있는다. 밀린 프레임을 쌓아 보내면
+        # 화면이 과거를 따라가게 된다 — 모니터는 지금을 보여야 한다.
+        self._control_node = str(self.get_parameter("bridge.control_node").value)
+        self._param_client = None
+        self._us_frame = None
+        self._us_at = 0.0
+        self._us_seq = 0
+        self._us_sent_seq = -1
+        self._us_converter = None
+        self._us_warned = False
+        if bool(self.get_parameter("us.enabled").value):
+            from rclpy.qos import qos_profile_sensor_data
+            from sensor_msgs.msg import Image as _Image
+            us_topic = str(self.get_parameter("us.topic").value)
+            # `us_frame_node` 는 sensor_data(BEST_EFFORT) 로 낸다. 기본 QoS(RELIABLE)
+            # 로 구독하면 DDS 가 짝을 맺지 않아 **프레임이 하나도 오지 않는다** —
+            # 에러 없이 조용히. 발행측에 맞춘다.
+            self.create_subscription(_Image, us_topic, self._on_us_image,
+                                     qos_profile_sensor_data)
+            self.get_logger().info(f"초음파 구독: {us_topic}")
 
         self._mode = None
         # 발행자가 TRANSIENT_LOCAL 이므로 구독도 맞춘다. 안 맞추면 QoS 불일치로
@@ -562,6 +605,117 @@ class TelemetryBridge(Node):
         self.get_logger().info(
             f"자동 캡처: {label} — 정지 감지 (직전 자세들과 {separation:.0f}°)"
         )
+
+    def _set_remote_parameter(self, name: str, value) -> bool:
+        """제어 노드의 파라미터를 **비동기로** 바꾼다.
+
+        응답을 기다리지 않는 이유는 이 함수가 웹소켓 스레드에서 불리고 rclpy 의
+        spin 은 다른 스레드에 있기 때문이다 — 여기서 기다리면 서로를 잡는다.
+        결과는 되돌아오는 `probing_mode` 로 확인한다.
+
+        Returns:
+            요청을 보냈는가. 서비스가 없으면 거짓 — 제어 스택이 없다는 뜻이다.
+        """
+        from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
+        from rcl_interfaces.srv import SetParameters
+
+        if self._param_client is None:
+            self._param_client = self.create_client(
+                SetParameters, f"{self._control_node}/set_parameters")
+        if not self._param_client.service_is_ready():
+            # 한 번은 짧게 기다려 준다 — 방금 뜬 스택이면 아직 광고 전일 수 있다.
+            if not self._param_client.wait_for_service(timeout_sec=1.0):
+                return False
+
+        if isinstance(value, bool):
+            pv = ParameterValue(type=ParameterType.PARAMETER_BOOL, bool_value=value)
+        elif isinstance(value, float):
+            pv = ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=value)
+        else:
+            raise TypeError(f"지원하지 않는 파라미터 형식: {type(value).__name__}")
+
+        req = SetParameters.Request()
+        req.parameters = [Parameter(name=name, value=pv)]
+        self._param_client.call_async(req)
+        self.get_logger().info(f"{self._control_node} {name} := {value} 요청")
+        return True
+
+    # -- 초음파 -----------------------------------------------------------
+
+    def _on_us_image(self, msg) -> None:
+        """`/us/image` 한 장. mono8 · step = width 를 전제한다."""
+        buf = np.frombuffer(bytes(msg.data), dtype=np.uint8)
+        if buf.size != msg.height * msg.width:
+            if not self._us_warned:
+                self._us_warned = True
+                self.get_logger().error(
+                    f"영상 형식이 예상과 다르다: {msg.width}×{msg.height} "
+                    f"encoding={msg.encoding!r} step={msg.step} bytes={buf.size}")
+            return
+        with self._lock:
+            self._us_frame = buf.reshape(msg.height, msg.width).copy()
+            self._us_at = time.time()
+            self._us_seq += 1
+
+    def ultrasound_frame(self) -> dict | None:
+        """최신 프레임 한 장을 JPEG 로 접어 보낸다. 새 프레임이 없으면 ``None``.
+
+        부채꼴 변환을 여기서 하는 이유는 조작자가 읽는 그림이 부채꼴이기 때문이다.
+        **저장 경로는 건드리지 않는다** — 세션에 남는 것은 언제나 극좌표 원본이고,
+        이것은 화면용 사본이다.
+        """
+        with self._lock:
+            frame = self._us_frame
+            at = self._us_at
+            seq = self._us_seq
+        if frame is None or seq == self._us_sent_seq:
+            return None
+        self._us_sent_seq = seq
+
+        try:
+            import cv2
+        except ImportError:
+            if not self._us_warned:
+                self._us_warned = True
+                self.get_logger().error("cv2 가 없어 초음파를 보내지 못한다")
+            return None
+
+        image = frame
+        if str(self.get_parameter("us.display").value) == "fan":
+            if self._us_converter is None:
+                from fr5_vision.scan_convert import FanGeometry, ScanConverter
+                geo = FanGeometry(
+                    radius_mm=float(self.get_parameter("us.fan_radius_mm").value),
+                    half_angle_deg=float(self.get_parameter("us.fan_half_angle_deg").value),
+                    depth_mm=float(self.get_parameter("us.fan_depth_mm").value),
+                    flip_lines=bool(self.get_parameter("us.fan_flip").value),
+                )
+                self._us_converter = ScanConverter(geo, frame.shape[0], frame.shape[1])
+            if frame.shape == (self._us_converter.n_lines, self._us_converter.n_samples):
+                image = self._us_converter.convert(frame)
+
+        max_h = int(self.get_parameter("us.max_height").value)
+        if max_h > 0 and image.shape[0] > max_h:
+            scale = max_h / image.shape[0]
+            image = cv2.resize(image, (max(1, int(image.shape[1] * scale)), max_h),
+                               interpolation=cv2.INTER_AREA)
+
+        quality = int(self.get_parameter("us.jpeg_quality").value)
+        ok, encoded = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+        if not ok:
+            return None
+        return {
+            "type": "ultrasound",
+            "timestamp": int(at * 1000),
+            "seq": seq,
+            "width": int(image.shape[1]),
+            "height": int(image.shape[0]),
+            "display": str(self.get_parameter("us.display").value),
+            # 장비 쪽 지연은 여기서 보정하지 않는다 (2026-09-10 실측 유효 지연 ≈ 200 ms).
+            # 모니터는 도착한 그림을 그대로 보여 주고, 해석은 기록을 보고 한다.
+            "latencyNote": "us latency ~200 ms, not compensated",
+            "jpeg": base64.b64encode(encoded.tobytes()).decode("ascii"),
+        }
 
     def _write_profile(self, registration, note: str):
         """지금 세션 상태로 프로파일을 쓴다.
@@ -1442,6 +1596,26 @@ class TelemetryBridge(Node):
             )
             return ok(valid=valid, issues=issues, path=self.calibration_path)
 
+        if command == "teleop.contact_probing":
+            # 접촉 프로빙 **전환 허가** 를 켜고 끈다. 동작 명령이 아니다 —
+            # 켜면 접촉이 잡힐 때 로봇이 z 를 가져가도 된다는 허가이고, 끄면
+            # 그 허가를 거두며 이미 프로빙 중이면 접근으로 되돌린다.
+            #
+            # 요청만 보내고 기다리지 않는다. **진실은 파라미터이고 이 콘솔이 보는
+            # 것은 `probing_mode` 토픽**이므로, 눌린 버튼이 아니라 되돌아온 모드가
+            # 화면의 근거가 된다 (teleop_frame·inplane 과 같은 규약).
+            want = request.get("enabled")
+            if not isinstance(want, bool):
+                return fail(f"enabled 가 참/거짓이어야 한다: {want!r}")
+            try:
+                ok_sent = self._set_remote_parameter(
+                    "teleop.contact_probing_enabled", bool(want))
+            except Exception as exc:  # noqa: BLE001
+                return fail(f"파라미터 요청 실패: {exc}")
+            if not ok_sent:
+                return fail("us_diff_ik_node 의 파라미터 서비스가 없다 — 제어 스택이 떠 있는가")
+            return ok(requested=bool(want))
+
         if command == "contact.inplane":
             # 접촉 프로빙에서 조작자에게 ω_y 하나를 돌려준다 — 영상면(프로브 x–z)을
             # 벗어나지 않는 유일한 회전이다. 힘 축은 그대로 로봇이 잡는다.
@@ -1555,7 +1729,10 @@ class TelemetryBridge(Node):
             stream_hz = max(read_hz, float(self.get_parameter("bridge.wrench_stream_hz").value))
             read_dt = 1.0 / read_hz
             stream_dt = 1.0 / stream_hz
-            next_tele = next_read = next_stream = 0.0
+            us_hz = max(1.0, float(self.get_parameter("us.stream_hz").value))
+            us_dt = 1.0 / us_hz
+            us_on = bool(self.get_parameter("us.enabled").value)
+            next_tele = next_read = next_stream = next_us = 0.0
             try:
                 while True:
                     now = time.monotonic()
@@ -1572,7 +1749,12 @@ class TelemetryBridge(Node):
                         sample = self.wrench_stream_frame(refresh)
                         if sample is not None:
                             await connection.send(json.dumps(sample))
-                    await asyncio.sleep(min(tele_dt, stream_dt) / 2.0)
+                    if us_on and now >= next_us:
+                        next_us = now + us_dt
+                        picture = self.ultrasound_frame()
+                        if picture is not None:
+                            await connection.send(json.dumps(picture))
+                    await asyncio.sleep(min(tele_dt, stream_dt, us_dt) / 2.0)
             except Exception:
                 pass
             finally:

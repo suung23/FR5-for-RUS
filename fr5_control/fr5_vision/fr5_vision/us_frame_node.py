@@ -29,7 +29,7 @@ from __future__ import annotations
 import threading
 import time
 
-from fr5_vision.us_protocol import UsScannerSession
+from fr5_vision.us_protocol import PROFILES, UsScannerSession
 import numpy as np
 import rclpy
 from rclpy.node import Node
@@ -53,6 +53,10 @@ class UsFrameNode(Node):
         super().__init__("us_frame_node")
 
         self.declare_parameter("us.host", "192.168.1.1")
+        # 프로브 프로파일. 상수와 거동이 기종마다 다르다 — C10UR 은 **스캔 시작을
+        # 클라이언트가 명령**하고 프레임이 160 라인 × 512 표본이다. 예전에는 기본
+        # 프로파일(SL2C)로 고정이라 C10UR 에서는 프레임이 하나도 오지 않았다.
+        self.declare_parameter("us.probe", "c10ur")
         self.declare_parameter("us.video_port", 5002)
         self.declare_parameter("us.control_port", 5003)
         self.declare_parameter("us.topic", "/us/image")
@@ -80,6 +84,11 @@ class UsFrameNode(Node):
         topic = self.get_parameter("us.topic").value
         # 센서 QoS(best effort). 지연된 프레임을 재전송받는 것보다 최신 프레임이
         # 중요하다 — 접촉 제어 루프가 소비하기 때문이다.
+        probe = str(self.get_parameter("us.probe").value)
+        if probe not in PROFILES:
+            raise RuntimeError(f"알 수 없는 프로브 {probe!r} — 있는 것: {sorted(PROFILES)}")
+        self._profile = PROFILES[probe]
+
         self._publisher = self.create_publisher(Image, topic, qos_profile_sensor_data)
 
         self._stop = threading.Event()
@@ -117,12 +126,18 @@ class UsFrameNode(Node):
         타이머 콜백으로 하면 select 대기가 executor 를 잡아 다른 콜백이 밀린다.
         rclpy publish 는 별도 스레드에서 호출해도 된다.
         """
-        session = UsScannerSession(self._host, self._video_port, self._control_port)
+        session = UsScannerSession(self._host, self._video_port, self._control_port,
+                                   profile=self._profile)
         last_frame_at = time.monotonic()
         last_report_at = last_frame_at
         last_connect_attempt = 0.0
         was_active = False
         warned_stale = False
+        # 세션이 열린 뒤 아래에서 다시 잡는다. 여기서도 정의해 두는 것은 스레드 안의
+        # NameError 가 조용히 스레드만 죽이기 때문이다 — 밖에서는 프레임이 안 오는
+        # 것으로만 보인다.
+        opened_at = time.monotonic()
+        commanded_scan = False
 
         while not self._stop.is_set():
             if not session.is_open:
@@ -139,10 +154,21 @@ class UsFrameNode(Node):
                         throttle_duration_sec=10.0,
                     )
                     continue
-                self.get_logger().info(f"connected to scanner {self._host}")
+                self.get_logger().info(
+                    f"connected to scanner {self._host} (profile {self._profile.name})")
                 last_frame_at = time.monotonic()
+                opened_at = time.monotonic()
+                commanded_scan = False
                 was_active = False
                 warned_stale = False
+
+            # C10UR 은 클라이언트가 스캔을 명령해야 프레임이 온다. setup 바이트가
+            # 다 나간 뒤(ready_after_s) 한 번만 보낸다 — 그 전에 보내면 무시된다.
+            if (session.can_command_scan and not commanded_scan
+                    and time.monotonic() - opened_at > self._profile.ready_after_s):
+                session.start_scan()
+                commanded_scan = True
+                self.get_logger().info("스캔 시작을 명령했다 (클라이언트 주도 프로브)")
 
             try:
                 frames = session.poll(0.05)

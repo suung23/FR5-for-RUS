@@ -11,6 +11,7 @@ import { SafetyPanel } from './components/SafetyPanel';
 import { SensorCalibration } from './components/SensorCalibration';
 import { StatusColumn } from './components/StatusColumn';
 import { StatusStrip } from './components/StatusStrip';
+import { Ultrasound } from './components/Ultrasound';
 import { Workspace } from './components/Workspace';
 import { isStale } from './store/selectors';
 import { logEvent } from './store/events';
@@ -22,6 +23,7 @@ import styles from './App.module.css';
 export function App() {
   const telemetry = useTelemetryStore((s) => s.telemetry);
   const wrench = useTelemetryStore((s) => s.wrench);
+  const ultrasound = useTelemetryStore((s) => s.ultrasound);
   const contact = useTelemetryStore((s) => s.contact);
   const contactForce = useTelemetryStore((s) => s.contactForce);
   const contactJudged = useTelemetryStore((s) => s.contactJudged);
@@ -145,6 +147,12 @@ export function App() {
 
           <div className={styles.workspace}>
             <div className={styles.viewport}>
+              {/* The picture leads. It is what the operator is actually reading
+                  while probing; the arm beside it is context. On the frame views
+                  it stands down — the triads need that width. */}
+              {view === 'monitoring' || view === 'contact' ? (
+                <Ultrasound frame={ultrasound} className={styles.usPanel} />
+              ) : null}
               <Workspace
                 jointPositions={telemetry.jointPositions}
                 available={available}

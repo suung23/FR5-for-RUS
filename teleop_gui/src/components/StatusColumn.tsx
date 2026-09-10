@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { fixed, signed } from '../lib/format';
 import { config } from '../telemetry/config';
 import { JOINT_NAMES, marginToLimit } from '../telemetry/fr5Model';
@@ -127,8 +128,13 @@ function StagePlate({
   // Selected is what the operator asked for; active is what the arm is doing.
   // During approach the two differ, and that gap is the whole reason the mode
   // can be chosen ahead of the contact it applies to.
+  // Mirrors `teleop.contact_probing_enabled`, whose node default is true. The
+  // robot does not report it back, so this is the request the operator made —
+  // the *mode* field above is what the robot says it is doing.
+  const [probingArmed, setProbingArmed] = useState(true);
   const inplaneSelected = telemetry.inplaneRotation === true;
   const inplaneActive = probingMode === 'contact_probing_inplane';
+  const probingActive = probingMode === 'contact_probing' || inplaneActive;
   const alarm = safety === 'protective_stop' || safety === 'emergency_stop';
   const warn = safety === 'warning';
 
@@ -206,6 +212,43 @@ function StagePlate({
             axis, the only rotation that maps the imaging plane onto itself. The
             force loop keeps `z` either way, so it does not change how hard the
             probe presses — only whether the operator may rock it while it does. */}
+        {/* Régime switch. This is a *permission*, not a motion command: enabling
+            lets the robot take `z` once contact is judged, and disabling takes
+            that permission back — and if the arm is already probing, the control
+            node returns it to approach and releases `z`.
+
+            The button says what was asked for. What the robot is actually doing
+            is the "Probing mode" field above, read from the mode topic, because
+            enabling only permits — the mode does not change until contact. */}
+        <div className={`field ${probingActive ? 'field--warn' : ''}`}>
+          <span className="field__label">Contact probing</span>
+          <span className="field__value">
+            <button
+              type="button"
+              className={styles.modeSelect}
+              aria-pressed={probingArmed}
+              disabled={!available}
+              title={
+                probingArmed
+                  ? 'Take the permission back. If the arm is probing it returns to approach and releases z.'
+                  : 'Let the robot take z once contact is judged. Nothing moves until contact.'
+              }
+              onClick={() => {
+                const next = !probingArmed;
+                setProbingArmed(next);
+                sendCommand({ command: 'teleop.contact_probing', enabled: next });
+              }}
+            >
+              {probingArmed ? 'ARMED' : 'HELD OFF'}
+            </button>
+          </span>
+        </div>
+        <p className={styles.note}>
+          {probingArmed
+            ? 'The robot may take z when contact is judged. Approach limits until then.'
+            : 'Approach limits are held. Contact will not hand z to the robot.'}
+        </p>
+
         <div className={`field ${inplaneActive ? 'field--warn' : ''}`}>
           <span className="field__label">
             In-plane rock <span className="tag tag--off">TEST</span>

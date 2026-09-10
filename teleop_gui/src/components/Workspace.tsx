@@ -56,14 +56,17 @@ export function Workspace({
           dpr={[1, 2]}
           gl={{ antialias: true }}
           shadows="soft"
-          style={{ background: '#ffffff' }}
+          // The scene shares the console's ground. Left at a fixed white it
+          // became the one bright rectangle on a dark console — the arm read as
+          // a cut-out rather than as part of the panel it sits in.
+          style={{ background: 'var(--white)' }}
         >
           {/* Lit so the links have volume, not so the render looks expensive.
               One key with a soft shadow, a fill from the opposite side to keep
               the shaded faces readable, and a low ambient floor. The earlier
               flat 2.1 ambient washed every surface to the same value, which is
               what made the arm read as an outline drawing. */}
-          <hemisphereLight args={['#ffffff', '#e6ece7', 0.85]} />
+          <hemisphereLight args={['#ffffff', '#20261f', 0.85]} />
           <ambientLight intensity={0.55} />
           <directionalLight
             position={[2.2, 3.4, 1.8]}
@@ -147,7 +150,7 @@ function Phantom({ under }: { under?: [number, number, number] }) {
     <group position={[x, y, 0.018]}>
       <mesh receiveShadow scale={[1, 1, 0.42]}>
         <sphereGeometry args={[0.105, 40, 22, 0, Math.PI * 2, 0, Math.PI / 2]} />
-        <meshStandardMaterial color="#dcdedb" roughness={0.94} metalness={0} />
+        <meshStandardMaterial color="#2a302a" roughness={0.94} metalness={0} />
       </mesh>
       <PhantomRing />
     </group>

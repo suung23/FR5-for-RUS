@@ -1,0 +1,41 @@
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* The picture is the one place on the console that is genuinely black. A
+     grey plate behind a B-mode image reads as fog inside the sector. */
+  background: #000000;
+  overflow: hidden;
+}
+
+.picture {
+  max-width: 100%;
+  max-height: 100%;
+  /* Nearest keeps a speckle pattern a speckle pattern. Smoothing invents
+     texture that the probe did not send. */
+  image-rendering: pixelated;
+  display: block;
+}
+
+.empty {
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+  padding: var(--pad);
+  max-width: 34ch;
+}
+
+.meta {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-family: var(--font-num);
+  font-size: 11px;
+}
+
+.stale {
+  color: var(--critical);
+}

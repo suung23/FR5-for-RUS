@@ -318,8 +318,31 @@ export interface CommandAck {
   reason?: string;
 }
 
+/**
+ * One ultrasound picture, already fan-converted and JPEG-encoded by the bridge.
+ *
+ * The bridge is not the probe's client — `us_frame_node` is, because the probe
+ * accepts only one. This is a display copy; what a session records is always the
+ * raw polar frame.
+ */
+export interface UltrasoundFrame {
+  /** Bridge clock, ms. */
+  timestamp: number;
+  /** Monotonic counter from the bridge. Lets the view tell a stalled stream from a still image. */
+  seq: number;
+  width: number;
+  height: number;
+  /** `fan` (scan-converted) or `polar` (raw layout). */
+  display: string;
+  /** base64 JPEG, no data: prefix. */
+  jpeg: string;
+  /** When the renderer received it. */
+  receivedAt: number;
+}
+
 export interface TransportSink {
   onTelemetry(frame: RobotTelemetry): void;
+  onUltrasound(frame: UltrasoundFrame): void;
   onWrench(sample: WrenchSample): void;
   onStatus(patch: Partial<LinkStatus>): void;
   onAck(ack: CommandAck): void;

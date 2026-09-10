@@ -180,7 +180,64 @@ python3 scripts/diag_quality.py runs/qres2/last.pt --dataset /data4/seong/policy
 매 tick 옳은 것이 아니라 **평균적으로 옳은** 수준으로 기대해야 한다. 그래서 `run_policy.py` 의
 후보 수 기본값이 64 이고, 모드 떨림을 막으려면 `ensemble.py` 의 `hysteresis` 모드를 얹는다.
 
-## 6. 평가 프로토콜
+## 6. 운용 프로토콜 — 콘솔에서
+
+콘솔이 조작자의 자리다. 터미널은 **에피소드 사이에 Enter 를 치는 것** 말고는 볼 일이 없다.
+
+### 기동 (터미널 넷, 순서대로)
+
+```bash
+# ① 제어 스택 — freespace:=false 는 필수다 (§4 경고)
+source ~/FR5-for-RUS/env.sh
+ros2 launch fr5_launch us_phase0.launch.py backend:=fairino teleop:=true freespace:=false
+
+# ② 브리지 — launch 가 띄우지 않는다. 없으면 콘솔 버튼이 아무 데도 안 닿는다
+source ~/FR5-for-RUS/env.sh
+ros2 run fr5_control telemetry_bridge
+
+# ③ 콘솔
+cd ~/FR5-for-RUS/teleop_gui && npm run console
+
+# ④ 힘 탐색 — 먼저 관찰 모드로 디더를 확인하고 execute:=true 로 바꾼다
+source ~/FR5-for-RUS/env.sh
+ros2 run fr5_control force_search
+```
+
+### 기동 확인 — 콘솔에서
+
+| 볼 것 | 어디 | 기대 |
+|---|---|---|
+| 링크 | 상단 스트립 | `NO TELEMETRY` 가 아니다 |
+| 렌치 | Monitoring | 0 이 아니고 잡음이 보인다 |
+| 프로빙 모드 | Contact → Probing mode 패널 | `approach` |
+| 정책 패널 | Contact 뷰 하단 오른쪽 | 버튼이 눌리는 상태 (비활성 아님) |
+
+`Policy inference` 패널이 회색이면 텔레메트리가 없는 것이다 — ② 를 확인한다.
+
+### 에피소드 한 번
+
+1. **접근** — Touch 데드맨(회색 버튼)을 쥐고 시작 자세로. 접촉이 잡히면 손을 놓는다.
+2. **터미널에서 Enter** — 세션 드라이버가 그 에피소드를 띄운다. 조건은 화면에 안 나온다
+   (`--blind`). `expert` 일 때만 "조작자가 계속 지령" 이라고 알린다.
+3. **콘솔에서 `Start inference`** — 패널이 `HANDOVER` 로 채워지고 프로빙 모드가
+   `contact_probing_policy` 로 바뀌는 것을 확인한다. **채워지지 않으면 누르지 않은 것과 같다** —
+   요청만 갔고 스택이 받지 않았다는 뜻이라 `PENDING` 으로 남는다.
+4. **손을 뗀다.** `desired_twist` 는 발행자가 하나여야 한다.
+5. 90 s 가 지나면 러너가 스스로 멈추고 판정을 인쇄한다.
+6. **콘솔에서 `Stop`** — 다음 자세로 접근하려면 régime 을 놓아야 Touch 가 돌아온다.
+
+### 즉시 멈춰야 할 때
+
+콘솔 `Stop` 이 가장 빠르다. 그것으로 안 되면 Touch 데드맨을 놓는다 (워치독 후퇴).
+그것도 아니면 ① 터미널 Ctrl-C.
+
+### 아직 콘솔에서 못 하는 것
+
+조건 선택(hold/placebo/policy)과 에피소드 길이는 `run_experiment.py` 의 인자다. 콘솔에서
+고르게 하려면 조건을 토픽이나 파라미터로 받아야 하는데, 그러면 **가림(blinding)이 깨진다** —
+조작자가 화면에서 조건을 보게 된다. 지금 구조는 조건을 터미널이 쥐고 조작자는 모르는 쪽이다.
+
+## 7. 평가 프로토콜
 
 팬텀 물풍선 부피를 바꾸며 영상 품질 유지를 본다. 접근은 텔레옵, 인퍼런싱 시작은 사용자가 지정
 (접촉 ~1 N, 영상이 보이기 시작하는 시점).
@@ -198,7 +255,7 @@ python3 scripts/diag_quality.py runs/qres2/last.pt --dataset /data4/seong/policy
 > 학습 데이터는 **프리핸드 접근·재위치** 동작이고 평가는 **접촉 후 서보** 구간이다. 분포가 다르다.
 > 결과가 나쁠 때 정책의 한계인지 분포 밖 상황인지 구분해서 볼 것.
 
-## 7. 함정 — YAML 이 데이터클래스 기본값을 덮는다
+## 8. 함정 — YAML 이 데이터클래스 기본값을 덮는다
 
 `configs/policy_default.yaml` 에 적힌 키는 `config.py` 의 기본값을 **무조건 이긴다**. 2026-09-10 에
 `discrete_bins`·`discrete_range_mm` 를 config.py 에서 고쳤는데 YAML 이 옛 값(21 / ±20mm)을 들고 있어
@@ -211,7 +268,7 @@ python3 scripts/diag_quality.py runs/qres2/last.pt --dataset /data4/seong/policy
 import torch; print(torch.load("runs/last.pt", map_location="cpu", weights_only=False)["config"])
 ```
 
-## 8. 열려 있는 항목
+## 9. 열려 있는 항목
 
 1. **`timing.us_latency_s`** 기본값을 0 → 0.200 으로 고쳐 두었으나 **데이터셋을 다시 빌드해야 반영된다**
    (`dataset.py` 가 빌드 때 프레임 시각에서 뺀다). 정책 스텝이 0.2 s 라 관측·행동이 한 스텝 어긋나 있다.

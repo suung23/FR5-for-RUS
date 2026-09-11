@@ -82,6 +82,39 @@ def select_cone(poses: list[CalibrationPose], cone_deg: float) -> list[Calibrati
     return kept
 
 
+def _reject_mixed_convention(rows: list[dict]) -> None:
+    """한 적합에 **서로 다른 규약의 렌치**가 섞이면 거부한다.
+
+    이 로그는 세션을 넘어 덧붙는데, 세션마다 무엇을 적었는지가 달랐다. 실제 파일
+    (2026-09-11 확인)에서 앞 31 행은 전자 영점이 **빠진** 값(‖F‖≈8.5 N)이고 뒤 75 행은
+    **원값**(‖F‖≈837 N, Fz≈−836)이다. 두 무리는 서로 830 N 떨어져 있다.
+
+    섞이면 적합은 그 차이를 바이어스로 흡수하려 들고, 나온 질량·회전·COM 이 전부
+    틀어진다. 그런데 **거부되지 않는다** — 잔차가 커지긴 해도 숫자는 나오고,
+    저장된 프로파일은 멀쩡해 보인다. 지금까지 무사했던 것은 `--count` 기본값 20 이
+    마침 꼬리의 같은 규약 안에 들어갔기 때문이지 방어가 있어서가 아니다.
+
+    판정: 자중이 0.2 kg 남짓이므로 자세가 아무리 달라져도 ‖F‖ 의 폭은 2·m·g ≈ 5 N 을
+    넘을 수 없다. 수십 N 이 벌어지면 그것은 자세 차이가 아니라 규약 차이다.
+    """
+    mags = [float(np.linalg.norm(np.asarray(r["wrench"], dtype=float)[:3])) for r in rows]
+    if not mags:
+        return
+    span = max(mags) - min(mags)
+    if span <= 50.0:
+        return
+    lo = [m for m in mags if m < (max(mags) + min(mags)) / 2]
+    hi = [m for m in mags if m >= (max(mags) + min(mags)) / 2]
+    raise SystemExit(
+        f"자세 로그에 규약이 다른 렌치가 섞여 있다 — 적합하지 않는다.\n"
+        f"  ‖F‖ 가 {min(mags):.1f} N 부터 {max(mags):.1f} N 까지 벌어진다 (폭 {span:.0f} N).\n"
+        f"  자중 0.2 kg 이면 자세가 어떻든 폭은 5 N 을 넘을 수 없다.\n"
+        f"  작은 쪽 {len(lo)} 개 (중앙 {sorted(lo)[len(lo)//2]:.1f} N) = 전자 영점이 빠진 값\n"
+        f"  큰 쪽   {len(hi)} 개 (중앙 {sorted(hi)[len(hi)//2]:.1f} N) = 원값\n"
+        f"  --count 를 줄여 한 세션 안에 머물러라 (로그는 시간순이고 최신이 꼬리다)."
+    )
+
+
 def load_poses(path: str, count: int) -> list[CalibrationPose]:
     """자세 로그의 **마지막 `count` 개**를 읽는다.
 
@@ -91,6 +124,7 @@ def load_poses(path: str, count: int) -> list[CalibrationPose]:
     rows = [json.loads(line) for line in open(path) if line.strip()]
     if len(rows) < count:
         raise SystemExit(f"자세가 {len(rows)} 개뿐이다 (요청 {count})")
+    _reject_mixed_convention(rows[-count:])
     return [
         CalibrationPose(
             wrench=np.asarray(r["wrench"], dtype=float),

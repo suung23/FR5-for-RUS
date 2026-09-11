@@ -100,13 +100,16 @@ def main() -> int:
 
     print(f"\n=== 품질 헤드 비교 — 목표 {args.target}, test 관측 {new['n_obs']} ===")
     rows = [("라벨 적합 R²", "fit_r2", "{:+.3f}"),
-            ("행동 효과 상관 ρ", "effect_spearman", "{:+.3f}"),
+            ("방향만: A 대 −A 부호 일치 ★", "mirror_sign_agree", "{:.1%}"),
+            ("크기만: 크게 움직이는 쪽 선호", "prefers_larger", "{:.1%}"),
+            ("행동 효과 상관 ρ (크기·방향 섞임)", "effect_spearman", "{:+.3f}"),
             ("방향별 Q̂ 차 (중앙)", "gap_median", "{:.4f}"),
             ("z 재추첨 방향 일치율", "consistency", "{:.1%}"),
             (f"Q̂ 가 방향을 정하는 몫 (γ={kw['gamma_ref']:g})", "decided_frac", "{:.1%}")]
     for label, key, fmt in rows:
         print(f"  {label:32s} 옛 {fmt.format(old[key]):>8}   새 {fmt.format(new[key]):>8}")
     v = verdict(old, new)
+    print("  ★ = 방향 판단의 주 지표. 나머지는 크기와 방향이 섞여 있다 (quality_eval.verdict)")
     print(f"\n  → {v}")
     (out / "quality_eval.json").write_text(
         json.dumps({"target": args.target, "old": old, "new": new, "verdict": v},

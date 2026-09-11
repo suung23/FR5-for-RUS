@@ -57,6 +57,7 @@ def evaluate_quality_head(model, loader, target: str = "Q_area", M: int = 64,
     model.eval()
     k = model.k
     fit_p, fit_y, eff_p, eff_y, gaps, agree, n = [], [], [], [], [], [], 0
+    mir_p, mir_y, mag = [], [], []
     for batch in loader:
         dev = next(model.parameters()).device
         batch = {key: (v.to(dev) if torch.is_tensor(v) else v) for key, v in batch.items()}
@@ -71,6 +72,14 @@ def evaluate_quality_head(model, loader, target: str = "Q_area", M: int = 64,
         if ends.any():
             eff_p.append((qa - q0)[:, -1].cpu().numpy()[ends])
             eff_y.append((lab[:, -1] - lab[:, 0]).cpu().numpy()[ends])
+            # 거울 검사 — 크기는 같고 방향만 반대. 방향을 아는 헤드만 이 차로 실제 변화의 부호를
+            # 맞힌다. 위의 행동 효과 상관은 크기와 방향이 섞여 있어, "크게 움직일수록 면적이 더
+            # 변한다" 만 배워도 오른다 (2026-09-11 재학습: 효과 상관 +0.20 인데 방향만은 +0.07).
+            qm = model.predict_quality(pooled, -batch["P"])
+            q2 = model.predict_quality(pooled, 2 * batch["P"])
+            mir_p.append((qa - qm)[:, -1].cpu().numpy()[ends])
+            mir_y.append((lab[:, -1] - lab[:, 0]).cpu().numpy()[ends])
+            mag.append(((q2 - qa)[:, -1] > 0).cpu().numpy()[ends])
 
         qa_, sa, _ = _candidates(model, batch, M, seed=11)
         qb_, sb, _ = _candidates(model, batch, M, seed=22)
@@ -90,6 +99,9 @@ def evaluate_quality_head(model, loader, target: str = "Q_area", M: int = 64,
     ey = np.concatenate(eff_y) if eff_y else np.array([])
     gaps = np.asarray(gaps)
     bonus_gap = gamma_ref * k
+    mp = np.concatenate(mir_p) if mir_p else np.array([])
+    my = np.concatenate(mir_y) if mir_y else np.array([])
+    nz = my != 0
     return {
         "n_obs": n,
         "fit_r2": float(r2),
@@ -98,23 +110,36 @@ def evaluate_quality_head(model, loader, target: str = "Q_area", M: int = 64,
         "consistency": float(np.mean(agree)) if agree else float("nan"),
         "decided_frac": float(np.mean(gaps > bonus_gap)) if gaps.size else float("nan"),
         "gamma_ref": gamma_ref,
+        # 방향만: A 대 −A 중 실제로 면적을 키운 쪽을 맞힌 비율 (0.5 = 모름). 방향 판단의 주 지표.
+        "mirror_sign_agree": float(np.mean(np.sign(mp[nz]) == np.sign(my[nz]))) if nz.any() else float("nan"),
+        "mirror_spearman": _spearman(mp, my),
+        # 크기만: 같은 방향으로 두 배 움직이는 쪽을 더 좋게 보는 비율.
+        "prefers_larger": float(np.mean(np.concatenate(mag))) if mag else float("nan"),
     }
 
 
 def verdict(old: dict, new: dict) -> str:
-    """재학습이 선택을 바꿀 만큼 달라졌는가 — 사람이 읽을 한 줄."""
-    if not np.isfinite(new["consistency"]):
-        return "판정 불가 — 두 방향 후보가 함께 나온 관측이 없다"
-    better_dir = new["consistency"] - old["consistency"]
-    if new["consistency"] < 0.6 and abs(new["effect_spearman"]) < 0.1:
-        return (f"⚠️ 방향을 가르지 못한다 — 일치율 {new['consistency']:.0%} (잡음 50 %), "
-                f"행동 효과 상관 {new['effect_spearman']:+.2f}. 이 데이터에는 '어느 쪽으로 가야 "
-                f"커지는가' 가 들어 있지 않다 (개입 데이터가 필요하다)")
-    if better_dir > 0.05 and new["effect_spearman"] > 0.1:
-        return (f"방향 판단이 나아졌다 — 일치율 {old['consistency']:.0%} → {new['consistency']:.0%}, "
-                f"행동 효과 상관 {new['effect_spearman']:+.2f}")
-    return (f"뚜렷한 개선 없음 — 일치율 {old['consistency']:.0%} → {new['consistency']:.0%}, "
-            f"행동 효과 상관 {old['effect_spearman']:+.2f} → {new['effect_spearman']:+.2f}")
+    """재학습이 **방향** 판단을 바꿨는가 — 사람이 읽을 한 줄.
+
+    거울 검사(A 대 −A)로 판정한다. 일치율·행동 효과 상관은 크기와 방향이 섞여 있어 주 지표로
+    쓰면 안 된다: 2026-09-11 Q_area 재학습에서 일치율 65 → 79 %, 효과 상관 −0.03 → +0.20 으로
+    크게 좋아 보였지만 방향만 떼어 보면 52 → 56 % 였다. 앞의 두 수가 오른 것은 대부분 "크게
+    움직일수록 면적이 더 변한다" 를 배운 몫이다. 이 함수의 첫 판본은 그 두 수로 판정해 "방향
+    판단이 나아졌다" 를 냈다.
+    """
+    a_new, a_old = new.get("mirror_sign_agree", float("nan")), old.get("mirror_sign_agree", float("nan"))
+    if not np.isfinite(a_new):
+        return "판정 불가 — 양 끝 라벨이 유효한 관측이 없다"
+    size = ""
+    if np.isfinite(new.get("prefers_larger", float("nan"))) and new["prefers_larger"] > 0.6:
+        size = f" · 크게 움직이는 쪽을 더 좋게 본다 ({new['prefers_larger']:.0%})"
+    if a_new < 0.55:
+        return (f"⚠️ 방향을 가르지 못한다 — A 대 −A 부호 일치 {a_new:.0%} (옛 {a_old:.0%}, 50 % = 모름){size}. "
+                "이 데이터에는 '어느 쪽으로 가야 커지는가' 가 거의 없다 — 개입 데이터가 필요하다")
+    if a_new < 0.65:
+        return (f"방향 판단이 약하다 — A 대 −A 부호 일치 {a_new:.0%} (옛 {a_old:.0%}, 50 % = 모름){size}. "
+                "선택에 맡기기에는 부족하다")
+    return f"방향 판단이 나아졌다 — A 대 −A 부호 일치 {a_old:.0%} → {a_new:.0%}{size}"
 
 
 # ---- 얼린 인코더 위에서 헤드만 빠르게 ---------------------------------------------

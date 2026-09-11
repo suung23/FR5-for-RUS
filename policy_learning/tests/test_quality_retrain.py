@@ -141,11 +141,21 @@ def test_verdict_flags_a_head_that_cannot_choose_a_direction():
     """사전 판정이 예상한 결과를 '개선' 으로 잘못 읽지 않아야 한다."""
     from rus_policy.quality_eval import verdict
 
-    old = {"consistency": 0.667, "effect_spearman": 0.02}
-    new = {"consistency": 0.55, "effect_spearman": 0.03}
-    assert "가르지 못한다" in verdict(old, new)
-    good = {"consistency": 0.80, "effect_spearman": 0.35}
-    assert "나아졌다" in verdict(old, good)
+    old = {"mirror_sign_agree": 0.524, "prefers_larger": 0.70}
+    assert "가르지 못한다" in verdict(old, {"mirror_sign_agree": 0.53, "prefers_larger": 0.67})
+    assert "나아졌다" in verdict(old, {"mirror_sign_agree": 0.72, "prefers_larger": 0.5})
+
+
+def test_verdict_is_not_fooled_by_a_magnitude_only_head():
+    """2026-09-11 의 실수: 일치율 79 %·효과 상관 +0.20 을 보고 '방향이 나아졌다' 고 판정했지만
+    방향만 떼어 보면 56 % 였다. 크기만 배운 헤드를 방향 개선으로 읽으면 안 된다."""
+    from rus_policy.quality_eval import verdict
+
+    old = {"mirror_sign_agree": 0.524, "consistency": 0.646, "effect_spearman": -0.035}
+    new = {"mirror_sign_agree": 0.563, "consistency": 0.793, "effect_spearman": 0.196,
+           "prefers_larger": 0.671}
+    v = verdict(old, new)
+    assert "나아졌다" not in v and "약하다" in v and "크게 움직이는" in v
 
 
 def test_cached_loss_matches_the_trainer_loss():

@@ -218,3 +218,78 @@ class PlaceboBuffer:
     @property
     def n_buffered(self) -> int:
         return len(self._items)
+
+
+# ---- 실현 확인 ---------------------------------------------------------------
+
+def _quat_angle_deg(q1: Sequence[float], q2: Sequence[float]) -> float:
+    """두 단위 사원수 사이의 회전각 [도]. 부호가 반대인 같은 자세(q ≡ −q)도 0 이다."""
+    a = np.asarray(q1, float)
+    b = np.asarray(q2, float)
+    na, nb = np.linalg.norm(a), np.linalg.norm(b)
+    if na < 1e-9 or nb < 1e-9:
+        return float("nan")
+    d = abs(float(np.dot(a / na, b / nb)))
+    return float(np.degrees(2.0 * np.arccos(min(1.0, d))))
+
+
+def motion_check(t: Sequence[float], cmd_w_deg_s: np.ndarray, quat: np.ndarray,
+                 *, min_commanded_deg: float = 1.0) -> dict:
+    """지령한 회전이 **실제로** 일어났는가.
+
+    지령만 기록하면 "로봇이 정책대로 움직였는가" 에 답할 수 없다. 2026-09-11 까지 세 번
+    "지령은 나가는데 로봇이 안 움직인다" 가 있었고 (축 게이트가 회전을 0 으로 만듦 ·
+    시작 게이트가 전량 차단 · 5 Hz 발행이 워치독에 매 주기 절반씩 버려짐), 셋 다 코드를
+    읽어서야 찾았다. 기록이 있었으면 첫 에피소드에서 드러났다.
+
+    **경로 길이**로 비교한다. 방향과 무관하므로 위약(크기는 같고 방향만 무작위)에서도
+    그대로 성립한다. 알짜 회전(처음↔끝)은 왕복하면 0 이 되어 판정에 못 쓴다.
+
+    Args:
+        t: 각 결정의 시각 [s].
+        cmd_w_deg_s: (N, 3) 로봇에 **실제로 보낸** 각속도 [°/s]. 조건을 지난 뒤의 값.
+        quat: (N, 4) 그때의 프로브 자세 (w, x, y, z). 모르면 NaN.
+        min_commanded_deg: 지령 경로가 이보다 짧으면 "지령 없음" 으로 본다.
+
+    Returns:
+        commanded_deg · realized_deg · realized_net_deg · ratio · verdict.
+    """
+    t = np.asarray(t, float)
+    w = np.asarray(cmd_w_deg_s, float).reshape(-1, 3)
+    q = np.asarray(quat, float).reshape(-1, 4)
+    out = {"commanded_deg": float("nan"), "realized_deg": float("nan"),
+           "realized_net_deg": float("nan"), "ratio": float("nan"), "verdict": ""}
+    if len(t) < 2:
+        out["verdict"] = "표본 부족"
+        return out
+
+    dt = np.diff(t)
+    speed = np.linalg.norm(np.nan_to_num(w[:-1]), axis=1)
+    commanded = float(np.sum(speed * dt))
+    out["commanded_deg"] = commanded
+
+    ok = np.all(np.isfinite(q), axis=1)
+    if ok.sum() < 2:
+        out["verdict"] = "자세 없음 — ee_wrt_base 가 안 왔다 (제어 스택이 떠 있는가)"
+        return out
+    qv = q[ok]
+    steps = [_quat_angle_deg(qv[i], qv[i + 1]) for i in range(len(qv) - 1)]
+    realized = float(np.nansum(steps))
+    out["realized_deg"] = realized
+    out["realized_net_deg"] = _quat_angle_deg(qv[0], qv[-1])
+
+    if commanded < min_commanded_deg:
+        out["verdict"] = (f"지령 없음 (경로 {commanded:.1f}°) — hold·expert 이거나 정책이 "
+                          f"거의 0 을 냈다. 그 사이 실제 회전 {realized:.1f}°")
+        return out
+    ratio = realized / commanded
+    out["ratio"] = ratio
+    if ratio >= 0.5:
+        out["verdict"] = f"지령대로 움직였다 — 실현 {ratio:.0%}"
+    elif ratio >= 0.2:
+        out["verdict"] = (f"⚠️ 일부만 실현됐다 ({ratio:.0%}) — 상한·가속 제한·감쇠를 의심하라")
+    else:
+        out["verdict"] = (f"⚠️ 지령했는데 거의 안 움직였다 ({ratio:.0%}) — 지령이 사슬 어딘가에서 "
+                          "끊겼다: probing_mode 가 contact_probing_policy 인가, desired_twist 가 "
+                          "50 Hz 로 오는가")
+    return out

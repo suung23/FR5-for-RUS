@@ -58,7 +58,7 @@ from _common import setup_logging
 from rus_policy.bmode import BmodeConverter
 from rus_policy.dataset import OBS_VEC_DIM, _resize_frames
 from rus_policy.episode import (CONDITIONS, PlaceboBuffer, StartGate, Thresholds, judge,
-                                randomize_direction)
+                                motion_check, randomize_direction)
 from rus_policy.model import ACTION_DIM
 from rus_policy.perception import STATE_DIM, apply_frame_transform, build_backend
 from rus_policy.train import load_policy
@@ -341,6 +341,15 @@ class PolicyRunner(Node):
         if self.n_img % 50 == 0:
             self.get_logger().info(f"프레임 {self.n_img} 장, 지각 {dt_ms:.0f} ms/장, 느림 {self.n_drop} 회")
 
+    def _pose_columns(self) -> dict:
+        """ee_wrt_base 의 최신값을 기록용 열로. 없으면 NaN."""
+        nan = float("nan")
+        if self.pose is None:
+            return {k: nan for k in ("ee_x", "ee_y", "ee_z", "ee_qw", "ee_qx", "ee_qy", "ee_qz")}
+        p, o = self.pose
+        return {"ee_x": float(p.x), "ee_y": float(p.y), "ee_z": float(p.z),
+                "ee_qw": float(o.w), "ee_qx": float(o.x), "ee_qy": float(o.y), "ee_qz": float(o.z)}
+
     # -- 관측 조립 ---------------------------------------------------------
     def _observation(self):
         quat = None
@@ -548,6 +557,9 @@ class PolicyRunner(Node):
             "condition": self.condition, "t_episode": t - self.t_start,
             "Q_raw": self.q_raw,
             "f_bar": self.f_bar if self.f_bar is not None else float("nan"),
+            # 로봇이 **실제로** 어디를 향했는가. 지령(cmd_*)만 적으면 "정책대로 움직였나" 에
+            # 답할 수 없다 — save() 의 motion_check 가 이 열과 cmd_w* 를 비교한다.
+            **self._pose_columns(),
         })
         if len(self.rows) % 10 == 0:
             # 두 줄로 나눈다: 첫 줄은 **정책이 원한 것**, 둘째 줄은 **로봇에 간 것**.
@@ -627,6 +639,10 @@ class PolicyRunner(Node):
                 verdict = judge([self.state_t[i] for i in m],
                                 np.stack([self.states[i] for i in m]), thr)
                 print("\n판정: " + "  ".join(f"{k}={v}" for k, v in verdict.items()))
+        motion = self._motion_check()
+        if motion:
+            print(f"움직임: 지령 {motion['commanded_deg']:.1f}° · 실제 {motion['realized_deg']:.1f}° "
+                  f"(처음↔끝 {motion['realized_net_deg']:.1f}°) — {motion['verdict']}")
         if self.states:
             # 판정 임계를 나중에 다시 훑으려면 원자료가 있어야 한다 — 파일럿의 목적이
             # "예비 촬영으로 임계를 확정한다" 이므로 판정 결과만 남기면 되돌아갈 수 없다.
@@ -641,6 +657,7 @@ class PolicyRunner(Node):
             "episode_started": self.t_start is not None,
             "stopped_by_operator_s": self.stopped_by_operator_s,
             "start_gate": self.args.start_gate, "gate_met_at_start": self.gate_met_at_start,
+            "motion": motion,
             "gate": {"area_max": self.args.gate_area_max, "quality_min": self.args.gate_quality_min,
                      "confirm_s": self.args.gate_confirm_s, "held_s": self.gate.held_s},
             "thresholds": {"area_min": self.args.success_area_min,
@@ -654,6 +671,18 @@ class PolicyRunner(Node):
         }, ensure_ascii=False, indent=2), encoding="utf-8")
         if not quiet:
             print(f"\n기록: {out}  (tick {len(self.rows)}, 프레임 {self.n_img})")
+
+    def _motion_check(self) -> dict:
+        """에피소드 구간의 지령 회전 대 실제 회전 (rus_policy.episode.motion_check)."""
+        if not self.rows:
+            return {}
+        rows = [r for r in self.rows if self.t_start is None or r["t"] >= self.t_start]
+        if len(rows) < 2:
+            return {}
+        return motion_check(
+            [r["t"] for r in rows],
+            np.array([[r["cmd_wx"], r["cmd_wy"], r["cmd_wz"]] for r in rows], float),
+            np.array([[r["ee_qw"], r["ee_qx"], r["ee_qy"], r["ee_qz"]] for r in rows], float))
 
     def summary(self) -> None:
         if not self.attempts:

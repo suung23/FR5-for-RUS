@@ -68,6 +68,15 @@ python3 ~/FR5-for-RUS/policy_learning/scripts/diag_wrench_poses.py
 | **본 시험** N 자세 × 4 조건 | `~/FR5-for-RUS/scripts/start_policy_eval.sh --main N` |
 | 자유 루프 (실험 아님) | `~/FR5-for-RUS/scripts/start_policy_eval.sh` |
 
+**방향 관성** — 뒤에 `--gamma 0.005` 를 붙이면 정책이 방향을 바꿀 수 있다. 기본(체크포인트
+값 0.2)은 방향을 **절대** 안 바꾼다 (H-9). gamma 를 바꾸면 방법이 바뀌므로 **새 폴더**로
+돌려 한 파일럿 안에서 섞이지 않게 한다:
+
+```bash
+~/FR5-for-RUS/scripts/start_policy_eval.sh --pilot --gamma 0.005 \
+        --out ~/FR5-for-RUS/policy_learning/runs/pilot_g0005
+```
+
 힘 탐색이 **함께 뜬다. Ctrl-C 하나로 둘 다 내린다.** 따로 띄우지 않는다 — 빠지면 힘
 설정값이 출발값에 고정되고 그 에피소드는 분리 보고 대상이 된다.
 
@@ -156,6 +165,9 @@ python3 ~/FR5-for-RUS/policy_learning/scripts/analyze_experiment.py \
 1. **접촉이 먼저다.** `Start inference` 를 누르면 조작자 축이 0 이 되어 접촉을 만들 수단이
    없다.
 2. **`Stop` 을 눌러야** régime 이 풀리고 Touch 가 돌아온다. 다음 자세로 가려면 반드시.
+   GUI 에 `TELEOP` 이 뜨고 Velocity limits 가 `APPROACH` 로 돌아오면 처음 상태다. 90 s 전에
+   누르면 그 에피소드는 거기서 닫힌다 (`meta.json` 의 `stopped_by_operator_s`) — 터미널 ② 가
+   곧바로 다음 자세를 묻는다.
 3. **버튼 전 teleop 구간에는 접촉 시 자동 감속이 없다.** 5 N 후퇴가 유일한 보호다.
 4. **Q 눈금은 에피소드가 도는 동안에만 채워진다.** 러너가 그 값을 내는 주체이고, 에피소드
    사이에는 러너가 없다. 눈금이 `—` 인 것은 고장이 아니다.
@@ -170,6 +182,14 @@ python3 ~/FR5-for-RUS/policy_learning/scripts/analyze_experiment.py \
    "마스크가 깨끗한가"(신뢰도·연결성·경계·시간 안정성)이고 면적은 15 % 뿐이다. 방광이
    화면의 2 % 만 보여도 0.91, 성공 문턱(8 %)에 가도 +0.04 다. **성공 판정은 Q 가 아니라
    면적·연결성분·중심이다** — 그쪽은 포화되지 않았다 (시작 자세에서 0/942).
+   → 2026-09-11 부터 화면의 Q_seg 는 **방광 뷰 품질**(면적·좌우 중심 63 %)이다: 방광 없음
+   0.10 · 2 % 0.63 · 성공 0.95. 정책의 입력은 옛 Q 그대로다 (학습 때 본 값). 로그의
+   `정책 입력 Q` 가 그것이다.
+9. **gamma 0.2 에서는 정책이 한 번 정한 방향을 영원히 유지한다.** 후보를 고르는 점수에
+   "직전과 같은 방향" 보너스가 붙는데, 그 크기(1.60)가 후보 사이 Q̂ 차(중앙 0.021)의
+   75 배라 테스트 관측 496 개 전부에서 방향을 직전 방향이 정했다. `--gamma 0.005` 면
+   Q̂ 가 약 20 % 를 정한다 — 다만 지금 Q̂ 는 옛 Q 로 학습돼 방광을 잘 모르므로
+   (방향 선호 일치율 67 %, 잡음 50 %) 되돌아가는 판단이 약하다.
 
 ---
 

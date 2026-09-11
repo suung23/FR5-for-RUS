@@ -329,6 +329,11 @@ class Trainer:
             if "select_nmae" in va:
                 msg += f"  sel_nmae {va['select_nmae']:.3f}"
             msg += f"  beta {tr.get('beta', float('nan')):.3f}"
+            # 품질 손실을 늘 찍는다. 헤드만 재학습할 때(train_only=quality)는 행동 헤드가 얼어
+            # 위의 total·mae·sel_nmae 가 epoch 마다 같게 나오고, 정작 학습 중인 값은 이것뿐이다 —
+            # 2026-09-11 서버 재학습에서 요약 줄만 보고는 헤드가 배우는지 알 수 없었다.
+            if "qual" in va:
+                msg += f"  qual {tr.get('qual', float('nan')):.4f}/{va['qual']:.4f}"
             logger.info(msg)
             self.adapt_beta(va)          # 저장 전에 — last.pt 는 다음 epoch 에 쓸 β 를 담아야 한다
             self.save("last.pt")

@@ -103,6 +103,7 @@ def run_episode(args, ep: dict, ep_dir: Path) -> dict:
     cmd = [sys.executable, str(Path(__file__).with_name("run_policy.py")), args.checkpoint,
            "--condition", ep["condition"], "--duration", str(args.duration),
            "--out", str(ep_dir), "--axes", args.axes,
+           "--start-gate", "on",          # 실험에서는 시작 조건이 자세를 가른다 (계획서 §3)
            "--gate-area-max", str(args.gate_area_max),
            "--gate-quality-min", str(args.gate_quality_min),
            "--success-area-min", str(args.success_area_min),

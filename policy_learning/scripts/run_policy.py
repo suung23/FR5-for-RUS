@@ -185,6 +185,10 @@ class PolicyRunner(Node):
         self.attempt = 0            # --loop: 시도 번호. enable 이 올라갈 때마다 는다
         self.attempts: list = []    # 시도별 판정 (한 줄씩 화면에 쌓는다)
         self.announced = False      # 이번 시도에서 성공을 이미 알렸는가
+        # 시작 조건은 **실험 장치**다 (계획서 §3 의 'teleop 실패 자세' 판정). 운용에서는
+        # 버튼이 조작자의 결정이므로 막지 않는다 — 다만 조건 충족 여부는 기록한다.
+        self.gate_required = args.start_gate == 'on'
+        self.gate_met_at_start = None
         self._warned = False
         self._uncompensated = ""    # 보상 안 된 렌치가 오고 있으면 그 frame_id
         self.q_raw = float("nan")   # 최근 Q_raw (힘 축)
@@ -376,12 +380,18 @@ class PolicyRunner(Node):
             st = self.states[-1] if self.states else None
             if st is None:
                 return self._idle("지각 상태가 아직 없다")
-            if not self.gate.update(t, st, self.q_raw):
-                from rus_policy.episode import AREA
+            from rus_policy.episode import AREA
+            met = self.gate.update(t, st, self.q_raw)
+            if self.gate_required and not met:
                 return self._idle(
                     f"시작 조건 미충족 — 면적비 {st[AREA]:.3f} (< {self.args.gate_area_max}) · "
                     f"Q_raw {self.q_raw:.2f} (≥ {self.args.gate_quality_min}) · "
                     f"유지 {self.gate.held_s:.1f}/{self.args.gate_confirm_s:.1f} s")
+            self.gate_met_at_start = bool(met)
+            if not met:
+                self.get_logger().warn(
+                    f"시작 조건 **미충족인 채로** 시작한다 (--start-gate off) — "
+                    f"면적비 {st[AREA]:.3f} · Q_raw {self.q_raw:.2f}. 기록에 남는다")
             self.t_start = t
             self.get_logger().warn(
                 f"시작 조건 충족 — 에피소드 시작 (조건 {self.condition}, "
@@ -529,6 +539,7 @@ class PolicyRunner(Node):
             "max_mm_s": self.args.max_mm_s, "max_deg_s": self.args.max_deg_s,
             "condition": self.condition, "duration_s": self.args.duration,
             "episode_started": self.t_start is not None,
+            "start_gate": self.args.start_gate, "gate_met_at_start": self.gate_met_at_start,
             "gate": {"area_max": self.args.gate_area_max, "quality_min": self.args.gate_quality_min,
                      "confirm_s": self.args.gate_confirm_s, "held_s": self.gate.held_s},
             "thresholds": {"area_min": self.args.success_area_min,
@@ -584,6 +595,9 @@ def main() -> int:
     p.add_argument("--placebo-seed", type=int, default=0, help="위약 방향 난수 — 세션을 재현한다")
     p.add_argument("--placebo-delay-s", type=float, default=30.0,
                    help="stale-obs 일 때의 관측 지연 [s]")
+    p.add_argument("--start-gate", default="off", choices=["off", "on"],
+                   help="on=시작 조건을 만족할 때까지 기다린다 (실험). off=버튼이 곧 시작이고 "
+                        "조건 충족 여부는 기록만 한다 (운용·평가 루프, 기본)")
     p.add_argument("--gate-area-max", type=float, default=0.02, help="시작: 면적비 < 이 값")
     p.add_argument("--gate-quality-min", type=float, default=0.6, help="시작: Q_raw ≥ 이 값")
     p.add_argument("--gate-confirm-s", type=float, default=2.0,

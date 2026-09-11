@@ -36,20 +36,19 @@ source ~/FR5-for-RUS/env.sh
 교정이 없으면 힘 유지가 열리지 않는다. 안 했으면 `./scripts/start_session.sh --calib` 로
 전자영점·다자세 중력을 먼저 마친다.
 
-## 2. 기동 (터미널 셋)
+## 2. 기동 (터미널 둘)
 
 ```bash
 # ① 세션 + GUI. --seg 를 붙이지 않는다 (러너가 자기 U-Net 을 돌린다)
 ./scripts/start_session.sh
 
-# ② 힘 탐색. 이것이 없으면 힘 설정값이 출발값에 고정된다
-source ~/FR5-for-RUS/env.sh
-ros2 run fr5_control force_search                       # 관찰: 2.5 s 마다 부호가 뒤집히는지
-ros2 run fr5_control force_search --ros-args -p execute:=true
-
-# ③ 러너 / 세션 드라이버
-source ~/FR5-for-RUS/env.sh && cd ~/FR5-for-RUS/policy_learning
+# ② 힘 탐색 + 러너. 한 명령이 둘 다 띄우고 Ctrl-C 하나로 둘 다 내린다
+./scripts/start_policy_eval.sh --pilot          # 또는 --main N, 또는 인자 없이 루프 평가
 ```
+
+힘 탐색을 따로 띄우지 않는다. 그것이 없으면 힘 설정값이 출발값에 고정된 채 돌고
+(Q_raw 기반 제어가 죽은 상태), 그 에피소드들은 나중에 **분리해서 보고**해야 한다.
+한 명령이 소유하면 빠뜨릴 수가 없다.
 
 콘솔 확인: 상단이 `NO TELEMETRY` 가 아니고, **Monitoring** 하단 오른쪽에 품질 두 눈금과
 `Policy inference` 버튼이 보인다.
@@ -165,13 +164,11 @@ python3 scripts/run_experiment.py runs/qres2_ep25.pt --out runs/_verify \
 목적은 결과가 아니라 본 시험을 설계할 수 있게 하는 것이다.
 
 ```bash
-python3 scripts/run_experiment.py runs/qres2_ep25.pt --out runs/pilot \
-        --poses 6 --conditions hold,placebo,policy \
-        --duration 90 --blind --execute --max-deg-s 3
+./scripts/start_policy_eval.sh --pilot
 ```
 
-조건 순서는 자세마다 섞인다. 조작자는 조건을 모른다 (`--blind`). 끊기면 같은 `--out` 으로
-이어서 한다.
+`runs/pilot` 에 쌓인다. 조건 순서는 자세마다 섞이고, 조작자는 조건을 모른다.
+**끊기면 같은 명령을 다시 친다** — 같은 폴더로 이어서 하고, 이미 있으면 그렇게 알린다.
 
 ### 에피소드 하나
 
@@ -227,12 +224,17 @@ python3 scripts/analyze_experiment.py runs/pilot --sweep
 분석 스크립트가 필요한 수를 계산해 준다).
 
 ```bash
-python3 scripts/analyze_experiment.py runs/pilot          # 필요한 자세 수를 확인
-python3 scripts/run_experiment.py runs/qres2_ep25.pt --out runs/main \
-        --poses <N> --conditions hold,placebo,policy,expert \
-        --duration 90 --blind --execute \
-        --success-area-min <파일럿 값> --success-component-min <파일럿 값>
+# ① 몇 자세가 필요한지 확인한다 — 숫자가 인쇄된다
+python3 policy_learning/scripts/analyze_experiment.py policy_learning/runs/pilot
+
+# ② 그 숫자를 그대로 넣는다 (아래 25 는 예시다 — ① 이 알려준 수로 바꾼다)
+./scripts/start_policy_eval.sh --main 25 -- \
+        --success-area-min 0.08 --success-component-min 0.80
 ```
+
+`--` 뒤는 드라이버로 그대로 넘어간다. 판정 임계는 **파일럿이 정한 값**으로 바꿔 넣는다
+(위 0.08 · 0.80 은 기본값이다). `--main` 뒤가 숫자가 아니면 스크립트가 거부한다 —
+자리표시자를 그대로 붙여넣어 bash 가 리다이렉션으로 읽는 일을 막는다.
 
 `expert` 는 사람이 계속 지령한다 — 러너는 기록만 한다. 그 에피소드만 조건이 콘솔에 뜬다.
 
@@ -241,7 +243,8 @@ python3 scripts/run_experiment.py runs/qres2_ep25.pt --out runs/main \
 
 ## 7. 중단
 
-콘솔 `Stop` → Touch 데드맨 놓기(워치독 후퇴) → 터미널 ① Ctrl-C → `./scripts/stop_all.sh`
+콘솔 `Stop` → Touch 데드맨 놓기(워치독 후퇴) → 터미널 ② Ctrl-C → 터미널 ① Ctrl-C
+→ `./scripts/stop_all.sh`
 
 ## 8. 결과와 함께 반드시 보고할 것
 

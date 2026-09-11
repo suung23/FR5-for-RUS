@@ -77,17 +77,24 @@ cd ~/FR5-for-RUS
 
 ## D. 평가 — 한 명령
 
+| 무엇을 | 명령 |
+|---|---|
+| 배선·축 확인 (지령 없음) | `./scripts/start_policy_eval.sh --dry` |
+| 자유 루프 평가 | `./scripts/start_policy_eval.sh` |
+| **파일럿** 6 자세 × 3 조건 = 18 | `./scripts/start_policy_eval.sh --pilot` |
+| **본 시험** N 자세 × 4 조건 | `./scripts/start_policy_eval.sh --main N` |
+
+셋 다 힘 탐색을 함께 띄운다. **Ctrl-C 하나로 둘 다 내린다.** 힘 탐색을 따로 띄우지
+않는다 — 빠지면 힘 설정값이 출발값에 고정되고 그 에피소드는 분리 보고 대상이 된다.
+
+파일럿·본시험은 `runs/pilot` · `runs/main` 으로 간다. **끊기면 같은 명령을 다시 친다**
+(이어서 한다). 본 시험의 `N` 은 파일럿 분석이 알려준다:
+
 ```bash
-./scripts/start_policy_eval.sh
+python3 policy_learning/scripts/analyze_experiment.py policy_learning/runs/pilot
 ```
 
-힘 탐색과 러너가 함께 뜬다. **Ctrl-C 하나로 둘 다 내린다.**
-
-처음 한 번은 지령 없이 확인한다:
-
-```bash
-./scripts/start_policy_eval.sh --dry
-```
+처음 한 번은 `--dry` 로 확인한다:
 
 | 확인 | 기대 |
 |---|---|

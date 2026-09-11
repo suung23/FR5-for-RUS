@@ -103,7 +103,12 @@ class ForceSetpointAdapter:
         amplitude_n: float = 0.25,
         period_s: float = 5.0,
         settle_s: float = 0.5,
-        gain_n_per_unit: float = 1.0,
+        # 20 인 이유: 2026-09-11 팬텀 실측에서 dQ_raw/dF 가 0.0003~0.008 /N 이었다
+        # (3 N 부근, 디더 ±0.25 N). 1.0 이면 한 주기 걸음이 그만큼이라 90 s 에피소드
+        # 동안 0.09 N 도 못 간다 — 힘이 출발값에 붙어 있게 된다. 전형 경사 0.005 에서
+        # 걸음이 step_max(0.1 N) 에 닿도록 0.1/0.005 = 20 으로 잡는다.
+        # **한계는 안 건드린다.** step_max_n 과 [f_min, f_max] 가 그대로 clamp 한다.
+        gain_n_per_unit: float = 20.0,
         step_max_n: float = 0.1,
         f_min_n: float = 1.0,
         f_max_n: float = 5.0,
@@ -362,8 +367,13 @@ class ForceSetpointAdapter:
 
     def describe(self) -> str:
         """사람이 읽을 한 줄 요약. 감시 화면과 로그에 그대로 쓴다."""
+        # 이득과 걸음 상한을 함께 찍는다. 이득이 물리적 경사에 비해 작으면 루프는
+        # "도는데 안 움직이는" 상태가 되는데, 로그에 F̄ 만 있으면 그것이 이득 탓인지
+        # 경사가 없어서인지 화면으로 못 가린다 (2026-09-11 에 실제로 그랬다).
         return (
             f"F̄ = {self._f_bar:.3f} N  ±{self.amplitude:.2f} @ {self.period:.1f} s  "
+            f"이득 {self.gain:g} N/(품질/N) · 걸음 ≤ {self.step_max:g} N  "
+            f"범위 [{self.f_min:g}, {self.f_max:g}] N  "
             f"갱신 {self._n_updates} · 실패 {self._n_failed}"
         )
 

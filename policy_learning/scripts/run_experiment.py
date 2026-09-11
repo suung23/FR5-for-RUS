@@ -103,7 +103,15 @@ def run_episode(args, ep: dict, ep_dir: Path) -> dict:
     cmd = [sys.executable, str(Path(__file__).with_name("run_policy.py")), args.checkpoint,
            "--condition", ep["condition"], "--duration", str(args.duration),
            "--out", str(ep_dir), "--axes", args.axes,
-           "--start-gate", "on",          # 실험에서는 시작 조건이 자세를 가른다 (계획서 §3)
+           # 게이트는 **막는 것이 아니라 재는 것**이다. run_policy 는 on/off 와 무관하게
+           # gate_met_at_start 를 기록하므로(§542), 기본을 off 로 두어도 "시작 시점에
+           # 조건이 맞았는가" 는 그대로 남는다 — 계획서 §3 이 요구하는 것은 그 기록이다.
+           #
+           # on 으로 두었더니 팬텀 위에서 한 에피소드도 열리지 않았다 (2026-09-11:
+           # 면적비 0.037 인데 문턱이 0.02). 문턱이 이 팬텀에 안 맞으면 **전량 폐기**가
+           # 되고 데이터가 한 줄도 안 남는다. 파일럿의 목적은 문턱을 고르는 것인데,
+           # 그 문턱이 파일럿을 막으면 고를 근거를 만들 수 없다.
+           "--start-gate", args.start_gate,
            "--gate-area-max", str(args.gate_area_max),
            "--gate-quality-min", str(args.gate_quality_min),
            "--success-area-min", str(args.success_area_min),
@@ -140,6 +148,9 @@ def main() -> int:
     p.add_argument("--max-deg-s", type=float, default=3.0, help="회전 지령 상한 [°/s]")
     p.add_argument("--max-mm-s", type=float, default=3.0, help="병진 지령 상한 [mm/s]")
     p.add_argument("--start-force", type=float, default=1.0, help="이 접촉력[N] 미만이면 지령하지 않는다")
+    p.add_argument("--start-gate", default="off", choices=["off", "on"],
+                   help="on 이면 시작 조건을 못 맞춘 에피소드를 폐기한다. off 여도 충족 "
+                        "여부는 그대로 기록된다 — 분석에서 사후에 걸러낼 수 있다")
     p.add_argument("--gate-area-max", type=float, default=0.02)
     p.add_argument("--gate-quality-min", type=float, default=0.6)
     p.add_argument("--success-area-min", type=float, default=0.08)
@@ -188,25 +199,34 @@ def main() -> int:
         meta = run_episode(args, ep, ep_dir)
         verdict = meta.get("verdict") or {}
         started = bool(meta.get("episode_started"))
+        gate_met = meta.get("gate_met_at_start")
         ep["status"] = "done" if started else "gate_reject"
+        ep["gate_met_at_start"] = gate_met
         ep["verdict"] = verdict
         save(out, session)
         append_summary(out, {
             "index": ep["index"], "pose": ep["pose"], "condition": ep["condition"],
             "started": int(started), "success": int(bool(verdict.get("success"))),
+            "gate_met": "" if gate_met is None else int(bool(gate_met)),
             "best_run_s": verdict.get("best_run_s", ""), "q_mean": verdict.get("q_mean", ""),
             "q_final_10s": verdict.get("q_final_10s", ""), "area_max": verdict.get("area_max", ""),
             "good_fraction": verdict.get("good_fraction", ""), "dir": ep_dir.name,
         })
         if not started:
-            print("  시작 조건 미충족 — 폐기로 기록합니다 (폐기율은 파일럿의 산출물입니다).")
+            print("  시작 조건 미충족 — 폐기로 기록합니다 (--start-gate on).")
         else:
+            gate_note = "" if gate_met is None else (
+                "  시작조건 충족" if gate_met else "  시작조건 미충족(기록만)")
             print(f"  성공={bool(verdict.get('success'))}  "
-                  f"최장 연속={verdict.get('best_run_s', float('nan')):.1f} s")
+                  f"최장 연속={verdict.get('best_run_s', float('nan')):.1f} s{gate_note}")
 
     done = sum(e["status"] == "done" for e in plan)
     rej = sum(e["status"] == "gate_reject" for e in plan)
+    met = sum(1 for e in plan if e.get("gate_met_at_start"))
     print(f"\n완료 {done} · 폐기 {rej} · 남음 {sum(e['status'] == 'pending' for e in plan)}")
+    if args.start_gate == "off":
+        print(f"시작 조건을 충족한 채 시작한 에피소드 {met}/{done} — "
+              f"분석에서 사후에 걸러낼 수 있습니다 (summary.csv 의 gate_met).")
     print(f"요약: {out / 'summary.csv'}")
     return 0
 

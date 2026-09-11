@@ -36,6 +36,11 @@ import math
 from typing import Optional
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
+try:  # rclpy 배포판마다 위치가 다르다
+    from rclpy._rclpy_pybind11 import RCLError
+except ImportError:  # pragma: no cover
+    RCLError = RuntimeError
 from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
 from rcl_interfaces.srv import SetParameters
 from rclpy.node import Node
@@ -61,6 +66,18 @@ class ForceSearchNode(Node):
         self.declare_parameter("dither_period_s", 5.0)
         self.declare_parameter("settle_s", 0.5)
         self.declare_parameter("step_max_n", 0.1)
+        # 경사 → 걸음 이득 [N / (품질단위/N)].
+        #
+        # 1.0 이었고, 그러면 **움직이지 않는다.** 2026-09-11 팬텀 실측에서 dQ/dF 는
+        # 0.0003~0.008 /N 이었다 (3 N 부근, 디더 ±0.25 N). 이득 1.0 이면 한 주기에
+        # 0.0003~0.008 N 이라 90 s 에피소드(18 주기) 동안 0.09 N 도 못 간다 — 힘이
+        # 출발값에 붙어 있는 것처럼 보이고, 실제로 그랬다.
+        #
+        # step_max_n 주석은 "한 주기에 ≤ 0.1 N, 1 N 옮기는 데 ≥ 50 s" 를 설계 의도로
+        # 말한다. 그 의도가 성립하려면 전형적 경사가 clamp 근처의 걸음을 내야 하므로
+        # 이득은 0.1/0.005 = 20 이다. 이득을 올려도 **한 주기 0.1 N · f_bar ≤ f_max−진폭**
+        # 두 clamp 는 그대로다 — 빨라지는 것은 한계에 닿는 속도지 한계 자체가 아니다.
+        self.declare_parameter("gain_n_per_unit", 20.0)
 
         g = lambda n: self.get_parameter(n).value
         ns = str(g("namespace"))
@@ -72,6 +89,7 @@ class ForceSearchNode(Node):
             period_s=float(g("dither_period_s")),
             settle_s=float(g("settle_s")),
             step_max_n=float(g("step_max_n")),
+            gain_n_per_unit=float(g("gain_n_per_unit")),
             f_min_n=float(g("f_min_n")),
             f_max_n=float(g("f_max_n")),
         )
@@ -135,14 +153,25 @@ class ForceSearchNode(Node):
         if self._param_client is None:
             self._param_client = self.create_client(
                 SetParameters, f"{self.control_node}/set_parameters")
-        if not self._param_client.service_is_ready():
-            if not self._param_client.wait_for_service(timeout_sec=0.2):
-                return False
+        # 종료가 시작되면 context 가 무효가 되고 service_is_ready() 는 **예외를 던진다**
+        # (rcl: "node's context is invalid"). 그 예외가 타이머 콜백에서 그대로 올라와
+        # rclpy.spin 을 뚫고 나가면 노드가 트레이스백으로 죽는다 — 2026-09-11 파일럿에서
+        # force_search 가 그렇게 내려갔고, 로그 마지막 22 줄이 전부 종료 경로였다.
+        # 밀지 못한 것은 경고할 일이지 죽을 일이 아니다.
+        try:
+            if not self._param_client.service_is_ready():
+                if not self._param_client.wait_for_service(timeout_sec=0.2):
+                    return False
+        except RCLError:
+            return False
         req = SetParameters.Request()
         req.parameters = [Parameter(
             name=name,
             value=ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=float(value)))]
-        self._param_client.call_async(req)
+        try:
+            self._param_client.call_async(req)
+        except RCLError:
+            return False
         return True
 
 
@@ -151,11 +180,22 @@ def main(args=None) -> None:
     node = ForceSearchNode()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        # 정리는 **실패해도 조용히** 끝낸다. 종료 중에는 context 가 이미 무효일 수
+        # 있고, 그때 destroy_node / shutdown 은 또 예외를 던진다. 예전에는 그 두 번째
+        # 예외가 그대로 올라와 "rcl_shutdown already called" 트레이스백이 로그의
+        # 마지막을 차지했고, 정작 왜 내려갔는지는 그 위에 묻혔다.
+        try:
+            node.destroy_node()
+        except RCLError:
+            pass
+        if rclpy.ok():
+            try:
+                rclpy.shutdown()
+            except RCLError:
+                pass
 
 
 if __name__ == "__main__":

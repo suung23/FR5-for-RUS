@@ -66,14 +66,22 @@ def test_observation_carries_no_dither_in_f_bar():
 
 
 def test_concave_quality_converges_to_optimum_within_step_limit():
-    """단봉 Q 에서 2.0 → 3.0 N 으로 올라가되 한 주기에 step_max 를 넘지 않는다."""
+    """단봉 Q 에서 2.0 → 3.0 N 으로 올라가되 한 주기에 step_max 를 넘지 않는다.
+
+    "경사 부호가 맞다" 를 **최적점까지의 거리가 안 늘어난다** 로 잰다. 예전에는
+    f_bar 가 단조 증가하는지를 봤는데, 그것은 루프가 15 주기 안에 **도착하지 못할**
+    때만 성립한다. 이득을 1 → 20 으로 올리자(2026-09-11, 실측 경사에 맞춤) 열 주기
+    남짓에 3.0 N 에 닿았고, 그 뒤로는 부동소수점 잡음으로 5e-15 씩 아래위로 떨었다 —
+    도착이 반례로 잡혔다. 도착은 이 루프가 해야 할 일이지 실패가 아니다.
+    """
     ad = ForceSetpointAdapter(2.0)
-    prev = ad.f_bar
+    prev, prev_gap = ad.f_bar, abs(ad.f_bar - 3.0)
     for r in _run(ad, lambda f, t: _concave(f), periods=15):
         assert not r["measurement_failed"]
         assert abs(r["f_bar"] - prev) <= ad.step_max + 1e-12
-        assert r["f_bar"] >= prev                            # 경사 부호가 맞다
-        prev = r["f_bar"]
+        gap = abs(r["f_bar"] - 3.0)
+        assert gap <= prev_gap + 1e-9, "최적점에서 멀어졌다 — 경사 부호가 틀렸다"
+        prev, prev_gap = r["f_bar"], gap
     assert ad.n_updates == 15 and ad.n_failed == 0
     assert abs(ad.f_bar - 3.0) < 0.15
 
@@ -209,3 +217,57 @@ def test_replaying_a_recording_is_deterministic():
         ad = ForceSetpointAdapter(2.0)
         runs.append([r["f_bar"] for r in _run(ad, lambda f, t: _concave(f), periods=5)])
     assert runs[0] == runs[1]
+
+
+def test_gain_is_scaled_to_the_measured_quality_gradient():
+    """이득이 실측 경사에 비해 작으면 루프는 돌면서 안 움직인다.
+
+    2026-09-11 팬텀 실측: 3 N 부근에서 dQ_raw/dF 는 0.0003~0.008 /N 이었다
+    (디더 ±0.25 N). 이득 1.0 이면 한 주기 걸음이 0.0003~0.008 N 이라 90 s
+    에피소드(5 s × 18 주기) 동안 0.09 N 도 못 간다 — 힘이 출발값에 붙어 있는
+    것처럼 보였고, 실제로 그랬다.
+
+    설계 의도는 step_max_n 주석에 있다: "한 주기에 ≤ 0.1 N". 전형적 경사가 그
+    clamp 근처의 걸음을 내야 의도가 성립한다.
+    """
+    from fr5_control.force_setpoint_adapter import ForceSetpointAdapter
+
+    typical_gradient = 0.005          # 실측 중앙 [품질단위 / N]
+    a = ForceSetpointAdapter(f_bar0=3.0)
+    step = min(typical_gradient * a.gain, a.step_max)
+    assert step >= 0.5 * a.step_max, (
+        f"전형적 경사 {typical_gradient} 에서 걸음이 {step:.4f} N 뿐이다 — "
+        f"이득 {a.gain} 이 물리적 경사에 비해 작다. 90 s 동안 "
+        f"{step * 18:.2f} N 밖에 못 간다")
+
+
+def test_raising_the_gain_does_not_widen_the_safety_clamps():
+    """이득을 올려도 한계는 그대로여야 한다 — 빨라지는 것은 닿는 속도뿐이다."""
+    from fr5_control.force_setpoint_adapter import ForceSetpointAdapter
+
+    slow = ForceSetpointAdapter(f_bar0=3.0, gain_n_per_unit=1.0, f_max_n=4.5)
+    fast = ForceSetpointAdapter(f_bar0=3.0, gain_n_per_unit=1000.0, f_max_n=4.5)
+    assert slow.step_max == fast.step_max
+    assert slow.f_min == fast.f_min and slow.f_max == fast.f_max
+
+    # "누를수록 좋다" 는 극단적 품질을 먹여도 한계를 못 넘는다.
+    now, seen = 0.0, []
+    fast.reset(3.0, now)
+    for _ in range(4000):
+        now += 0.05
+        fast.update(now, 0.5 + 0.5 * fast.setpoint(now) / fast.f_max)
+        seen.append(fast.f_bar)
+    assert max(seen) <= fast.f_max - fast.amplitude + 1e-9, (
+        f"f_bar 가 {max(seen):.3f} N 까지 갔다 — 상한 {fast.f_max - fast.amplitude:.3f}")
+    assert fast.setpoint(now) <= fast.f_max + 1e-9
+    # 한 주기에 step_max 를 넘게 뛰지 않는다.
+    jumps = [abs(b - a) for a, b in zip(seen, seen[1:]) if b != a]
+    assert not jumps or max(jumps) <= fast.step_max + 1e-9, f"한 번에 {max(jumps):.3f} N 뛰었다"
+
+
+def test_describe_shows_the_gain():
+    """로그에 이득이 없으면 '안 움직이는' 이유를 화면으로 못 가린다."""
+    from fr5_control.force_setpoint_adapter import ForceSetpointAdapter
+
+    text = ForceSetpointAdapter(f_bar0=3.0, gain_n_per_unit=20.0).describe()
+    assert "이득 20" in text and "걸음" in text

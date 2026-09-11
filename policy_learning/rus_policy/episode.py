@@ -139,12 +139,18 @@ def judge(t: Sequence[float], state: np.ndarray, thr: Thresholds) -> dict:
     best = longest_run_s(t, good)
     q = state[:, QUALITY]
     finite = np.isfinite(q)
+    # 방광 뷰 품질(면적·중심 63 %) — 화면의 Q_seg 와 같은 정의. q_mean 은 옛 정의 그대로
+    # 두어 이전 에피소드와 비교가 된다.
+    from .view_quality import view_quality
+    qv = np.array([view_quality(row)[0] for row in state]) if state.size else np.array([])
     return {
         "success": bool(best >= thr.hold_s),
         "best_run_s": best,
         "good_fraction": float(good.mean()) if good.size else 0.0,
         "q_mean": float(q[finite].mean()) if finite.any() else float("nan"),
         "q_final_10s": _tail_mean(t, q, 10.0),
+        "q_view_mean": float(np.mean(qv)) if qv.size else float("nan"),
+        "q_view_final_10s": _tail_mean(t, qv, 10.0) if qv.size else float("nan"),
         "area_max": float(state[:, AREA].max()) if state.size else 0.0,
         "n_samples": int(state.shape[0]),
     }

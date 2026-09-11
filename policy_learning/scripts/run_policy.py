@@ -60,6 +60,7 @@ from rus_policy.dataset import OBS_VEC_DIM, _resize_frames
 from rus_policy.episode import (CONDITIONS, PlaceboBuffer, StartGate, Thresholds, judge,
                                 motion_check, randomize_direction)
 from rus_policy.model import ACTION_DIM
+from rus_policy.view_quality import view_quality
 from rus_policy.perception import STATE_DIM, apply_frame_transform, build_backend
 from rus_policy.train import load_policy
 
@@ -193,6 +194,8 @@ class PolicyRunner(Node):
         self._warned = False
         self._uncompensated = ""    # 보상 안 된 렌치가 오고 있으면 그 frame_id
         self.q_raw = float("nan")   # 최근 Q_raw (힘 축)
+        self.q_view = float("nan")  # 최근 Q_seg — 방광 뷰 품질 (화면·기록)
+        self.q_train = float("nan")  # 최근 옛 Q — 정책 입력에 들어가는 값 (학습 때 정의)
         self.f_bar = None           # 힘 탐색이 알리는 설정값
         self.f_bar_t = 0.0
         self._warned_no_search = False
@@ -334,7 +337,12 @@ class PolicyRunner(Node):
         self.state_t.append(now_t)
         self.states.append(state)
         q_raw = self.backend.raw_quality(bm) if self.backend is not None else float("nan")
-        self.q_seg_pub.publish(Float32(data=float(q)))       # NaN 도 그대로 — "측정 안 됨"
+        # 화면·기록의 Q_seg 는 **방광 뷰 품질**이다 (rus_policy.view_quality) — 면적과 좌우
+        # 중심이 가중치의 63 %. 정책의 입력(state 의 quality 특징)은 학습 때 값 그대로 둔다:
+        # 그것을 바꾸면 정책이 처음 보는 입력을 받는다. q 는 기록용으로만 남긴다.
+        q_view = view_quality(state)[0] if self.backend is not None else float("nan")
+        self.q_view, self.q_train = q_view, float(q)
+        self.q_seg_pub.publish(Float32(data=float(q_view)))  # NaN 도 그대로 — "측정 안 됨"
         self.q_raw_pub.publish(Float32(data=float(q_raw)))
         self.q_raw = q_raw
         self.n_img += 1
@@ -556,6 +564,7 @@ class PolicyRunner(Node):
             "n_frames": len(self.buf), "enabled": int(self.enabled),
             "condition": self.condition, "t_episode": t - self.t_start,
             "Q_raw": self.q_raw,
+            "Q_view": self.q_view,       # 새 Q_seg (면적·중심 63 %). Q_now 는 옛 정의 그대로
             "f_bar": self.f_bar if self.f_bar is not None else float("nan"),
             # 로봇이 **실제로** 어디를 향했는가. 지령(cmd_*)만 적으면 "정책대로 움직였나" 에
             # 답할 수 없다 — save() 의 motion_check 가 이 열과 cmd_w* 를 비교한다.
@@ -570,7 +579,8 @@ class PolicyRunner(Node):
                    "placebo": "placebo — 방향 무작위", "policy": "policy"}.get(
                        self.condition, self.condition)
             self.get_logger().info(
-                f"F={fn:4.1f}N  Q_seg={qn:.3f} Q_raw={self.q_raw:.3f} Q̂={qhat:.3f}  [{tag}]\n"
+                f"F={fn:4.1f}N  Q_seg={self.q_view:.3f} Q_raw={self.q_raw:.3f} "
+                f"Q̂={qhat:.3f} (정책 입력 Q {qn:.3f})  [{tag}]\n"
                 f"    정책  ω=({pw[0]:+5.2f},{pw[1]:+5.2f},{pw[2]:+5.2f})°/s   "
                 f"chunk 순변위 θ=({net[3]:+5.1f},{net[4]:+5.1f},{net[5]:+5.1f})°\n"
                 f"    지령  ω=({ang[0]:+5.2f},{ang[1]:+5.2f},{ang[2]:+5.2f})°/s   "

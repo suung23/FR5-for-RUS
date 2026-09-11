@@ -90,7 +90,10 @@ def rejudge(root: Path, thr: Thresholds) -> dict[str, list[bool]]:
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("session", help="세션 폴더 (run_experiment.py 의 --out)")
-    p.add_argument("--sweep", action="store_true", help="임계 민감도를 훑는다")
+    p.add_argument("--sweep", action="store_true", help="임계 민감도를 훑는다 (조건별)")
+    p.add_argument("--blind-thresholds", action="store_true",
+                   help="임계를 **조건을 가린 채** 고른다. 조건별 성공률을 보고 고르면 그 선택이 "
+                        "결과를 만든다 — 본 시험을 이어서 돌릴 때는 이쪽을 쓴다")
     p.add_argument("--hold-s", type=float, default=3.0)
     p.add_argument("--target-lift", type=float, default=0.30,
                    help="본 시험에서 검출하려는 p_C − p_B")
@@ -125,6 +128,28 @@ def main() -> int:
         if len(started) < n:
             need_poses = math.ceil(need / max(1e-9, len(started) / n))
             print(f"  폐기율을 감안하면 자세 약 {need_poses} 개를 잡아야 팔당 {need} 개가 남는다")
+
+    if args.blind_thresholds:
+        print("\n① 임계 선택 — **조건을 가린다.** 전체를 한 덩어리로 보고 평탄한 자리를 고른다.")
+        print("   기울기가 작을수록 그 임계에서 성공률이 임계 자체에 덜 휘둘린다는 뜻이다.")
+        print(f"  {'면적비':>7} {'연결성분':>8} {'성공률':>8} {'면적비 기울기':>14}")
+        grid = [(a, c) for a in (0.04, 0.06, 0.08, 0.10, 0.12) for c in (0.70, 0.80, 0.90)]
+        pooled = {}
+        for area, comp in grid:
+            res = rejudge(root, Thresholds(area_min=area, component_min=comp, hold_s=args.hold_s))
+            if not res:
+                print("  (states.npz 가 없습니다 — 이 세션은 임계를 다시 훑을 수 없습니다)")
+                return 0
+            allv = [v for lst in res.values() for v in lst]      # 조건을 섞는다
+            pooled[(area, comp)] = float(np.mean(allv)) if allv else float("nan")
+        for area, comp in grid:
+            here = pooled[(area, comp)]
+            nb = [pooled.get((a, comp)) for a in (round(area - 0.02, 2), round(area + 0.02, 2))]
+            nb = [v for v in nb if v is not None and np.isfinite(v)]
+            slope = (max(nb) - min(nb)) if len(nb) == 2 else float("nan")
+            print(f"  {area:>7.2f} {comp:>8.2f} {here:>8.0%} {slope:>13.1%}")
+        print("\n  기울기가 가장 작은 줄을 고르고, 그 값을 본 시험에 --success-* 로 고정한다.")
+        print("  고른 뒤에는 바꾸지 않는다 — 바꾸는 순간 사전 등록이 아니다.")
 
     if args.sweep:
         print("\n① 임계 민감도 — 성공률이 **평탄한** 자리를 고른다 (민감한 자리를 고르면 그 선택이 결과다)")

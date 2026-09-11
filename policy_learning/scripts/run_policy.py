@@ -357,6 +357,17 @@ class PolicyRunner(Node):
         if self.n_img % 50 == 0:
             self.get_logger().info(f"프레임 {self.n_img} 장, 지각 {dt_ms:.0f} ms/장, 느림 {self.n_drop} 회")
 
+    def _shown_condition(self) -> str:
+        """조작자 화면에 쓸 조건 이름. --blind 면 가린다 — expert 만 예외 (조작자가 지령한다).
+
+        run_experiment 는 자기 출력에서 조건을 가렸지만 러너에는 그것을 알리지 않았고,
+        러너는 "에피소드 시작 (조건 policy …)" 을 그대로 찍었다. 위약 대조의 전제가
+        조작자가 조건을 모르는 것이므로, 조건은 러너의 출력에서도 가려야 한다.
+        """
+        if self.args.blind and self.condition != "expert":
+            return "····"
+        return self.condition
+
     def _pose_columns(self) -> dict:
         """ee_wrt_base 의 최신값을 기록용 열로. 없으면 NaN."""
         nan = float("nan")
@@ -505,7 +516,7 @@ class PolicyRunner(Node):
                     f"면적비 {st[AREA]:.3f} · Q_raw {self.q_raw:.2f}. 기록에 남는다")
             self.t_start = t
             self.get_logger().warn(
-                f"시작 조건 충족 — 에피소드 시작 (조건 {self.condition}, "
+                f"시작 조건 충족 — 에피소드 시작 (조건 {self._shown_condition()}, "
                 + (f"{self.args.duration:.0f} s)" if self.args.duration > 0 else "무제한)"))
 
         if self.args.duration > 0 and (t - self.t_start) >= self.args.duration:
@@ -583,16 +594,23 @@ class PolicyRunner(Node):
             # 조건(hold·placebo)이 둘을 갈라놓으므로 한 줄에 섞으면 어느 쪽인지 모른다.
             # 정책 줄은 상한으로 자르기 전 값이다 — 3 °/s 를 넘겨 원하면 그대로 보인다.
             pw = a_policy[AX_ANG]
-            tag = {"hold": "hold — 지령 안 함", "expert": "expert — 사람이 지령",
-                   "placebo": "placebo — 방향 무작위", "policy": "policy"}.get(
-                       self.condition, self.condition)
-            self.get_logger().info(
-                f"F={fn:4.1f}N  Q_seg={self.q_view:.3f} Q_raw={self.q_raw:.3f} "
-                f"Q̂={qhat:.3f} (정책 입력 Q {qn:.3f})  [{tag}]\n"
-                f"    정책  ω=({pw[0]:+5.2f},{pw[1]:+5.2f},{pw[2]:+5.2f})°/s   "
-                f"chunk 순변위 θ=({net[3]:+5.1f},{net[4]:+5.1f},{net[5]:+5.1f})°\n"
-                f"    지령  ω=({ang[0]:+5.2f},{ang[1]:+5.2f},{ang[2]:+5.2f})°/s   "
-                f"v=({lin[0]:+5.2f},{lin[1]:+5.2f})mm/s")
+            head = (f"F={fn:4.1f}N  Q_seg={self.q_view:.3f} Q_raw={self.q_raw:.3f} "
+                    f"Q̂={qhat:.3f} (정책 입력 Q {qn:.3f})")
+            cmd = (f"    지령  ω=({ang[0]:+5.2f},{ang[1]:+5.2f},{ang[2]:+5.2f})°/s   "
+                   f"v=({lin[0]:+5.2f},{lin[1]:+5.2f})mm/s")
+            if self.args.blind:
+                # **정책 줄을 찍지 않는다.** 위약에서는 지령의 방향이 정책과 다르고, 두 줄을
+                # 나란히 보이면 그 차이만으로 위약이 드러난다. 정책 의도는 decisions.csv 의
+                # net_* 에 그대로 남는다 — 가리는 것은 화면이지 기록이 아니다.
+                self.get_logger().info(f"{head}  [{self._shown_condition()}]\n{cmd}")
+            else:
+                tag = {"hold": "hold — 지령 안 함", "expert": "expert — 사람이 지령",
+                       "placebo": "placebo — 방향 무작위", "policy": "policy"}.get(
+                           self.condition, self.condition)
+                self.get_logger().info(
+                    f"{head}  [{tag}]\n"
+                    f"    정책  ω=({pw[0]:+5.2f},{pw[1]:+5.2f},{pw[2]:+5.2f})°/s   "
+                    f"chunk 순변위 θ=({net[3]:+5.1f},{net[4]:+5.1f},{net[5]:+5.1f})°\n{cmd}")
 
     def _judge_now(self) -> dict:
         """지금까지 쌓인 상태로 판정한다. 시도가 시작되지 않았으면 빈 dict."""
@@ -744,6 +762,8 @@ def main() -> int:
     p.add_argument("--placebo-seed", type=int, default=0, help="위약 방향 난수 — 세션을 재현한다")
     p.add_argument("--placebo-delay-s", type=float, default=30.0,
                    help="stale-obs 일 때의 관측 지연 [s]")
+    p.add_argument("--blind", action="store_true",
+                   help="조작자 화면에서 조건을 가린다 (expert 제외). 기록에는 그대로 남는다")
     p.add_argument("--gamma", type=float, default=None,
                    help="방향 관성 (모드 일관성 보너스). 없으면 체크포인트 값(0.2). 0.2 는 후보 사이 "
                         "Q̂ 차의 75 배라 방향이 절대 안 바뀐다. 0.005 면 Q̂ 가 약 20 %% 를 정한다")

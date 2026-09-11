@@ -47,3 +47,21 @@ def test_gamma_defaults_to_the_checkpoint_value():
     src = (SCRIPTS / "run_policy.py").read_text()
     assert "else float(cfg.train.gamma_mode_consistency)" in src
     assert '"gamma_mode_consistency": self.gamma' in src, "쓴 gamma 가 meta 에 안 남는다"
+
+
+def test_blind_reaches_the_runner_and_hides_the_condition():
+    """위약 대조의 전제: 조작자가 조건을 모른다.
+
+    2026-09-11: run_experiment 는 자기 출력만 가렸고 러너에 --blind 를 넘기지 않았다. 러너는
+    "에피소드 시작 (조건 policy …)" 과 매 로그 줄의 [placebo — 방향 무작위] 로 조건을
+    드러냈다. 위약에서는 정책 줄과 지령 줄의 방향이 달라 그 차이만으로도 드러났다.
+    """
+    exp = (SCRIPTS / "run_experiment.py").read_text()
+    assert 'cmd.append("--blind")' in exp, "드라이버가 러너에 --blind 를 넘기지 않는다"
+
+    run = (SCRIPTS / "run_policy.py").read_text()
+    assert "(조건 {self._shown_condition()}" in run, "에피소드 시작 줄이 조건을 그대로 찍는다"
+    blind_branch = run[run.index("if self.args.blind:\n                # **정책 줄을"):]
+    blind_branch = blind_branch[:blind_branch.index("else:")]
+    assert "정책  ω=" not in blind_branch, "눈가림에서 정책 줄을 찍으면 위약이 드러난다"
+    assert "_shown_condition()" in blind_branch

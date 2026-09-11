@@ -338,3 +338,34 @@ def test_reset_clears_the_policy_request():
     s.request_policy(True)
     s.reset()
     assert not s.in_contact_probing and not s.policy_requested
+
+
+# --- 축 게이팅 (2026-09-11) ----------------------------------------------------
+
+def test_policy_passes_all_three_rotations():
+    """정책이 쥐고 있으면 회전 세 축이 통과한다 — 그 전에는 다섯 축이 0 이라 사라졌다."""
+    from fr5_ik.probing_mode import gate_axes
+    tw = [1.0, 2.0, 3.0, 0.4, -0.7, 1.1]
+    out = gate_axes(tw, v_z=-0.002, allow_lateral=False, allow_inplane=False, policy=True)
+    assert out[3:] == [0.4, -0.7, 1.1]          # 회전은 그대로
+    assert out[0] == 0.0 and out[1] == 0.0      # 병진은 0 — 힘을 잡는 동안 흐르면 안 된다
+    assert out[2] == -0.002                     # z 는 언제나 조절기의 것
+
+
+def test_policy_wins_over_the_operator_channels():
+    """정책이 쥐고 있는데 조작자 통로가 열려 있으면 두 주체가 같은 축을 다툰다."""
+    from fr5_ik.probing_mode import gate_axes
+    tw = [1.0, 2.0, 3.0, 0.4, -0.7, 1.1]
+    out = gate_axes(tw, v_z=0.0, allow_lateral=True, allow_inplane=True, policy=True)
+    assert out[0] == 0.0 and out[3:] == [0.4, -0.7, 1.1]
+
+
+def test_without_policy_the_old_gating_stands():
+    from fr5_ik.probing_mode import gate_axes
+    tw = [1.0, 2.0, 3.0, 0.4, -0.7, 1.1]
+    none_ = gate_axes(tw, v_z=0.5, allow_lateral=False, allow_inplane=False, policy=False)
+    assert none_ == [0.0, 0.0, 0.5, 0.0, 0.0, 0.0]          # z 만
+    inpl = gate_axes(tw, v_z=0.5, allow_lateral=False, allow_inplane=True, policy=False)
+    assert inpl == [0.0, 0.0, 0.5, 0.0, -0.7, 0.0]          # ω_y 하나
+    lat = gate_axes(tw, v_z=0.5, allow_lateral=True, allow_inplane=False, policy=False)
+    assert lat == [1.0, 2.0, 0.5, 0.4, -0.7, 1.1]           # 다섯 축 + 조절기 z

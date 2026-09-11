@@ -30,7 +30,7 @@ from std_msgs.msg import Bool, Float32MultiArray, Float64, String
 
 from fr5_ik.dls_solver import DlsSolver
 from fr5_ik.force_regulator import ForceRegulator, RegulatorOutput
-from fr5_ik.probing_mode import APPROACH, CONTACT_PROBING, ProbingModeSwitch
+from fr5_ik.probing_mode import APPROACH, CONTACT_PROBING, ProbingModeSwitch, gate_axes
 from fr5_ik.teleop_frame import TeleopFrameMapper
 
 JOINT_NAMES = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
@@ -1169,20 +1169,15 @@ class UsDiffIkNode(Node):
         self.regulator_reason = out.reason
         self._last_v_z = float(out.v_z)
 
-        regulated = np.zeros(6)
-        if self.allow_teleop_lateral:
-            regulated = np.array(twist, dtype=float)
-            regulated[2] = 0.0
-        elif self.allow_inplane_rotation:
-            # 면내 회전만 돌려준다. twist 는 이미 접촉 상한으로 묶여 있으므로
-            # (`_clamp` 뒤에 불린다) 여기서 다시 제한하지 않는다.
-            #
-            # **면을 벗어나지 않는다** 는 것이 이 한 줄의 전부다: 영상면은 x–z 이고
-            # ω_y 는 그 면을 자기 자신으로 옮긴다. 다른 회전축을 함께 열면 그 성질이
-            # 사라지므로, 여기서 twist 를 통째로 복사하지 않는 것이 요점이다.
-            regulated[4] = float(twist[4])
-        regulated[2] = out.v_z
-        return regulated
+        # 어느 축을 통과시킬지는 rclpy 없는 판정에 맡긴다 (probing_mode.gate_axes).
+        # twist 는 이미 접촉 상한으로 묶여 있으므로 (`_clamp` 뒤에 불린다) 여기서 다시
+        # 제한하지 않는다. 2026-09-11: **정책이 쥐고 있으면 회전 세 축을 통과시킨다** —
+        # 그 전에는 다섯 축이 전부 0 이라 정책 지령이 여기서 조용히 사라졌다.
+        return np.asarray(gate_axes(
+            twist, out.v_z,
+            allow_lateral=self.allow_teleop_lateral,
+            allow_inplane=self.allow_inplane_rotation,
+            policy=self.mode_switch.policy_requested), dtype=float)
 
     def _remap_twist(self, twist: np.ndarray) -> np.ndarray:
         """지령을 표류하지 않는 고정 프레임으로 옮긴다 (fr5_ik.teleop_frame 참조).

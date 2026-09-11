@@ -57,7 +57,35 @@ teleop 한 세션은 두 단계로 나뉜다.
 """
 from __future__ import annotations
 
-__all__ = ["APPROACH", "CONTACT_PROBING", "ProbingModeSwitch"]
+__all__ = ["APPROACH", "CONTACT_PROBING", "ProbingModeSwitch", "gate_axes"]
+
+
+def gate_axes(twist, v_z: float, *, allow_lateral: bool, allow_inplane: bool,
+              policy: bool) -> list:
+    """접촉 régime 에서 어느 축을 통과시킬지 정한다. rclpy 없이 돈다.
+
+    z(침투축)는 언제나 힘 조절기의 것이다. 나머지는 누가 régime 을 쥐고 있느냐로 갈린다.
+
+    * ``policy``  — **회전 세 축을 통과**시킨다. 정책이 영상축을 맡는다는 것이 이 모드의
+      정의이고, 그 지령은 회전이다 (병진은 학습되지 않았다 — 런북 §4). 병진은 0 으로
+      둔다: 힘을 잡는 동안 옆으로 흐르면 그 힘이 무엇에 대한 힘인지 알 수 없게 된다.
+    * ``allow_lateral`` — 조작자에게 다섯 축을 돌려준다 (z 만 조절기).
+    * ``allow_inplane`` — 조작자에게 ω_y 하나만. 영상면(프로브 x–z)을 자기 자신으로
+      옮기는 유일한 회전이라, 다른 축을 함께 열면 그 성질이 사라진다.
+    * 아무것도 아니면 z 만 남는다.
+
+    policy 를 먼저 본다. 정책이 쥐고 있는데 조작자 통로가 함께 열려 있으면 두 주체가
+    같은 축을 다투고, 그 축은 둘 중 누구의 의도도 아니게 된다.
+    """
+    out = [0.0] * 6
+    if policy:
+        out[3], out[4], out[5] = float(twist[3]), float(twist[4]), float(twist[5])
+    elif allow_lateral:
+        out = [float(v) for v in twist]
+    elif allow_inplane:
+        out[4] = float(twist[4])
+    out[2] = float(v_z)
+    return out
 
 #: 자유공간 스케일. 초기 자세 접근용.
 APPROACH = "approach"

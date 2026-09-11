@@ -180,6 +180,10 @@ class LossConfig:
     # §5.4 계수 요약 (전부 🟡)
     lambda_force: float = 0.3
     lambda_quality: float = 1.0
+    # 품질 헤드가 맞힐 라벨. "Q" = 옛 Q_seg (면적 15 %, 방광이 없어도 0.89 · 있어도 0.95 로
+    # 포화). "Q_area" = chunk 격자의 세션 정규화 면적 — 데이터셋이 그 포화를 우회하려고
+    # 만들어 두었지만 2026-09-11 까지 로드만 되고 손실에 쓰이지 않았다.
+    quality_target: str = "Q"           # "Q" | "Q_area"
     lambda_smooth: float = 0.05
     lambda_feas: float = 0.5
     lambda_risk: float = 0.2
@@ -219,6 +223,14 @@ class TrainConfig:
     gamma_mode_consistency: float = 0.2  # γ (3.3) — Q̂ 스케일 대비 🟡
     log_every: int = 20
     max_train_samples: Optional[int] = None   # 디버그용 서브샘플
+    # 가중치만 가져올 체크포인트. --resume 과 달리 옵티마이저·epoch·best 는 새로 시작한다 —
+    # 다른 목표로 다시 학습하는 것이지 같은 학습을 잇는 것이 아니다.
+    init_from: str = ""
+    # "quality" = 품질 헤드(quality_head · quality_base)만 학습한다. 나머지는 가중치를 얼리고
+    # **eval 모드로 묶는다** — frame_encoder 의 BatchNorm 은 requires_grad 를 꺼도 train 모드면
+    # running 통계가 바뀌어, 얼린 인코더가 조용히 변하고 그 위의 행동 디코더도 따라 변한다.
+    # 행동 후보를 만드는 부분이 그대로여야 "후보는 같고 줄 세우는 기준만 바뀐" 비교가 된다.
+    train_only: str = ""                # "" | "quality"
     augment: bool = True
     # 체크포인트 기준 (§5.3g 2026-09-10). "select_nmae" = 실행시 경로(사전분포 z + Q̂)의 σ 정규화 오차.
     # "total" 은 사후분포 경로(라벨이 z 로 들어감)라 누설이 심해질수록 좋아진다 — exp1 은 그 기준으로

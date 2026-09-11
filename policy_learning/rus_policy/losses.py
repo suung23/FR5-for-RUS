@@ -94,11 +94,15 @@ def compute_loss(model: ActPolicy, out: PolicyOutput, batch: dict[str, torch.Ten
     logs["act_net"], logs["act_shape"] = l_net.item(), l_shape.item()
 
     # (d) 품질 헤드 — 시연된 chunk (라벨) 에 대한 Q̃ 로 감독
-    qmask = batch["Q_valid"].float()
+    qkey = cfg.quality_target
+    if qkey not in ("Q", "Q_area"):
+        raise ValueError(f"loss.quality_target 는 'Q' 또는 'Q_area' 여야 한다: {qkey!r}")
+    qmask = batch[f"{qkey}_valid"].float()
+    qlab = batch[qkey]
     denom = qmask.sum().clamp_min(1.0)
 
     def _mse(pred: torch.Tensor) -> torch.Tensor:
-        return ((pred - batch["Q"]) ** 2 * qmask).sum() / denom
+        return ((pred - qlab) ** 2 * qmask).sum() / denom
 
     base, resid = model.quality_parts(out.memory_pooled, P_lab)
     if model.quality_residual:

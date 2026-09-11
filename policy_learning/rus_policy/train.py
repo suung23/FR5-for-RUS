@@ -87,7 +87,15 @@ class Trainer:
         self.model: ActPolicy = build_policy(cfg.model, cfg.timing).to(self.device)
         logger.info("모델 파라미터 %.2fM, device=%s, train=%d val=%d", count_parameters(self.model) / 1e6,
                     self.device, len(self.train_ds), 0 if self.val_ds is None else len(self.val_ds))
-        self.opt = torch.optim.AdamW(self.model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
+        if cfg.train.init_from:
+            ck = torch.load(cfg.resolve(cfg.train.init_from), map_location=self.device, weights_only=False)
+            self.model.load_state_dict(ck["model_state"])
+            logger.info("가중치만 가져옴: %s (옵티마이저·epoch 는 새로 시작)", cfg.train.init_from)
+        self.frozen: list[torch.nn.Module] = []
+        if cfg.train.train_only:
+            self._freeze_except(cfg.train.train_only)
+        params = [p for p in self.model.parameters() if p.requires_grad]
+        self.opt = torch.optim.AdamW(params, lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
         steps_per_epoch = max(1, len(self.train_loader))
         total = cfg.train.epochs * steps_per_epoch
         warm = cfg.train.warmup_epochs * steps_per_epoch
@@ -105,6 +113,36 @@ class Trainer:
         self.best = float("inf")
         self.beta_mult = 1.0          # β 자동 조정 배율 (실제 β = loss.beta_kl × 워밍업 × 이 값)
         self.history: list[dict[str, Any]] = []
+
+    #: train_only 값 → 학습할 최상위 모듈.
+    TRAINABLE = {"quality": ("quality_head", "quality_base")}
+
+    def _freeze_except(self, which: str) -> None:
+        """``which`` 의 모듈만 학습하고 나머지는 얼린다 (config.TrainConfig.train_only)."""
+        if which not in self.TRAINABLE:
+            raise ValueError(f"train.train_only 는 {sorted(self.TRAINABLE)} 중 하나여야 한다: {which!r}")
+        keep = self.TRAINABLE[which]
+        n_train = n_all = 0
+        for name, p in self.model.named_parameters():
+            p.requires_grad = name.split(".")[0] in keep
+            n_all += p.numel()
+            n_train += p.numel() if p.requires_grad else 0
+        self.frozen = [m for n, m in self.model.named_children() if n not in keep]
+        # 인코더가 얼었으니 KL 도 β 조정도 의미가 없다. 조정기가 돌면 로그만 어지럽힌다.
+        if self.cfg.train.beta_adapt:
+            logger.info("train_only=%s — beta_adapt 를 끈다 (인코더가 얼어 있다)", which)
+            self.cfg.train.beta_adapt = False
+        # 행동 헤드가 얼면 select_nmae 는 상수다 — 그걸로 best 를 고르면 첫 epoch 가 늘 best 다.
+        if which == "quality" and self.cfg.train.checkpoint_metric == "select_nmae":
+            logger.info("train_only=quality — checkpoint_metric 을 select_nmae → qual 로 바꾼다")
+            self.cfg.train.checkpoint_metric = "qual"
+        logger.info("학습 %s: %d / %d 파라미터 (%.1f %%) · 얼린 모듈 %d 개는 eval 모드로 묶는다",
+                    which, n_train, n_all, 100.0 * n_train / max(n_all, 1), len(self.frozen))
+
+    def _pin_frozen_eval(self) -> None:
+        """얼린 모듈을 eval 로 되돌린다. model.train() 이 전부 train 으로 바꾸므로 매번 부른다."""
+        for m in self.frozen:
+            m.eval()
 
     # ------------------------------------------------------------------ 체크포인트
     def save(self, name: str) -> Path:
@@ -182,6 +220,7 @@ class Trainer:
 
     def train_epoch(self) -> dict[str, float]:
         self.model.train()
+        self._pin_frozen_eval()
         agg: dict[str, list[float]] = {}
         t0 = time.time()
         bscale = self.beta_scale()

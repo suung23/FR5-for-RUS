@@ -40,10 +40,10 @@ source ~/FR5-for-RUS/env.sh
 
 ```bash
 # ① 세션 + GUI. --seg 를 붙이지 않는다 (러너가 자기 U-Net 을 돌린다)
-./scripts/start_session.sh
+~/FR5-for-RUS/scripts/start_session.sh
 
 # ② 힘 탐색 + 러너. 한 명령이 둘 다 띄우고 Ctrl-C 하나로 둘 다 내린다
-./scripts/start_policy_eval.sh --pilot          # 또는 --main N, 또는 인자 없이 루프 평가
+~/FR5-for-RUS/scripts/start_policy_eval.sh --pilot          # 또는 --main N, 또는 인자 없이 루프 평가
 ```
 
 힘 탐색을 따로 띄우지 않는다. 그것이 없으면 힘 설정값이 출발값에 고정된 채 돌고
@@ -143,6 +143,7 @@ ros2 topic echo /diag/retreating
 지령 없이 한 에피소드를 돌린다.
 
 ```bash
+cd ~/FR5-for-RUS/policy_learning
 python3 scripts/run_experiment.py runs/qres2_ep25.pt --out runs/_verify \
         --poses 1 --conditions hold,policy --duration 30
 ```
@@ -155,7 +156,7 @@ python3 scripts/run_experiment.py runs/qres2_ep25.pt --out runs/_verify \
 * `summary.csv` 에 두 줄이 쌓인다.
 
 `states.npz` 가 없으면 나중에 임계를 다시 훑을 수 없다 — 파일럿의 목적이 그것이므로
-여기서 반드시 확인한다. 확인이 끝나면 `rm -rf runs/_verify`.
+여기서 반드시 확인한다. 확인이 끝나면 `rm -rf ~/FR5-for-RUS/policy_learning/runs/_verify`.
 
 ---
 
@@ -164,10 +165,10 @@ python3 scripts/run_experiment.py runs/qres2_ep25.pt --out runs/_verify \
 목적은 결과가 아니라 본 시험을 설계할 수 있게 하는 것이다.
 
 ```bash
-./scripts/start_policy_eval.sh --pilot
+~/FR5-for-RUS/scripts/start_policy_eval.sh --pilot
 ```
 
-`runs/pilot` 에 쌓인다. 조건 순서는 자세마다 섞이고, 조작자는 조건을 모른다.
+`~/FR5-for-RUS/policy_learning/runs/pilot` 에 쌓인다. 조건 순서는 자세마다 섞이고, 조작자는 조건을 모른다.
 **끊기면 같은 명령을 다시 친다** — 같은 폴더로 이어서 하고, 이미 있으면 그렇게 알린다.
 
 ### 에피소드 하나
@@ -205,7 +206,8 @@ python3 scripts/run_experiment.py runs/qres2_ep25.pt --out runs/_verify \
 ## 5. 파일럿 분석 — 네 산출물
 
 ```bash
-python3 scripts/analyze_experiment.py runs/pilot --sweep
+python3 ~/FR5-for-RUS/policy_learning/scripts/analyze_experiment.py \
+        ~/FR5-for-RUS/policy_learning/runs/pilot --sweep
 ```
 
 1. **판정 임계** — `--sweep` 이 면적비 4~12 % × 연결성분 70~90 % 를 훑는다. 조건이 가장 잘
@@ -225,10 +227,11 @@ python3 scripts/analyze_experiment.py runs/pilot --sweep
 
 ```bash
 # ① 몇 자세가 필요한지 확인한다 — 숫자가 인쇄된다
-python3 policy_learning/scripts/analyze_experiment.py policy_learning/runs/pilot
+python3 ~/FR5-for-RUS/policy_learning/scripts/analyze_experiment.py \
+        ~/FR5-for-RUS/policy_learning/runs/pilot
 
 # ② 그 숫자를 그대로 넣는다 (아래 25 는 예시다 — ① 이 알려준 수로 바꾼다)
-./scripts/start_policy_eval.sh --main 25 -- \
+~/FR5-for-RUS/scripts/start_policy_eval.sh --main 25 -- \
         --success-area-min 0.08 --success-component-min 0.80
 ```
 

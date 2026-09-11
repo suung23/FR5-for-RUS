@@ -149,8 +149,8 @@ def main() -> int:
     else:
         print(f"  → 영점을 잡아도 {y:.2f} N 이 남는다. **이건 영점 문제가 아니다.**")
         print("     중력 모델이 이 자세 영역을 설명하지 못하고 있다:")
-        print("       python3 phantom_stiffness/refit_calibration.py --count 75 \\")
-        print("               --down-cone-deg 60 --min-poses 12 --dry-run")
+        print("       python3 ~/FR5-for-RUS/phantom_stiffness/refit_calibration.py \\")
+        print("               --count 75 --down-cone-deg 60 --min-poses 12 --dry-run")
         print("     그래도 안 되면 GUI Calibration 에서 다자세 중력을 다시 잡아라.")
         print("     ⚠️ 자세를 **많이** 모아라. 자세가 적으면 적합이 그 자세들에만 맞춰지고")
         print("        (in-sample) rms 는 좋아 보이지만 다른 자세에서 두 배로 틀어진다.")

@@ -12,7 +12,7 @@ source ~/FR5-for-RUS/env.sh
 cd ~/FR5-for-RUS
 colcon build --packages-select fr5_control fr5_ik --symlink-install
 source ~/FR5-for-RUS/env.sh
-cd teleop_gui && npm run build && cd ..        # GUI 를 고쳤다면
+cd ~/FR5-for-RUS/teleop_gui && npm run build        # GUI 를 고쳤다면
 ```
 
 `환경 OK — rclpy · torch …` 가 안 뜨면 그 터미널에서는 아무것도 하지 않는다.
@@ -43,8 +43,8 @@ cd teleop_gui && npm run build && cd ..        # GUI 를 고쳤다면
 ### 그래도 이상하면
 
 ```bash
-./scripts/start_session.sh --calib --no-us --no-ap     # 다른 창에서 (제어 스택 없이)
-python3 policy_learning/scripts/diag_wrench_poses.py   # 공중에서 자세 3~5 곳, Enter
+~/FR5-for-RUS/scripts/start_session.sh --calib --no-us --no-ap     # 다른 창에서 (제어 스택 없이)
+python3 ~/FR5-for-RUS/policy_learning/scripts/diag_wrench_poses.py   # 공중에서 자세 3~5 곳, Enter
 ```
 
 잔차를 **영점이 지우는 몫**과 **남는 몫**으로 쪼개 인쇄한다. 남는 몫이
@@ -54,8 +54,8 @@ python3 policy_learning/scripts/diag_wrench_poses.py   # 공중에서 자세 3~5
 - **1.0 N 이상** → 영점 문제가 아니다. 중력 모델이 이 자세 영역을 설명하지 못한다:
 
 ```bash
-python3 phantom_stiffness/refit_calibration.py --count 75 --down-cone-deg 60 \
-        --min-poses 12 --dry-run
+python3 ~/FR5-for-RUS/phantom_stiffness/refit_calibration.py \
+        --count 75 --down-cone-deg 60 --min-poses 12 --dry-run
 ```
 
 ⚠️ 재적합할 때 **자세를 많이 써라.** 자세가 적으면 적합이 그 자세들에만 맞고 rms 는
@@ -67,7 +67,7 @@ python3 phantom_stiffness/refit_calibration.py --count 75 --down-cone-deg 60 \
 
 ```bash
 cd ~/FR5-for-RUS
-./scripts/start_session.sh
+~/FR5-for-RUS/scripts/start_session.sh
 ```
 
 `--seg` 를 붙이지 않는다 (러너가 자기 U-Net 을 돌린다).
@@ -87,11 +87,12 @@ cd ~/FR5-for-RUS
 셋 다 힘 탐색을 함께 띄운다. **Ctrl-C 하나로 둘 다 내린다.** 힘 탐색을 따로 띄우지
 않는다 — 빠지면 힘 설정값이 출발값에 고정되고 그 에피소드는 분리 보고 대상이 된다.
 
-파일럿·본시험은 `runs/pilot` · `runs/main` 으로 간다. **끊기면 같은 명령을 다시 친다**
+파일럿·본시험은 `policy_learning/runs/pilot` · `runs/main` 으로 간다. **끊기면 같은 명령을 다시 친다**
 (이어서 한다). 본 시험의 `N` 은 파일럿 분석이 알려준다:
 
 ```bash
-python3 policy_learning/scripts/analyze_experiment.py policy_learning/runs/pilot
+python3 ~/FR5-for-RUS/policy_learning/scripts/analyze_experiment.py \
+        ~/FR5-for-RUS/policy_learning/runs/pilot
 ```
 
 처음 한 번은 `--dry` 로 확인한다:

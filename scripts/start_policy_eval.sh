@@ -91,8 +91,27 @@ set -u
 [[ -f "$CKPT" ]] || { echo "체크포인트가 없다: $CKPT"; exit 1; }
 
 # 제어 스택이 떠 있어야 지령이 갈 데가 있다. 없는 채로 띄우면 러너는 조용히 대기만 한다.
+#
+# **한 번만 보고 포기하지 않는다.** ROS 2 디스커버리는 비동기라, 세션이 막 뜬 직후에는
+# 노드가 실제로 살아 있어도 `ros2 node list` 에 아직 안 나온다. 2026-09-11 에 세션을
+# 띄우자마자 이 명령을 친 조작자가 "안 보인다" 를 받았는데 노드는 멀쩡히 돌고 있었다.
+# 없다고 단정하려면 기다려 봐야 한다.
+WAIT_S=15
+echo -n "제어 스택 확인"
+for ((i = 0; i < WAIT_S; i++)); do
+  if ros2 node list 2>/dev/null | grep -q us_diff_ik_node; then
+    echo "  us_diff_ik_node ✓"
+    break
+  fi
+  echo -n "."
+  sleep 1
+done
 if ! ros2 node list 2>/dev/null | grep -q us_diff_ik_node; then
-  echo "⚠️  us_diff_ik_node 가 안 보인다 — ./scripts/start_session.sh 를 먼저 띄우십시오"
+  echo
+  echo "⚠️  us_diff_ik_node 가 ${WAIT_S} s 동안 안 보인다 — 세션을 먼저 띄우십시오:"
+  echo "      ~/FR5-for-RUS/scripts/start_session.sh"
+  echo "    떠 있는데도 이 메시지가 나오면 남은 노드를 정리하고 다시 띄우십시오:"
+  echo "      ~/FR5-for-RUS/scripts/stop_all.sh"
   exit 1
 fi
 

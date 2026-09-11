@@ -201,6 +201,14 @@ class PolicyRunner(Node):
         self._warned_no_search = False
         self._idle_reason = ""      # 왜 지령하지 않는가. 바뀔 때와 5 s 마다 알린다.
         self._idle_logged = 0.0
+        # 방향 관성. 체크포인트 값(0.2)은 보너스 차 1.60 으로 후보 사이 Q̂ 차(중앙 0.021)의
+        # 75 배다 — 테스트 관측 496 개 전부에서 방향을 Q̂ 가 아니라 **직전 방향이** 정했다
+        # (2026-09-11). 한 번 정한 방향을 영원히 유지하는 것이 그 결과다. --gamma 로 바꾼다.
+        self.gamma = (float(args.gamma) if args.gamma is not None
+                      else float(cfg.train.gamma_mode_consistency))
+        self.get_logger().info(
+            f"방향 관성 gamma {self.gamma:g} (보너스 차 {self.gamma * cfg.timing.chunk_steps:.3f}"
+            + (", 체크포인트 값" if args.gamma is None else ", --gamma 로 지정") + ")")
         self.create_timer(1.0 / cfg.timing.policy_hz, self._tick)
         # 추론 사이를 메우는 재발행. 워치독이 기대하는 발행 주기(50 Hz)에 맞춘다 —
         # _republish 의 주석에 이유가 있다. 0 이면 옛 거동(추론할 때만 발행).
@@ -534,7 +542,7 @@ class PolicyRunner(Node):
             self._idle_reason = ""
         with torch.no_grad():
             sel = self.model.select_action(obs, n_samples=self.args.z_samples,
-                                           gamma=self.cfg.train.gamma_mode_consistency,
+                                           gamma=self.gamma,
                                            prev_dy=torch.as_tensor([self.prev_net[1]], device=self.dev))
         a = sel["a"][0, 0].cpu().numpy()                    # 첫 스텝 속도 (B,k,6) → (6,)
         net = sel["net"][0].cpu().numpy()
@@ -662,6 +670,7 @@ class PolicyRunner(Node):
         (out / "meta.json").write_text(json.dumps({
             "checkpoint": self.args.checkpoint, "axes": self.args.axes, "execute": self.args.execute,
             "z_samples": self.args.z_samples, "start_force_N": self.args.start_force,
+            "gamma_mode_consistency": self.gamma,
             "max_mm_s": self.args.max_mm_s, "max_deg_s": self.args.max_deg_s,
             "condition": self.condition, "duration_s": self.args.duration,
             "episode_started": self.t_start is not None,
@@ -735,6 +744,9 @@ def main() -> int:
     p.add_argument("--placebo-seed", type=int, default=0, help="위약 방향 난수 — 세션을 재현한다")
     p.add_argument("--placebo-delay-s", type=float, default=30.0,
                    help="stale-obs 일 때의 관측 지연 [s]")
+    p.add_argument("--gamma", type=float, default=None,
+                   help="방향 관성 (모드 일관성 보너스). 없으면 체크포인트 값(0.2). 0.2 는 후보 사이 "
+                        "Q̂ 차의 75 배라 방향이 절대 안 바뀐다. 0.005 면 Q̂ 가 약 20 %% 를 정한다")
     p.add_argument("--republish-hz", type=float, default=50.0,
                    help="추론 사이에 직전 지령을 다시 내는 주기 [Hz]. 제어 스택의 워치독은 "
                         "50 Hz 발행자 기준이라 policy_hz(5 Hz)만으로는 매 주기 절반이 "

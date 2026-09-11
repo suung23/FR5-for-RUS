@@ -123,6 +123,8 @@ def run_episode(args, ep: dict, ep_dir: Path) -> dict:
            "--placebo-delay-s", str(args.placebo_delay_s),
            "--max-deg-s", str(args.max_deg_s), "--max-mm-s", str(args.max_mm_s),
            "--start-force", str(args.start_force)]
+    if args.gamma is not None:
+        cmd += ["--gamma", str(args.gamma)]
     if args.execute and ep["condition"] in ("policy", "placebo"):
         cmd.append("--execute")          # hold·expert 는 애초에 지령하지 않는다
     cmd += args.extra
@@ -160,8 +162,14 @@ def main() -> int:
                    choices=["random-direction", "stale-obs"])
     p.add_argument("--success-hold-s", type=float, default=3.0)
     p.add_argument("--placebo-delay-s", type=float, default=30.0)
+    p.add_argument("--gamma", type=float, default=None,
+                   help="방향 관성 — run_policy 로 넘긴다. 없으면 체크포인트 값")
     p.add_argument("extra", nargs="*", help="run_policy.py 에 그대로 넘길 인자")
-    args = p.parse_args()
+    # 선언 안 된 옵션은 run_policy 로 흘려보낸다. 예전에는 parse_args 가 그것을 거부했고,
+    # `--` 를 앞에 붙여도 위치 인자 extra 가 앞에서 이미 빈 값으로 소비돼 역시 거부됐다 —
+    # 러너 전용 옵션을 드라이버 너머로 넘기는 통로가 사실상 없었다.
+    args, unknown = p.parse_known_args()
+    args.extra = list(args.extra) + [a for a in unknown if a != "--"]
 
     out = Path(args.out)
     session = load_or_create(out, args)

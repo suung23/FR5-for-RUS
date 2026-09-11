@@ -198,6 +198,16 @@ class PolicyRunner(Node):
         self._idle_reason = ""      # 왜 지령하지 않는가. 바뀔 때와 5 s 마다 알린다.
         self._idle_logged = 0.0
         self.create_timer(1.0 / cfg.timing.policy_hz, self._tick)
+        # 추론 사이를 메우는 재발행. 워치독이 기대하는 발행 주기(50 Hz)에 맞춘다 —
+        # _republish 의 주석에 이유가 있다. 0 이면 옛 거동(추론할 때만 발행).
+        self._held = None
+        self._held_t = 0.0
+        self._held_max_age_s = 3.0 / float(cfg.timing.policy_hz)
+        if self.args.republish_hz > 0.0:
+            self.create_timer(1.0 / self.args.republish_hz, self._republish)
+            self.get_logger().info(
+                f"지령 재발행 {self.args.republish_hz:.0f} Hz "
+                f"(추론 {cfg.timing.policy_hz:.0f} Hz · 최대 유지 {self._held_max_age_s:.1f} s)")
         self.get_logger().info(
             f"준비됨 — {'DRY-RUN (지령 없음)' if not args.execute else '실행 모드'}, 축={args.axes}, "
             f"m={self.m} k={self.k} @{cfg.timing.policy_hz:.0f}Hz, "
@@ -319,8 +329,47 @@ class PolicyRunner(Node):
 
     # -- 지령 -------------------------------------------------------------
     def _stop(self):
+        self._held = None                      # 재발행을 멈춘다
         if self.args.execute:
             self.twist_pub.publish(Twist())
+
+    def _republish(self):
+        """직전 지령을 **발행 주기에 맞춰** 다시 낸다 (ZOH).
+
+        정책은 policy_hz(5 Hz, 200 ms)로 추론하는데, 제어 스택의 워치독은 **50 Hz
+        발행자**를 기준으로 맞춰져 있다 (probe.yaml: twist_hold_s 0.04 = "발행 주기
+        20 ms 의 2배", twist_timeout_s 0.1). 200 ms 마다 한 번만 내면 매 주기가 이렇게
+        된다:
+
+            0–40 ms    그대로
+            40–100 ms  1.0 → 0 으로 선형 감쇠 (_hold_fade)
+            100–200 ms **두절 판정** — 접촉 프로빙 분기가 zeros(6) 을 넣어
+                       정책의 회전 세 축이 통째로 사라진다
+
+        평균 0.35 배에 매 주기 절반은 정확히 0 이다. 정책이 3 °/s 를 내도 실효는
+        1 °/s 에 50 % 끊김이고, 로봇은 "거의 안 움직이는" 것처럼 보인다.
+
+        워치독을 늦추는 것이 아니라 **발행을 빠르게 한다.** 워치독은 정책이 죽었을 때
+        프로브를 물리는 유일한 장치이므로 그대로 둔다 — 재발행이 멈추면 100 ms 안에
+        후퇴가 걸리고, 그것이 바로 우리가 원하는 거동이다.
+        """
+        if self._held is None or not self.args.execute:
+            return
+        # **오래된 지령은 재발행하지 않는다.** 재발행은 추론 사이를 메우는 것이지 추론을
+        # 대신하는 것이 아니다. _tick 이 멈추면(추론 예외·교착·GIL 기아) 이 타이머만
+        # 살아남아 마지막 지령을 영원히 내보내게 되는데, 그러면 워치독이 영영 안 걸리고
+        # 로봇은 아무도 판단하지 않는 속도로 계속 돈다.
+        #
+        # 세 주기(5 Hz → 0.6 s)까지만 믿는다. 느린 추론 한두 번은 넘기고, 정말 멈춘
+        # 경우에는 재발행이 끊겨 100 ms 뒤 워치독이 프로브를 물린다.
+        if (time.time() - self._held_t) > self._held_max_age_s:
+            if self._held is not None:
+                self.get_logger().warn(
+                    f"추론이 {self._held_max_age_s:.1f} s 넘게 멎었다 — 재발행을 멈춘다 "
+                    "(제어 스택 워치독이 후퇴시킨다)")
+            self._held = None
+            return
+        self.twist_pub.publish(self._held)
 
     def _publish(self, vel6: np.ndarray):
         """vel6 = [vx, vy, vz mm/s, wx, wy, wz deg/s] (프로브 프레임). z 병진은 항상 버린다."""
@@ -333,6 +382,7 @@ class PolicyRunner(Node):
         ang = np.clip(ang, -self.args.max_deg_s, self.args.max_deg_s)
         tw.linear.x, tw.linear.y, tw.linear.z = (lin / 1000.0).tolist()
         tw.angular.x, tw.angular.y, tw.angular.z = np.radians(ang).tolist()
+        self._held, self._held_t = tw, time.time()   # 다음 추론까지 이 값을 유지한다
         if self.args.execute:
             self.twist_pub.publish(tw)
         return lin, ang
@@ -595,6 +645,10 @@ def main() -> int:
     p.add_argument("--placebo-seed", type=int, default=0, help="위약 방향 난수 — 세션을 재현한다")
     p.add_argument("--placebo-delay-s", type=float, default=30.0,
                    help="stale-obs 일 때의 관측 지연 [s]")
+    p.add_argument("--republish-hz", type=float, default=50.0,
+                   help="추론 사이에 직전 지령을 다시 내는 주기 [Hz]. 제어 스택의 워치독은 "
+                        "50 Hz 발행자 기준이라 policy_hz(5 Hz)만으로는 매 주기 절반이 "
+                        "두절로 잡힌다. 0 이면 재발행하지 않는다 (옛 거동)")
     p.add_argument("--start-gate", default="off", choices=["off", "on"],
                    help="on=시작 조건을 만족할 때까지 기다린다 (실험). off=버튼이 곧 시작이고 "
                         "조건 충족 여부는 기록만 한다 (운용·평가 루프, 기본)")

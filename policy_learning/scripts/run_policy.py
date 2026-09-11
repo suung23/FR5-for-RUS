@@ -182,6 +182,9 @@ class PolicyRunner(Node):
         self.states: list = []                    # 판정에 쓸 상태 이력
         self.state_t: list = []
         self.finished = False
+        self.attempt = 0            # --loop: 시도 번호. enable 이 올라갈 때마다 는다
+        self.attempts: list = []    # 시도별 판정 (한 줄씩 화면에 쌓는다)
+        self.announced = False      # 이번 시도에서 성공을 이미 알렸는가
         self._warned = False
         self._uncompensated = ""    # 보상 안 된 렌치가 오고 있으면 그 frame_id
         self.q_raw = float("nan")   # 최근 Q_raw (힘 축)
@@ -216,11 +219,15 @@ class PolicyRunner(Node):
         self.wrench = np.array([f.x, f.y, f.z], np.float32)
 
     def _on_enable(self, msg: Bool):
-        if bool(msg.data) != self.enabled:
-            self.get_logger().warn(f"정책 {'시작' if msg.data else '정지'}")
-        self.enabled = bool(msg.data)
-        if not self.enabled:
+        want = bool(msg.data)
+        if want == self.enabled:
+            return
+        self.get_logger().warn(f"정책 {'시작' if want else '정지'}")
+        self.enabled = want
+        if not want:
             self._stop()
+            if self.args.loop:
+                self._close_attempt()          # 놓는 순간이 한 시도의 끝이다
 
     def _on_mode(self, msg) -> None:
         """접촉 프로빙에 들어가면 켜고, 나오면 끈다 (`--start-on probing`).
@@ -400,6 +407,13 @@ class PolicyRunner(Node):
                 f"⚠️ 힘 탐색이 보이지 않는다 ({self.args.robot_namespace}/force_setpoint_bar 무음) — "
                 "힘 설정값이 출발값에 고정된 채 돈다. "
                 "`ros2 run fr5_control force_search --ros-args -p execute:=true` 를 띄웠는가")
+        if not self.announced and self.t_start is not None:
+            v = self._judge_now()
+            if v.get("success"):
+                self.announced = True
+                self.get_logger().warn(
+                    f"○ 진단 가능 뷰 도달 — 시작 후 {t - self.t_start:.0f} s. "
+                    "계속 두면 유지되는지 본다. Stop 으로 이 시도를 닫는다")
         if self._idle_reason:
             # 여기까지 왔다는 것은 실제로 지령을 낸다는 뜻이다. 관측을 얻은 자리에서 지우면
             # 시작 조건에서 막히는 동안 매 tick "해제 → 대기" 가 번갈아 찍힌다.
@@ -440,7 +454,53 @@ class PolicyRunner(Node):
                 f"F={fn:4.1f}N  Q_seg={qn:.3f} Q_raw={self.q_raw:.3f} Q̂={qhat:.3f}  "
                 f"ω=({ang[0]:+5.2f},{ang[1]:+5.2f},{ang[2]:+5.2f})°/s  v=({lin[0]:+5.2f},{lin[1]:+5.2f})mm/s")
 
-    def save(self, out: Path):
+    def _judge_now(self) -> dict:
+        """지금까지 쌓인 상태로 판정한다. 시도가 시작되지 않았으면 빈 dict."""
+        if self.t_start is None or not self.states:
+            return {}
+        m = [i for i, tt in enumerate(self.state_t) if tt >= self.t_start]
+        if not m:
+            return {}
+        thr = Thresholds(area_min=self.args.success_area_min,
+                         component_min=self.args.success_component_min,
+                         centroid_max=self.args.success_centroid_max,
+                         hold_s=self.args.success_hold_s)
+        return judge([self.state_t[i] for i in m],
+                     np.stack([self.states[i] for i in m]), thr)
+
+    def _close_attempt(self) -> None:
+        """한 시도를 닫고 기록한 뒤 다음을 위해 비운다 (--loop).
+
+        프로세스를 다시 띄우지 않는 이유는 모델 로딩과 지각 워밍업이 시도마다 반복되면
+        조작자가 그 사이를 기다려야 하기 때문이다. 평가 루프는 "접근 → 전환 → 찾기 →
+        다시" 이고, 그 사이에 터미널을 만질 일이 없어야 한다.
+        """
+        v = self._judge_now()
+        if not v and self.t_start is None:
+            self.get_logger().warn("시도가 시작되지 않았다 (시작 조건 미충족) — 기록하지 않는다")
+        else:
+            self.attempt += 1
+            out = Path(self.args.out or ".") / f"attempt_{self.attempt:03d}"
+            self.save(out, quiet=True)
+            row = {"n": self.attempt, "success": bool(v.get("success")),
+                   "best_run_s": v.get("best_run_s", float("nan")),
+                   "t_total_s": (self.state_t[-1] - self.t_start) if self.t_start else float("nan"),
+                   "q_seg": v.get("q_mean", float("nan")), "dir": out.name}
+            self.attempts.append(row)
+            mark = "○ 성공" if row["success"] else "✗ 실패"
+            self.get_logger().warn(
+                f"시도 {row['n']}  {mark}  최장 연속 {row['best_run_s']:.1f} s  "
+                f"소요 {row['t_total_s']:.0f} s  → {out.name}")
+            ok = sum(a["success"] for a in self.attempts)
+            self.get_logger().warn(f"  누적 {ok}/{len(self.attempts)}")
+        # 다음 시도를 위해 비운다. 관측 버퍼와 지각 스트림은 그대로 둔다 — 프로브는
+        # 그 자리에 있고, 끊긴 적이 없다.
+        self.t_start = None
+        self.states, self.state_t, self.rows = [], [], []
+        self.gate.reset()
+        self.announced = False
+
+    def save(self, out: Path, quiet: bool = False):
         out.mkdir(parents=True, exist_ok=True)
         if self.rows:
             with open(out / "decisions.csv", "w", newline="", encoding="utf-8") as fh:
@@ -480,7 +540,18 @@ class PolicyRunner(Node):
             "n_ticks": len(self.rows), "n_frames": self.n_img, "n_slow_perception": self.n_drop,
             "bmode": self.conv.describe() if self.conv else None,
         }, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"\n기록: {out}  (tick {len(self.rows)}, 프레임 {self.n_img})")
+        if not quiet:
+            print(f"\n기록: {out}  (tick {len(self.rows)}, 프레임 {self.n_img})")
+
+    def summary(self) -> None:
+        if not self.attempts:
+            return
+        ok = sum(a["success"] for a in self.attempts)
+        print(f"\n시도 {len(self.attempts)} · 성공 {ok} ({ok/len(self.attempts):.0%})")
+        print(f"  {'#':>3} {'결과':>5} {'최장연속':>9} {'소요':>7}  기록")
+        for a in self.attempts:
+            print(f"  {a['n']:>3} {'성공' if a['success'] else '실패':>5} "
+                  f"{a['best_run_s']:>8.1f}s {a['t_total_s']:>6.0f}s  {a['dir']}")
 
 
 def main() -> int:
@@ -501,6 +572,9 @@ def main() -> int:
     p.add_argument("--condition", default="policy", choices=list(CONDITIONS),
                    help="hold=정지(바닥선) · placebo=지연 관측으로 같은 분포의 움직임 · "
                         "policy=학습된 정책 · expert=숙련자(러너는 기록만)")
+    p.add_argument("--loop", action="store_true",
+                   help="평가 루프. Start/Stop 한 번이 한 시도이고, 프로세스는 계속 떠 있는다 — "
+                        "접근 → 전환 → 찾기 → 다시 사이에 터미널을 만질 일이 없다")
     p.add_argument("--duration", type=float, default=0.0,
                    help="에피소드 길이 [s]. 0 이면 무제한 (예전 거동)")
     p.add_argument("--placebo-mode", default="random-direction",
@@ -540,6 +614,7 @@ def main() -> int:
     out = Path(args.out) if args.out else Path("runs") / time.strftime("live_%Y%m%d_%H%M%S")
 
     rclpy.init()
+    args.out = str(out)
     node = PolicyRunner(args, model, cfg, backend)
     try:
         while rclpy.ok() and not node.finished:
@@ -548,7 +623,10 @@ def main() -> int:
         pass
     finally:
         node._stop()
-        node.save(out)
+        if args.loop:
+            node.summary()
+        else:
+            node.save(out)
         node.destroy_node()
         rclpy.shutdown()
     return 0

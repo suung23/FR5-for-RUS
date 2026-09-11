@@ -111,7 +111,9 @@ def run_episode(args, ep: dict, ep_dir: Path) -> dict:
            "--placebo-mode", args.placebo_mode,
            "--placebo-seed", str(args.seed * 1000 + ep["index"]),
            "--success-hold-s", str(args.success_hold_s),
-           "--placebo-delay-s", str(args.placebo_delay_s)]
+           "--placebo-delay-s", str(args.placebo_delay_s),
+           "--max-deg-s", str(args.max_deg_s), "--max-mm-s", str(args.max_mm_s),
+           "--start-force", str(args.start_force)]
     if args.execute and ep["condition"] in ("policy", "placebo"):
         cmd.append("--execute")          # hold·expert 는 애초에 지령하지 않는다
     cmd += args.extra
@@ -133,6 +135,10 @@ def main() -> int:
     p.add_argument("--blind", action="store_true", help="조건을 콘솔에 인쇄하지 않는다 (expert 제외)")
     p.add_argument("--execute", action="store_true", help="실제로 지령한다 (없으면 전 조건 DRY-RUN)")
     p.add_argument("--axes", default="rot")
+    # 안전 상한은 러너가 아니라 여기서 정한다 — 에피소드마다 다르면 조건 비교가 깨진다.
+    p.add_argument("--max-deg-s", type=float, default=3.0, help="회전 지령 상한 [°/s]")
+    p.add_argument("--max-mm-s", type=float, default=3.0, help="병진 지령 상한 [mm/s]")
+    p.add_argument("--start-force", type=float, default=1.0, help="이 접촉력[N] 미만이면 지령하지 않는다")
     p.add_argument("--gate-area-max", type=float, default=0.02)
     p.add_argument("--gate-quality-min", type=float, default=0.6)
     p.add_argument("--success-area-min", type=float, default=0.08)

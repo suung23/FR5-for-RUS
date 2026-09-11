@@ -302,8 +302,9 @@ import torch; print(torch.load("runs/last.pt", map_location="cpu", weights_only=
 
 ## 9. 열려 있는 항목
 
-1. **`timing.us_latency_s`** 기본값을 0 → 0.200 으로 고쳐 두었으나 **데이터셋을 다시 빌드해야 반영된다**
-   (`dataset.py` 가 빌드 때 프레임 시각에서 뺀다). 정책 스텝이 0.2 s 라 관측·행동이 한 스텝 어긋나 있다.
+1. ~~`timing.us_latency_s` 가 반영되지 않았다~~ — **해결돼 있었다 (2026-09-11 확인).**
+   `data/policy_dataset.h5` 의 `schema/config` 가 `us_latency_s: 0.2` 로 빌드된 것을 보여준다.
+   설정을 바꾸면 재빌드가 필요하다는 것은 여전히 맞지만, 지금 데이터는 이미 보정본이다.
 2. **`sigma_translation_coeff_mm = 0.7`** → σ_net ≈ 1.06 mm 로 병진 라벨 정밀도를 가정하는데 실측
    드리프트는 그 50 배 이상이다. `w_net = 1/σ²` 가중과 Huber δ 가 전부 이 잘못된 σ 위에 있다.
 3. **Q̂ 의 행동 대비 부족.** 시연 하나당 행동이 하나뿐이라 "비슷한 영상에서 다른 움직임" 대비가 없다.

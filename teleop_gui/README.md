@@ -186,18 +186,77 @@ SYSTEM │ ROBOT: CONNECTED │ SENSOR: CONNECTED │ MODE: TELEOPERATION │ SO
  EVENT LOG · timestamps · telemetry age · research-use-only
 ```
 
-The four navigation entries are operational views, not decoration — each
-changes the lower workspace panel:
+The navigation entries are operational views, not decoration — each changes the
+lower workspace panel:
 
 | View | Lower panel |
 |---|---|
 | Monitoring | rolling force trend, normal or per-axis components |
 | Teleoperation | operator station, then joint travel within each axis' own limits |
 | Contact | stage-transition timeline reconstructed from the buffer |
+| Segmentation | *(none — the two pictures take the whole row, see below)* |
 | Safety | configured limits and standing caveats |
 
 The selected view is held in the URL hash, so a reload returns to the panel the
 operator was on.
+
+### Bladder segmentation
+
+The **Segmentation** view puts the ultrasound sector and the U-Net's output side
+by side. It is the one view the 3D arm stands down on: the stage, the velocity
+limits and the contact force are all still in the right-hand column, and a third
+plate in that row leaves both pictures too narrow to judge a boundary in —
+which is the only reason to be on this view.
+
+**The two pictures are not the same picture.** The left one is
+`fr5_vision.scan_convert`'s fan, which is what the operator reads. The right one
+is `rus_policy.bmode`'s 256² letterbox, which is what the network is actually
+fed. They are different scan conversions, so the mask is drawn only on the one
+it belongs to — laid over the other it would sit in the wrong place and look
+entirely convincing. The pair travels from the node as two messages and the
+bridge matches them by ROS header stamp before either is sent.
+
+Three switches, because each is a claim that has to be checkable:
+
+| Switch | What it is for |
+|---|---|
+| **Mask** | Blink it off. A boundary that follows the lumen edge underneath is a mask; one that stays put while the edge moves is a model repeating itself. |
+| **Fill** | The tint reads at a glance and hides the speckle it covers. Outline-only leaves the interior visible. |
+| **Marks** | Centroid and beam axis. `ê` is measured between them, and the beam axis is the centre of the **imaged sector**, not of the frame. |
+
+The picture is upscaled with nearest-neighbour, so the blocks on screen are the
+pixels the network classified — not an interpolation of them.
+
+Every number under it comes from the `ControlState` the network's own feature
+extractor produced; the console computes none of them. `Q_seg` presupposes the
+bladder was found, so when there is no mask the panel says **NO MASK** rather
+than printing a score — a number there reads as "poor image" when the fact is
+"nothing to score". `VALID` / `NOT VALID` is an *observation verdict*, never a
+command and never a claim about the arm; when it is not valid, the checks that
+failed are listed.
+
+Nothing appears here unless the segmentation node is running — it is **not**
+part of the default session, because it needs `Unet_seg/.venv`'s torch rather
+than the ROS system interpreter, and running it alongside `run_policy.py` puts
+two copies of the U-Net on the GPU:
+
+```bash
+./scripts/start_session.sh --seg          # with the session
+```
+
+or on its own, ROS first and the venv second (`docs/RUNBOOK_POLICY_INFERENCE.md`
+§4 — the other order leaves `rclpy` unable to find `librcl_action.so`):
+
+```bash
+source /opt/ros/jazzy/setup.bash && source install/setup.bash
+source Unet_seg/.venv/bin/activate
+python3 policy_learning/scripts/run_segmentation.py
+```
+
+It publishes `/us/seg/bmode`, `/us/seg/mask` and `/us/seg/state`, subscribes to
+`/us/image`, and writes nothing that reaches the robot. In particular it does
+**not** publish `{ns}/image_quality` — that is `run_policy.py`'s, and a second
+publisher would leave the force search unable to say whose `Q` it was acting on.
 
 ### Operator station
 
@@ -286,6 +345,7 @@ where numbers come from, never what they mean.
 | `src/telemetry/guidance.ts` | operator guidance rules |
 | `src/store/telemetryStore.ts` | live state, chart decimation, peak hold, flange path |
 | `src/store/events.ts` | transition-only event log |
+| `src/components/BladderSegmentation.tsx` | mask overlay, blink/outline/marks switches, `ControlState` readout |
 
 ## Thresholds
 

@@ -59,7 +59,9 @@ export function PolicyInference({ telemetry, available, onCommand }: Props) {
               ? 'no request sent'
               : requested
                 ? 'start requested \u2014 not confirmed'
-                : 'stopped'}
+                : mode === 'approach'
+                  ? 'stopped \u2014 teleop restored'
+                  : 'stop requested \u2014 not confirmed'}
         </span>
       </div>
       <div className={`plate__body ${styles.body}`}>
@@ -100,6 +102,14 @@ export function PolicyInference({ telemetry, available, onCommand }: Props) {
               <span className="tag tag--strong">PENDING</span> the request went out but the stack
               has not declared <code>contact_probing_policy</code>. Either it is not up, or it
               refused. Nothing has changed on the robot.
+            </>
+          ) : requested === false && mode === 'approach' ? (
+            // Stop is confirmed by the mode coming back, not by the click — the
+            // same rule as HANDOVER. This is the state the session started in.
+            <>
+              <span className="tag">TELEOP</span> back to where the session started: the stylus
+              has all six axes at the approach limits, and the robot no longer holds the force.
+              The probe is still where the policy left it.
             </>
           ) : !known ? (
             <>

@@ -126,7 +126,16 @@ export class TransitionWatcher {
     // transition and must not be logged as one. A console attached mid-session
     // would otherwise announce a switch that happened before it was watching.
     if (previous === undefined) return;
-    if (mode === 'contact_probing') {
+    if (mode === 'contact_probing_policy') {
+      logEvent(
+        'MODE',
+        'policy inference holds the contact régime — operator axes zeroed, ' +
+          'the robot is holding force on the penetration axis',
+        'warn',
+      );
+    } else if (mode === 'approach' && previous === 'contact_probing_policy') {
+      logEvent('MODE', 'policy stopped — teleop restored, all six axes back to the stylus', 'info');
+    } else if (mode === 'contact_probing') {
       logEvent(
         'MODE',
         'approach to contact probing — velocity limits tightened, ' +

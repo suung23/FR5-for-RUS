@@ -74,7 +74,7 @@ def test_idle_stops_republishing():
     src = RUN_POLICY.read_text()
     stop = src[src.index("    def _stop(self):"):src.index("    def _republish(self):")]
     assert "self._held = None" in stop, "_stop 이 보유 지령을 비우지 않는다"
-    idle = src[src.index("    def _idle(self, reason: str)"):]
+    idle = src[src.index("    def _idle(self, reason: str"):]
     idle = idle[:idle.index("    def _tick(self):")]
     assert "self._stop()" in idle, "_idle 이 _stop 을 부르지 않는다"
 

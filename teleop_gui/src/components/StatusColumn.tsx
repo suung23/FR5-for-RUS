@@ -134,7 +134,8 @@ function StagePlate({
   const [probingArmed, setProbingArmed] = useState(true);
   const inplaneSelected = telemetry.inplaneRotation === true;
   const inplaneActive = probingMode === 'contact_probing_inplane';
-  const probingActive = probingMode === 'contact_probing' || inplaneActive;
+  const probingActive =
+    probingMode === 'contact_probing' || inplaneActive || probingMode === 'contact_probing_policy';
   const alarm = safety === 'protective_stop' || safety === 'emergency_stop';
   const warn = safety === 'warning';
 
@@ -182,9 +183,11 @@ function StagePlate({
               ? '—'
               : probingMode === 'contact_probing_inplane'
                 ? 'CONTACT · IN-PLANE'
-                : probingMode === 'contact_probing'
-                  ? 'CONTACT PROBING'
-                  : 'APPROACH'}
+                : probingMode === 'contact_probing_policy'
+                  ? 'CONTACT · POLICY'
+                  : probingMode === 'contact_probing'
+                    ? 'CONTACT PROBING'
+                    : 'APPROACH'}
           </span>
         </div>
         {/* Which axes the operator still has. In contact probing the answer is

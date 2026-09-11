@@ -10,7 +10,9 @@
 #   ./scripts/start_session.sh --no-px6d             # 센서 없이
 #   ./scripts/start_session.sh --no-gui              # GUI 없이
 #   ./scripts/start_session.sh --no-us               # 초음파 없이 (영상 패널은 비어 있다)
+#   ./scripts/start_session.sh --seg                 # 방광 세그멘테이션까지 (U-Net)
 #   ./scripts/start_session.sh --no-ap               # AP 는 이미 붙여 두었을 때
+#   ./scripts/start_session.sh --ap-wait 120         # 프로브를 2 분만 기다린다 (기본: 무한)
 #   ./scripts/start_session.sh --calib               # 교정 모드 (teleop 없이)
 #   ./scripts/start_session.sh --dry-run             # 무엇을 할지만 출력
 #
@@ -69,11 +71,20 @@ USE_GUI=1
 # /us/image 를 브리지가 GUI 로, capture_sweep·정책 노드가 각자 구독한다. 프로브는
 # 클라이언트를 하나만 받으므로 이 노드를 여기서 소유해 두 번 뜨는 일을 막는다.
 USE_US=1
+# 방광 세그멘테이션. GUI 의 Segmentation 패널이 이것 없이는 비어 있다.
+#
+# 기본이 꺼짐인 이유 둘. (1) U-Net 은 venv 의 torch 를 쓰는데 세션의 나머지는 ROS 의
+# 시스템 파이썬으로 돈다 — 다른 해석기를 하나 더 띄우는 것을 조용히 하지 않는다.
+# (2) `run_policy.py` 를 같이 돌리면 U-Net 이 두 벌 돌아 지각이 느려질 수 있다
+# (run_segmentation.py 도크스트링). 영상 위의 마스크를 보고 싶을 때 켜라.
+USE_SEG=0
 US_PROBE="c10ur"
 US_HOST="192.168.1.1"
 # AP 접속까지 할 것인가. NetworkManager 는 polkit 인증을 요구하므로 tty/SSH 세션에서는
 # 거부된다 — 그 경우 안내만 하고 세션은 계속 간다 (영상이 없다고 teleop 을 막을 이유가 없다).
 CONNECT_AP=1
+# AP 를 기다리는 상한 [s]. 0 이면 무한 — 명령을 먼저 치고 프로브를 나중에 켜도 되게.
+AP_WAIT_S=0
 DRY_RUN=0
 # 교정 모드. 브리지와 GUI 만 띄우고 제어 스택은 띄우지 않는다.
 #
@@ -91,7 +102,9 @@ while (( $# )); do
     --px6d)     PX6D_PORT="${2:-}"; shift 2 ;;
     --no-px6d)  USE_PX6D=0; shift ;;
     --no-us)    USE_US=0; shift ;;
+    --seg)      USE_SEG=1; shift ;;
     --no-ap)    CONNECT_AP=0; shift ;;
+    --ap-wait)  AP_WAIT_S="${2:-0}"; shift 2 ;;
     --probe)    US_PROBE="${2:-c10ur}"; shift 2 ;;
     --us-host)  US_HOST="${2:-192.168.1.1}"; shift 2 ;;
     --no-gui)   USE_GUI=0; shift ;;
@@ -128,6 +141,7 @@ GUI_LOG="$WORKSPACE/log/teleop_gui.log"
 BRIDGE_PID=""
 GUI_PGID=""
 US_PID=""
+SEG_PID=""
 
 # 나가는 길은 하나뿐이다. Ctrl-C 든 오류든 여기를 지난다.
 cleanup() {
@@ -141,6 +155,9 @@ cleanup() {
   fi
   if [[ -n "$BRIDGE_PID" ]]; then
     kill -TERM "$BRIDGE_PID" 2>/dev/null || true
+  fi
+  if [[ -n "$SEG_PID" ]]; then
+    kill -TERM "$SEG_PID" 2>/dev/null || true
   fi
   if [[ -n "$US_PID" ]]; then
     kill -TERM "$US_PID" 2>/dev/null || true
@@ -371,7 +388,8 @@ if (( DRY_RUN )); then
   echo
   echo "--- dry run, 실행하지 않는다 ---"
   if (( USE_US )); then
-    echo "  초음파: ros2 run fr5_vision us_frame_node --ros-args -p us.probe:=$US_PROBE -p us.host:=$US_HOST"
+    echo "  초음파: ros2 run fr5_vision us_frame --ros-args -p us.probe:=$US_PROBE -p us.host:=$US_HOST"
+    (( USE_SEG )) && echo "  세그:   (venv) python3 policy_learning/scripts/run_segmentation.py"
     (( CONNECT_AP )) && echo "          AP: python3 imu_bench/host/probe_wifi_linux.py"
   fi
   if (( NEEDS_SG )); then
@@ -398,29 +416,94 @@ mkdir -p "$(dirname "$BRIDGE_LOG")"
 # 된다), 프레임이 안 올 때 브리지 로그가 아니라 이 노드 로그를 먼저 보게 된다.
 if (( USE_US )); then
   echo
-  echo "초음파  us_frame_node (probe=$US_PROBE host=$US_HOST)"
+  echo "초음파  us_frame (probe=$US_PROBE host=$US_HOST)"
   if (( CONNECT_AP )); then
-    # **프로브가 없으면 여기서 멈춘다.** 예전에는 경고만 하고 계속 갔는데, 그러면
-    # 영상 없는 콘솔이 떠서 조작자가 한참 쓴 뒤에야 알아차린다 — 그리고 그때는
-    # 이미 세션을 다시 띄워야 한다. 영상이 목적인 세션이면 영상부터 세운다.
+    # **프로브를 기다린다.** 영상이 목적인 세션이면 영상부터 세운다 — 예전에는 경고만
+    # 하고 계속 가서, 영상 없는 콘솔을 한참 쓴 뒤에야 알아차렸다.
+    #
+    # 기다리는 이유는 순서가 뒤집혀도 되게 하려는 것이다: 명령을 먼저 치고 그다음
+    # 프로브 전원을 켜도 된다. 스캔에 AP 가 나타나면 그때 붙는다.
     # 영상 없이 쓸 작정이면 `--no-us` 로 그 뜻을 밝히면 된다.
-    if /usr/bin/python3 "$WORKSPACE/imu_bench/host/probe_wifi_linux.py"; then
-      echo "  AP 접속됨"
-    else
-      echo >&2
-      echo "✗ 프로브 AP 에 붙지 못했다 — 세션을 띄우지 않는다." >&2
-      echo "  · 프로브 배터리 전원을 켜고 USB 는 뽑은 상태인지" >&2
-      echo "  · NetworkManager 가 polkit 인증을 요구하므로, 이 PC 화면에 로그인한" >&2
-      echo "    터미널에서 실행하고 있는지 (tty/SSH 세션은 거부된다)" >&2
-      echo "  영상 없이 진행하려면:  $0 --no-us $*" >&2
-      exit 1
-    fi
+    ap_deadline=0
+    (( AP_WAIT_S > 0 )) && ap_deadline=$(( SECONDS + AP_WAIT_S ))
+    echo "  프로브 AP 를 기다린다 — 배터리 전원을 켜라 (USB 는 뽑은 상태). Ctrl-C 로 중단."
+    ap_tries=0
+    until /usr/bin/python3 "$WORKSPACE/imu_bench/host/probe_wifi_linux.py" --scan-only >/dev/null 2>&1; do
+      ap_tries=$(( ap_tries + 1 ))
+      if (( ap_deadline > 0 && SECONDS > ap_deadline )); then
+        echo >&2
+        echo "✗ ${AP_WAIT_S}s 안에 프로브 AP 가 나타나지 않았다 — 세션을 띄우지 않는다." >&2
+        echo "  영상 없이 진행하려면:  $0 --no-us" >&2
+        exit 1
+      fi
+      printf "\r    기다리는 중 … %ds (스캔 %d회)   " "$SECONDS" "$ap_tries"
+      sleep 3
+    done
+    printf "\r                                          \r"
+    echo "  프로브 AP 발견 — 접속한다"
+
+    # 접속도 **될 때까지 다시 시도한다.** 한 번 실패했다고 나가면, 프로브가 막 켜져
+    # 아직 준비가 안 됐거나 다른 클라이언트가 잠깐 쥐고 있던 경우까지 세션이 죽는다.
+    # 첫 실패의 이유는 그대로 보여 주고 (조작자가 고쳐야 할 것이 있을 수 있다),
+    # 그 뒤로는 조용히 세면서 기다린다.
+    ap_conn_tries=0
+    until /usr/bin/python3 "$WORKSPACE/imu_bench/host/probe_wifi_linux.py"; do
+      ap_conn_tries=$(( ap_conn_tries + 1 ))
+      if (( ap_conn_tries == 1 )); then
+        echo
+        echo "  ⚠ 아직 못 붙었다. 될 때까지 다시 시도한다 (Ctrl-C 로 중단)."
+        echo "    · 프로브가 다른 클라이언트에 점유돼 있지 않은지 (윈도우 뷰어)"
+        echo "    · NetworkManager 가 polkit 인증을 요구한다 — 이 PC 화면에 로그인한"
+        echo "      터미널인지 (tty/SSH 세션은 거부된다)"
+        echo "    영상 없이 진행하려면 Ctrl-C 후:  $0 --no-us"
+      fi
+      if (( ap_deadline > 0 && SECONDS > ap_deadline )); then
+        echo >&2
+        echo "✗ ${AP_WAIT_S}s 안에 붙지 못했다 — 세션을 띄우지 않는다." >&2
+        exit 1
+      fi
+      printf "\r    재시도 %d회 … %ds   " "$ap_conn_tries" "$SECONDS"
+      sleep 5
+    done
+    printf "\r                                   \r"
+    echo "  AP 접속됨"
   fi
   US_LOG="$(mktemp -t us_frame_node.XXXXXX.log)"
-  ros2 run fr5_vision us_frame_node --ros-args \
+  ros2 run fr5_vision us_frame --ros-args \
     -p us.probe:="$US_PROBE" -p us.host:="$US_HOST" >>"$US_LOG" 2>&1 &
   US_PID=$!
   echo "  로그: $US_LOG"
+fi
+
+# 세그멘테이션은 영상 **뒤에** 띄운다. /us/image 가 없으면 할 일이 없고, 그 사실이
+# 이 노드의 로그가 아니라 us_frame 의 로그에 있기 때문이다.
+if (( USE_SEG )); then
+  if (( ! USE_US )); then
+    echo
+    echo "  ⚠ --seg 는 영상이 있어야 한다 (--no-us 와 같이 쓸 수 없다) — 생략한다"
+    USE_SEG=0
+  elif [[ ! -x "$WORKSPACE/Unet_seg/.venv/bin/python3" ]]; then
+    echo
+    echo "  ⚠ Unet_seg/.venv 가 없다 — 세그멘테이션 생략 (Segmentation 패널은 비어 있다)"
+    USE_SEG=0
+  else
+    echo
+    echo "세그멘테이션  run_segmentation (U-Net)"
+    SEG_LOG="$(mktemp -t run_segmentation.XXXXXX.log)"
+    # venv 를 **ROS 다음에** 켠다. 순서가 뒤집히면 rclpy 가 librcl_action.so 를 못
+    # 찾는다 (docs/RUNBOOK_POLICY_INFERENCE.md §4). 여기서는 이 셸이 이미 ROS 를
+    # 소스한 뒤이므로 venv 만 얹으면 된다.
+    (
+      set +u
+      # shellcheck disable=SC1091
+      source "$WORKSPACE/Unet_seg/.venv/bin/activate"
+      set -u
+      cd "$WORKSPACE/policy_learning"
+      exec python3 scripts/run_segmentation.py
+    ) >>"$SEG_LOG" 2>&1 &
+    SEG_PID=$!
+    echo "  로그: $SEG_LOG   (U-Net 적재에 수십 초 걸린다 — 그동안 패널은 비어 있다)"
+  fi
 fi
 
 : > "$BRIDGE_LOG"

@@ -30,10 +30,15 @@ const SAFETY_STATES: SafetyState[] = [
   'protective_stop',
   'emergency_stop',
 ];
+// Every value the stack can declare must be here. One that is missing parses as
+// `undefined` — "no mode declared" — so while the policy held the régime the
+// console read it as the stack being down, never lit HANDOVER, and showed no
+// change at all when Stop handed the stylus back.
 const PROBING_MODES: ProbingMode[] = [
   'approach',
   'contact_probing',
   'contact_probing_inplane',
+  'contact_probing_policy',
 ];
 const WRENCH_SOURCES: WrenchSource[] = ['px6d_serial', 'controller', 'simulation', 'none'];
 

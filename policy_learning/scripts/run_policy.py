@@ -182,6 +182,7 @@ class PolicyRunner(Node):
         self.states: list = []                    # 판정에 쓸 상태 이력
         self.state_t: list = []
         self.finished = False
+        self.stopped_by_operator_s: Optional[float] = None   # 계획보다 먼저 Stop 으로 닫혔으면 그 시각
         self.attempt = 0            # --loop: 시도 번호. enable 이 올라갈 때마다 는다
         self.attempts: list = []    # 시도별 판정 (한 줄씩 화면에 쌓는다)
         self.announced = False      # 이번 시도에서 성공을 이미 알렸는가
@@ -242,6 +243,28 @@ class PolicyRunner(Node):
             self._stop()
             if self.args.loop:
                 self._close_attempt()          # 놓는 순간이 한 시도의 끝이다
+            elif self.args.duration > 0:
+                self._stop_episode()
+
+    def _stop_episode(self) -> None:
+        """에피소드 모드(run_experiment)에서 Stop 은 그 에피소드를 닫는다.
+
+        예전에는 enable 만 내리고 계속 떠 있었다. _tick 은 꺼져 있으면 시간 판정까지 가지
+        않으므로 에피소드가 영영 끝나지 않고, 드라이버는 subprocess 에 묶여 다음 자세를
+        묻지 못한다 — teleop 은 돌아왔는데 실험은 멈춘 채로 남는다.
+
+        시작 전(접촉 부족 등으로 아직 t_start 가 없다)이면 닫지 않는다. 조작자가 teleop 으로
+        다시 닿고 Start 를 누르면 그 자리에서 이어진다.
+        """
+        if self.t_start is None:
+            self.get_logger().warn(
+                "Stop — 에피소드는 아직 시작 전이다. teleop 으로 다시 닿고 Start 하면 이어서 한다")
+            return
+        self.stopped_by_operator_s = time.time() - self.t_start
+        self.finished = True
+        self.get_logger().warn(
+            f"Stop — 에피소드를 {self.stopped_by_operator_s:.0f} s 에서 닫는다 "
+            f"(계획 {self.args.duration:.0f} s). meta.json 의 stopped_by_operator_s 에 남는다")
 
     def _on_mode(self, msg) -> None:
         """접촉 프로빙에 들어가면 켜고, 나오면 끈다 (`--start-on probing`).
@@ -388,14 +411,19 @@ class PolicyRunner(Node):
         return lin, ang
 
     # -- 주기 --------------------------------------------------------------
-    def _idle(self, reason: str) -> None:
+    def _idle(self, reason: str, *, publish: bool = True) -> None:
         """지령하지 않는 이유를 알린다.
 
         조용히 멈춰 있으면 조작자는 "눌렀는데 아무 일도 없다" 만 본다 — 접촉이 없는 것인지,
         시작 조건이 안 열린 것인지, 렌치가 아예 안 오는 것인지 구별할 수 없다. 이유가 바뀔
         때와 5 s 마다 한 번 찍는다 (매 tick 찍으면 5 Hz 로 로그가 흐른다).
+
+        ``publish=False`` 는 **desired_twist 가 이 러너의 것이 아닐 때**다 — 0 조차 내지 않는다.
         """
-        self._stop()
+        if publish:
+            self._stop()
+        else:
+            self._held = None                  # 재발행만 멈추고 채널은 건드리지 않는다
         now = time.time()
         if reason != self._idle_reason or (now - self._idle_logged) > 5.0:
             self.get_logger().warn(f"대기 — {reason}")
@@ -405,10 +433,18 @@ class PolicyRunner(Node):
         import torch
         t = time.time()          # 이 tick 의 시각. 게이트·에피소드·위약이 모두 이 값을 쓴다.
         fn = float(np.linalg.norm(self.wrench)) if self.wrench is not None else 0.0
+        # 꺼져 있거나 후퇴 중이면 desired_twist 에 **아무것도 내지 않는다.**
+        #
+        # Stop 뒤 그 채널은 Touch 의 것이다. 예전에는 여기서도 매 tick(5 Hz) 0 을 냈고,
+        # 그러면 teleop 이 "처음" 으로 돌아오지 않는다: 쥐고 있으면 200 ms 마다 조작자 지령이
+        # 한 번씩 0 으로 덮이고, 놓으면 그 0 이 twist 를 신선하게 만들어 워치독 후퇴를 매번
+        # 푼다 (us_diff_ik_node: "twist 복귀 — 후퇴 해제"). 후퇴 중에 0 을 내는 것도 같은
+        # 이유로 후퇴를 무른다. 정지의 0 은 _on_enable 이 전환 순간에 한 번만 낸다.
         if not self.enabled:
-            return self._idle(f"정책이 꺼져 있다 ({self.args.enable_topic} 에 true)")
+            return self._idle(f"정책이 꺼져 있다 ({self.args.enable_topic} 에 true)",
+                              publish=False)
         if self.retreating:
-            return self._idle("/diag/retreating — 제어 스택이 후퇴 중")
+            return self._idle("/diag/retreating — 제어 스택이 후퇴 중", publish=False)
         if self.wrench is None:
             if self._uncompensated:
                 return self._idle(
@@ -603,6 +639,7 @@ class PolicyRunner(Node):
             "max_mm_s": self.args.max_mm_s, "max_deg_s": self.args.max_deg_s,
             "condition": self.condition, "duration_s": self.args.duration,
             "episode_started": self.t_start is not None,
+            "stopped_by_operator_s": self.stopped_by_operator_s,
             "start_gate": self.args.start_gate, "gate_met_at_start": self.gate_met_at_start,
             "gate": {"area_max": self.args.gate_area_max, "quality_min": self.args.gate_quality_min,
                      "confirm_s": self.args.gate_confirm_s, "held_s": self.gate.held_s},

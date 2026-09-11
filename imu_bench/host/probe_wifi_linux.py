@@ -201,6 +201,7 @@ def main(argv=None) -> int:
     ap.add_argument("--iface", default=None, help="Wi-Fi 인터페이스 (기본: 기본 경로가 아닌 동글)")
     ap.add_argument("--ssid", default=None, help="프로브 SSID (기본: 'US-' 로 시작하는 것을 스캔)")
     ap.add_argument("--password", default=None, help=f"AP 비밀번호 (기본: {', '.join(CANDIDATE_PASSWORDS)} 순서)")
+    ap.add_argument("--host", default=CANDIDATE_HOSTS[0], help="프로브 주소 (기본 %(default)s)")
     ap.add_argument("--probe", default="c10ur", help="프로브 프로파일 (기본 %(default)s)")
     ap.add_argument("--scan-only", action="store_true")
     ap.add_argument("--frames", action="store_true",
@@ -233,6 +234,14 @@ def main(argv=None) -> int:
     if iface == default_iface:
         print(f"⚠ {iface} 에 기본 경로가 걸려 있습니다 — 프로브 AP 에 붙이면 인터넷이 끊깁니다.")
     print(f"사용 인터페이스: {iface}")
+
+    # 이미 닿으면 손대지 않는다. 프로브는 클라이언트를 하나만 받고, 멀쩡한 링크를
+    # 지웠다 다시 만들면 한동안 접속을 거부한다 — 그리고 프로필 재생성에는 polkit
+    # 인증이 필요해서, 붙어 있는데도 권한 때문에 실패하는 일이 생긴다.
+    if ping(args.host if args.ssid is None else args.host, iface):
+        ip, gw = iface_ipv4(iface)
+        print(f"AP 이미 연결됨 — {iface} {ip} → 프로브 {gw or args.host}")
+        return 0
 
     ssid = args.ssid
     if ssid is None:

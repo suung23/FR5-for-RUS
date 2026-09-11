@@ -486,6 +486,10 @@ class PolicyRunner(Node):
         a = sel["a"][0, 0].cpu().numpy()                    # 첫 스텝 속도 (B,k,6) → (6,)
         net = sel["net"][0].cpu().numpy()
         qhat = float(sel["Q_hat"][0].mean())
+        # 조건을 지나기 **전**의 정책 의도. 위약은 아래에서 방향을 섞고 hold 는 0 으로
+        # 막으므로, 그 뒤의 값만 찍으면 hold 에피소드 내내 "정책이 0 을 낸다" 로 보인다
+        # (2026-09-11 에 실제로 그렇게 읽혔다). 모델이 무엇을 원했는지는 지령과 따로 봐야 한다.
+        a_policy = a.copy()
         if self.condition == "placebo" and self.placebo is None:
             # 크기는 정책이 고른 그대로, 방향만 무의미하게. 크기를 다시 뽑으면 조건 사이에서
             # "움직임의 양" 이 어긋나고, 그것이 이 대조군이 통제하려던 변수다.
@@ -510,9 +514,19 @@ class PolicyRunner(Node):
             "f_bar": self.f_bar if self.f_bar is not None else float("nan"),
         })
         if len(self.rows) % 10 == 0:
+            # 두 줄로 나눈다: 첫 줄은 **정책이 원한 것**, 둘째 줄은 **로봇에 간 것**.
+            # 조건(hold·placebo)이 둘을 갈라놓으므로 한 줄에 섞으면 어느 쪽인지 모른다.
+            # 정책 줄은 상한으로 자르기 전 값이다 — 3 °/s 를 넘겨 원하면 그대로 보인다.
+            pw = a_policy[AX_ANG]
+            tag = {"hold": "hold — 지령 안 함", "expert": "expert — 사람이 지령",
+                   "placebo": "placebo — 방향 무작위", "policy": "policy"}.get(
+                       self.condition, self.condition)
             self.get_logger().info(
-                f"F={fn:4.1f}N  Q_seg={qn:.3f} Q_raw={self.q_raw:.3f} Q̂={qhat:.3f}  "
-                f"ω=({ang[0]:+5.2f},{ang[1]:+5.2f},{ang[2]:+5.2f})°/s  v=({lin[0]:+5.2f},{lin[1]:+5.2f})mm/s")
+                f"F={fn:4.1f}N  Q_seg={qn:.3f} Q_raw={self.q_raw:.3f} Q̂={qhat:.3f}  [{tag}]\n"
+                f"    정책  ω=({pw[0]:+5.2f},{pw[1]:+5.2f},{pw[2]:+5.2f})°/s   "
+                f"chunk 순변위 θ=({net[3]:+5.1f},{net[4]:+5.1f},{net[5]:+5.1f})°\n"
+                f"    지령  ω=({ang[0]:+5.2f},{ang[1]:+5.2f},{ang[2]:+5.2f})°/s   "
+                f"v=({lin[0]:+5.2f},{lin[1]:+5.2f})mm/s")
 
     def _judge_now(self) -> dict:
         """지금까지 쌓인 상태로 판정한다. 시도가 시작되지 않았으면 빈 dict."""

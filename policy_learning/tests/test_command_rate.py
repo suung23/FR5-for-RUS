@@ -77,3 +77,24 @@ def test_idle_stops_republishing():
     idle = src[src.index("    def _idle(self, reason: str)"):]
     idle = idle[:idle.index("    def _tick(self):")]
     assert "self._stop()" in idle, "_idle 이 _stop 을 부르지 않는다"
+
+
+def test_log_shows_policy_intent_separately_from_command():
+    """hold 에피소드에서 '정책이 0 을 낸다' 로 읽히지 않아야 한다.
+
+    2026-09-11: 로그의 ω 는 조건을 지난 **지령**만 찍었다. hold 는 지령을 0 으로 막으므로
+    한 에피소드 내내 ω=(+0.00,+0.00,+0.00) 이 찍혔고, 조작자는 모델이 아무것도 안 낸다고
+    읽었다. 실제 net_thx 는 평균 −4.53°/chunk 로 컸다.
+
+    정책의 의도는 **위약 무작위화보다 먼저** 떠 두어야 한다. 뒤에서 뜨면 위약 에피소드의
+    '정책' 줄이 무작위 방향을 정책 의도라고 말하게 된다.
+    """
+    src = RUN_POLICY.read_text()
+    i_copy = src.index("a_policy = a.copy()")
+    i_placebo = src.index("a = randomize_direction(a, self.rng)")
+    assert i_copy < i_placebo, "a_policy 를 위약 무작위화 뒤에 떴다 — 위약의 의도가 섞인다"
+
+    log = src[src.index("if len(self.rows) % 10 == 0:"):]
+    log = log[:log.index("def _judge_now")]
+    assert "정책  ω=" in log and "지령  ω=" in log, "로그가 정책 의도와 지령을 나눠 찍지 않는다"
+    assert "a_policy[AX_ANG]" in log, "정책 줄이 a_policy 를 읽지 않는다"

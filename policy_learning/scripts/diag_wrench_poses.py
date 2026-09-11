@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """자세를 바꿔가며 공중에서 잔차 렌치를 재고, 영점으로 고쳐지는 종류인지 가른다.
 
-    python3 scripts/diag_wrench_poses.py          # 프로브 전원 불필요
+    ./scripts/start_session.sh --calib --no-us --no-ap    # 다른 창에서 먼저
+    python3 scripts/diag_wrench_poses.py                  # 프로브 전원 불필요
+
+렌치를 내는 것은 telemetry_bridge 다. **교정 모드**로 띄우는 이유는 이 진단이 손으로
+자세를 바꾸는 절차여서다 — 제어 스택이 함께 떠 있으면 us_servo 가 ServoJ 를 쏘아
+드래그 모드와 싸운다. 교정 모드에는 제어 스택이 없으므로 자세(ee_wrt_base)도 안 온다.
+자세는 참고로 찍을 뿐 판정에는 쓰지 않으니 없어도 된다.
 
 **아무것도 닿지 않은 상태**로 여러 자세에서 표본을 찍는다. 잔차의 성질이 원인을 가른다:
 
@@ -55,12 +61,22 @@ def main() -> int:
 
     rclpy.init()
     node = Probe()
+    # 자세는 **있으면 찍고 없으면 넘어간다.** ee_wrt_base 를 내는 것은 제어 스택인데,
+    # 이 진단은 손으로 자세를 바꿔야 하므로 제어 스택이 없는 교정 모드에서 돌린다 —
+    # 즉 자세가 없는 것이 이 스크립트의 **정상 사용법**이다. 예전에는 두 토픽을 같이
+    # 기다렸다가 자세 없이 진행한 뒤 flange_z 를 읽다 TypeError 로 죽었고, 그 값은
+    # 화면에 찍히기만 할 뿐 판정에는 쓰이지도 않는다.
     for _ in range(100):
-        if node.w is not None and node.pose is not None:
+        if node.w is not None:
             break
         rclpy.spin_once(node, timeout_sec=0.05)
     if node.w is None:
-        print(f"렌치가 안 온다 — {args.namespace}/wrench_px6d")
+        print(f"렌치가 안 온다 — {args.namespace}/wrench_px6d 에 아무도 publish 하지 않는다.")
+        print("   이 토픽을 내는 것은 telemetry_bridge 다. 세션이 떠 있는지 확인하라:")
+        print("     ros2 topic list | grep wrench")
+        print("   안 떠 있으면 **교정 모드**로 띄운다 (제어 스택 없이 브리지·GUI 만 —")
+        print("   손으로 자세를 바꿔야 하므로 이 진단에는 이 모드가 맞다):")
+        print("     ./scripts/start_session.sh --calib --no-us --no-ap")
         rclpy.shutdown(); return 1
     if not node.frame.endswith("_probe"):
         print(f"⚠️ 보상 전 렌치다 (frame_id={node.frame!r}) — 중력 교정이 먼저다")
@@ -73,10 +89,11 @@ def main() -> int:
             for _ in range(20):
                 rclpy.spin_once(node, timeout_sec=0.02)
             w, q = node.w.copy(), node.pose
-            fz = 1 - 2*(q[1]**2 + q[2]**2)
+            fz = 1 - 2*(q[1]**2 + q[2]**2) if q is not None else float("nan")
             mag = float(np.linalg.norm(w))
+            shown = f"  flange_z={fz:+.2f}" if q is not None else ""
             print(f"  [{len(rows)+1:2d}] ‖F‖={mag:5.2f} N  "
-                  f"F=({w[0]:+5.2f},{w[1]:+5.2f},{w[2]:+5.2f})  flange_z={fz:+.2f}", end="")
+                  f"F=({w[0]:+5.2f},{w[1]:+5.2f},{w[2]:+5.2f}){shown}", end="")
             if input("   Enter=기록 / q=끝 > ").strip().lower() == "q":
                 break
             rows.append((w, mag, fz))

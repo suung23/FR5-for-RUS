@@ -26,7 +26,22 @@ def test_no_bladder_scores_low():
     """못 찾았으면 점수에 드러나야 한다. 옛 Q 는 이때도 0.89 였다."""
     q, parts = view_quality(_state(has_mask=0.0, area_ratio=0.0))
     assert q < 0.2
-    assert parts["presence_area"] == 0.0 and parts["centering"] == 0.0
+    assert parts["presence"] == 0.0 and parts["area"] == 0.0 and parts["centering"] == 0.0
+
+
+def test_presence_is_the_heaviest_term():
+    """방광을 보는 것이 주 목적이다 — 유무의 가중치가 가장 커야 한다 (2026-09-12)."""
+    from rus_policy.view_quality import WEIGHTS
+    assert WEIGHTS["presence"] == max(WEIGHTS.values())
+    assert WEIGHTS["presence"] / sum(WEIGHTS.values()) > 0.35
+
+
+def test_barely_visible_bladder_already_scores_far_above_none():
+    """겨우 보이는 것과 안 보이는 것의 차이가 가장 커야 한다 — 찾는 것이 목적이다."""
+    none = view_quality(_state(has_mask=0.0))[0]
+    seen = view_quality(_state(area_ratio=0.005))[0]          # 0.5 %
+    success = view_quality(_state(area_ratio=0.08))[0]
+    assert seen - none > success - seen, (none, seen, success)
 
 
 def test_area_raises_score_up_to_the_success_threshold():
@@ -51,10 +66,10 @@ def test_score_spans_most_of_the_range():
     assert success - none > 0.7
 
 
-def test_area_and_centering_dominate_the_weights():
+def test_presence_area_and_centering_dominate_the_weights():
     from rus_policy.view_quality import WEIGHTS
-    share = (WEIGHTS["presence_area"] + WEIGHTS["centering"]) / sum(WEIGHTS.values())
-    assert share > 0.5, f"면적·중심 비중이 {share:.0%} 뿐이다"
+    share = sum(WEIGHTS[k] for k in ("presence", "area", "centering")) / sum(WEIGHTS.values())
+    assert share > 0.6, f"유무·면적·중심 비중이 {share:.0%} 뿐이다"
 
 
 def test_does_not_modify_the_policy_input():

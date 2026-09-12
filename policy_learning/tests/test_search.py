@@ -1,0 +1,129 @@
+"""오르막 탐색기 — 측정한 Q 로 방향을 고른다.
+
+학습된 Q̂ 로 고르지 않는 이유는 rus_policy/search.py 머리말에 있다 (방향 판별 52~54 %).
+여기서는 로봇 없이, 가상의 Q 지형 위에서 탐색기가 실제로 봉우리를 찾는지 본다.
+"""
+
+import numpy as np
+import pytest
+
+from rus_policy.search import DWELL, MOVE, SETTLE, UNDO, HillClimbSearch
+
+
+def _run(peak, n_ticks=3000, hz=5.0, start=(0.0, 0.0), **kw):
+    """탐색기를 가상 지형 위에서 돌린다. 각속도를 적분해 자세를 만들고 그 자리의 Q 를 준다."""
+    s = HillClimbSearch(**kw)
+    ang = np.array(start, float)                      # (θx, θy) [°]
+    traj, t = [], 0.0
+    for _ in range(n_ticks):
+        q = peak(ang)
+        w = s.update(t, q)
+        ang = ang + np.array(w[:2]) / hz
+        traj.append((t, ang.copy(), q, s.phase))
+        t += 1.0 / hz
+    return s, traj
+
+
+def _gauss(center=(6.0, -4.0), width=8.0, floor=0.07, top=0.97):
+    c = np.asarray(center, float)
+
+    def q(ang):
+        d = np.linalg.norm(np.asarray(ang, float) - c)
+        return floor + (top - floor) * float(np.exp(-(d / width) ** 2))
+    return q
+
+
+def test_finds_the_peak_from_a_blind_start():
+    """방광이 안 보이는 자리에서 출발해 봉우리로 간다."""
+    peak = _gauss()
+    s, traj = _run(peak, start=(-10.0, 10.0))
+    q_start, q_end = traj[0][2], traj[-1][2]
+    assert q_end > q_start + 0.3, (q_start, q_end)
+    assert q_end > 0.9, q_end
+    end = traj[-1][1]
+    assert np.linalg.norm(end - np.array([6.0, -4.0])) < 4.0, end
+
+
+def test_steps_back_when_quality_drops():
+    """나빠지면 **한 걸음 되돌아간다** — 직전이 곧 최고점이다."""
+    peak = _gauss(center=(0.0, 0.0), width=4.0)
+    s, traj = _run(peak, start=(0.0, 0.0), n_ticks=200)
+    phases = [p for _, _, _, p in traj]
+    assert UNDO in phases, "봉우리에 있는데 되돌림이 한 번도 없었다"
+    # 되돌림 뒤에는 출발 자세 근처로 돌아와 있어야 한다
+    after = [a for _, a, _, p in traj if p == MOVE]
+    assert max(np.linalg.norm(a) for a in after) < 4.0
+
+
+def test_tries_every_direction_then_dwells():
+    """평평한 곳에서는 네 방향을 다 시험하고 쉰다 — 헛돌지 않는다."""
+    s, traj = _run(lambda ang: 0.5, n_ticks=400)
+    assert DWELL in [p for _, _, _, p in traj], "모든 방향이 실패했는데 대기로 가지 않았다"
+    assert s.n_fail <= len(s.axes)
+
+
+def test_noise_below_min_gain_is_not_taken_as_improvement():
+    """Q 잡음(실측 0.0004 수준)으로 방향을 바꾸면 안 된다."""
+    rng = np.random.default_rng(0)
+    s, traj = _run(lambda ang: 0.5 + rng.normal(0, 0.0005), n_ticks=400, min_gain=0.01)
+    assert DWELL in [p for _, _, _, p in traj], "잡음을 개선으로 읽어 계속 전진했다"
+
+
+def test_blocked_direction_is_undone_and_abandoned():
+    """안전 한계에 걸리면 간 만큼 되돌리고 다음 방향으로."""
+    s = HillClimbSearch()
+    t = 0.0
+    for _ in range(2):                                 # 조금 전진
+        s.update(t, 0.5); t += 0.2
+    first = s.idx
+    w = s.update(t, 0.5, blocked=True)
+    assert s.phase == UNDO and s.last_decision == "막힘"
+    axis, direction = s.axes[first]
+    assert np.sign(w[axis]) == -np.sign(direction), w
+    for _ in range(40):                                # 되돌림·재측정을 마치면 방향이 바뀐다
+        t += 0.2
+        s.update(t, 0.5)
+    assert s.idx != first
+
+
+def test_rebases_the_best_after_stepping_back():
+    """팬텀이 변하면 옛 최고값은 그 자리의 값이 아니다 — 되돌아온 자리에서 다시 잰다."""
+    s = HillClimbSearch(settle_s=0.4, step_deg=2.0, rate_deg_s=3.0)
+    t, q = 0.0, 0.9
+    while s.phase != UNDO:                             # 한 걸음 갔다가 실패하게 만든다
+        s.update(t, q); t += 0.1
+        q = 0.5 if s.phase == SETTLE else q            # 나빠졌다
+    assert s.best_q == pytest.approx(0.9, abs=1e-6)
+    while s.phase in (UNDO,) or s.phase == "재측정":    # 되돌아와 다시 잰다
+        s.update(t, 0.4); t += 0.1
+        if t > 20: break
+    assert s.best_q == pytest.approx(0.4, abs=1e-6), "되돌아온 자리의 값으로 기준을 다시 잡지 않았다"
+
+
+def test_describe_is_readable():
+    s = HillClimbSearch()
+    s.update(0.0, 0.6)
+    text = s.describe()
+    assert "θx" in text and "최고 Q" in text
+
+
+def test_runner_uses_measured_quality_not_the_learned_head():
+    """탐색 조건은 **잰** Q(q_view)로 방향을 고르고, 지령은 실제로 나가야 한다."""
+    from pathlib import Path
+
+    from rus_policy.episode import CONDITIONS
+
+    assert "search" in CONDITIONS
+    run = (Path(__file__).resolve().parents[1] / "scripts" / "run_policy.py").read_text()
+    blk = run[run.index('if self.condition == "search":'):]
+    blk = blk[:blk.index('if self.condition == "placebo"')]
+    assert "self.search.update(t, self.q_view" in blk, "잰 Q 가 아니라 다른 값을 쓰고 있다"
+    assert "blocked=far" in blk and "_excursion_deg()" in blk, "안전 한계(시작 자세에서의 각)가 없다"
+    # hold·expert 로 막히는 분기에 search 가 들어가면 안 된다 (지령이 나가야 한다)
+    hold = run[run.index('if self.condition in ("hold", "expert")'):]
+    assert '"search"' not in hold[:hold.index("else:")]
+    # 에피소드가 열릴 때 탐색기를 다시 시작한다 — 앞 에피소드의 최고값을 들고 가면 안 된다
+    assert "self.search.reset(t, self.q_view)" in run
+
+    exp = (Path(__file__).resolve().parents[1] / "scripts" / "run_experiment.py").read_text()
+    assert '("policy", "placebo", "search")' in exp, "드라이버가 search 에 --execute 를 안 준다"

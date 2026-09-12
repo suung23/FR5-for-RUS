@@ -57,9 +57,10 @@ from _common import setup_logging
 
 from rus_policy.bmode import BmodeConverter
 from rus_policy.dataset import OBS_VEC_DIM, _resize_frames
-from rus_policy.episode import (CONDITIONS, PlaceboBuffer, StartGate, Thresholds, judge,
-                                motion_check, randomize_direction)
+from rus_policy.episode import (CONDITIONS, PlaceboBuffer, StartGate, Thresholds, _quat_angle_deg,
+                                judge, motion_check, randomize_direction)
 from rus_policy.model import ACTION_DIM
+from rus_policy.search import HillClimbSearch
 from rus_policy.view_quality import view_quality
 from rus_policy.perception import STATE_DIM, apply_frame_transform, build_backend
 from rus_policy.train import load_policy
@@ -171,6 +172,12 @@ class PolicyRunner(Node):
         self.n_img = self.n_drop = 0
         # 에피소드 틀 (실험용). duration 0 이면 예전처럼 계속 돈다.
         self.condition = args.condition
+        # 측정한 Q 로 방향을 고르는 탐색기 (condition=search). 회전 상한을 그대로 쓴다.
+        self.search = HillClimbSearch(rate_deg_s=float(args.max_deg_s),
+                                      step_deg=float(args.search_step_deg),
+                                      settle_s=float(args.search_settle_s),
+                                      min_gain=float(args.search_min_gain))
+        self.start_quat = None          # 에피소드 시작 자세 — 너무 멀리 가지 않게
         self.gate = StartGate(area_max=args.gate_area_max, quality_min=args.gate_quality_min,
                               confirm_s=args.gate_confirm_s)
         # 사전 등록된 위약(EVAL_PLAN §5)은 "같은 속도·같은 지속시간의 무작위 회전" 이다.
@@ -368,6 +375,13 @@ class PolicyRunner(Node):
             return "····"
         return self.condition
 
+    def _excursion_deg(self) -> float:
+        """에피소드 시작 자세에서 지금 몇 도 떨어졌는가. 자세를 모르면 0 — 모른다고 막지는 않는다."""
+        if self.start_quat is None or self.pose is None:
+            return 0.0
+        o = self.pose[1]
+        return _quat_angle_deg(self.start_quat, (o.w, o.x, o.y, o.z))
+
     def _pose_columns(self) -> dict:
         """ee_wrt_base 의 최신값을 기록용 열로. 없으면 NaN."""
         nan = float("nan")
@@ -515,6 +529,10 @@ class PolicyRunner(Node):
                     f"시작 조건 **미충족인 채로** 시작한다 (--start-gate off) — "
                     f"면적비 {st[AREA]:.3f} · Q_raw {self.q_raw:.2f}. 기록에 남는다")
             self.t_start = t
+            if self.pose is not None:
+                o = self.pose[1]
+                self.start_quat = (o.w, o.x, o.y, o.z)
+            self.search.reset(t, self.q_view)
             self.get_logger().warn(
                 f"시작 조건 충족 — 에피소드 시작 (조건 {self._shown_condition()}, "
                 + (f"{self.args.duration:.0f} s)" if self.args.duration > 0 else "무제한)"))
@@ -562,6 +580,13 @@ class PolicyRunner(Node):
         # 막으므로, 그 뒤의 값만 찍으면 hold 에피소드 내내 "정책이 0 을 낸다" 로 보인다
         # (2026-09-11 에 실제로 그렇게 읽혔다). 모델이 무엇을 원했는지는 지령과 따로 봐야 한다.
         a_policy = a.copy()
+        if self.condition == "search":
+            # 학습된 Q̂ 로 고르지 않는다. 실제로 조금 움직여 보고 **잰** Q 로 방향을 고른다 —
+            # Q̂ 의 방향 판별은 우연 수준(52~54 %)이고, 후보 64 개 중 최댓값을 고르는 순간
+            # Q̂ 의 작은 기울어짐이 고정된 방향이 된다 (2026-09-12 실측: −θx 로 68~91 %).
+            far = self._excursion_deg() > self.args.search_max_excursion_deg
+            w = self.search.update(t, self.q_view, blocked=far)
+            a = np.array([0.0, 0.0, 0.0, w[0], w[1], w[2]], dtype=float)
         if self.condition == "placebo" and self.placebo is None:
             # 크기는 정책이 고른 그대로, 방향만 무의미하게. 크기를 다시 뽑으면 조건 사이에서
             # "움직임의 양" 이 어긋나고, 그것이 이 대조군이 통제하려던 변수다.
@@ -583,7 +608,10 @@ class PolicyRunner(Node):
             "n_frames": len(self.buf), "enabled": int(self.enabled),
             "condition": self.condition, "t_episode": t - self.t_start,
             "Q_raw": self.q_raw,
-            "Q_view": self.q_view,       # 새 Q_seg (면적·중심 63 %). Q_now 는 옛 정의 그대로
+            "Q_view": self.q_view,       # 새 Q_seg. Q_now 는 옛 정의 그대로 (정책 입력)
+            "search_phase": self.search.phase if self.condition == "search" else "",
+            "search_best_q": self.search.best_q if self.condition == "search" else float("nan"),
+            "excursion_deg": self._excursion_deg(),
             "f_bar": self.f_bar if self.f_bar is not None else float("nan"),
             # 로봇이 **실제로** 어디를 향했는가. 지령(cmd_*)만 적으면 "정책대로 움직였나" 에
             # 답할 수 없다 — save() 의 motion_check 가 이 열과 cmd_w* 를 비교한다.
@@ -605,8 +633,10 @@ class PolicyRunner(Node):
                 self.get_logger().info(f"{head}  [{self._shown_condition()}]\n{cmd}")
             else:
                 tag = {"hold": "hold — 지령 안 함", "expert": "expert — 사람이 지령",
-                       "placebo": "placebo — 방향 무작위", "policy": "policy"}.get(
-                           self.condition, self.condition)
+                       "placebo": "placebo — 방향 무작위", "policy": "policy",
+                       "search": "search — 재 보고 고른다"}.get(self.condition, self.condition)
+                if self.condition == "search":
+                    tag += f" · {self.search.describe()} · 시작에서 {self._excursion_deg():.0f}°"
                 self.get_logger().info(
                     f"{head}  [{tag}]\n"
                     f"    정책  ω=({pw[0]:+5.2f},{pw[1]:+5.2f},{pw[2]:+5.2f})°/s   "
@@ -762,6 +792,13 @@ def main() -> int:
     p.add_argument("--placebo-seed", type=int, default=0, help="위약 방향 난수 — 세션을 재현한다")
     p.add_argument("--placebo-delay-s", type=float, default=30.0,
                    help="stale-obs 일 때의 관측 지연 [s]")
+    p.add_argument("--search-step-deg", type=float, default=2.0, help="탐색 한 걸음의 회전각")
+    p.add_argument("--search-settle-s", type=float, default=0.6,
+                   help="걸음 뒤 Q 를 모으는 시간. 초음파 지연 0.2 s 보다 넉넉해야 한다")
+    p.add_argument("--search-min-gain", type=float, default=0.01,
+                   help="이만큼 올라야 '나아졌다'. 실측 Q 잡음(0.6 s 평균, 창 간 95%%p 0.0004)의 25 배")
+    p.add_argument("--search-max-excursion-deg", type=float, default=30.0,
+                   help="에피소드 시작 자세에서 이 각을 넘으면 그 방향은 막고 되돌린다")
     p.add_argument("--blind", action="store_true",
                    help="조작자 화면에서 조건을 가린다 (expert 제외). 기록에는 그대로 남는다")
     p.add_argument("--gamma", type=float, default=None,

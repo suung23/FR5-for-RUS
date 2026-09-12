@@ -1,0 +1,159 @@
+"""측정한 Q 로 오르막을 오른다 — 방광을 찾는 탐색기.
+
+    s = HillClimbSearch()
+    omega_deg_s = s.update(t, q_measured)      # (wx, wy, wz), 프로브 프레임
+
+왜 학습된 Q̂ 로 고르지 않는가
+----------------------------
+2026-09-11~12 실측: 디코더가 낸 후보 64 개는 θx 가 51 % 양수로 고르게 퍼져 있는데, Q̂ 로 고른
+뒤에는 32 % (Q_area 재학습 헤드는 9 %) 가 된다 — 64 개 중 최댓값을 고르다 보니 Q̂ 의 작은
+기울어짐이 고정된 방향이 된다. 그 Q̂ 는 방향을 모른다: 크기가 같고 방향만 반대인 행동을
+구별하는 정확도가 52~54 % 다 (찍으면 50 %). 학습 데이터가 조작자가 보면서 고른 움직임이라
+방향의 효과가 선택과 뒤섞여 있어서, 라벨을 Q_area 로 바꾸고 증강을 넣어도 그대로였다.
+
+**방향은 예측하지 말고 재면 된다.** 실제로 조금 움직여 보고 Q 가 올랐는지 보는 것은 관찰이
+아니라 개입이라 뒤섞임이 없다. 힘 축에서 ForceSetpointAdapter 가 하는 일과 같고, 여기서는
+회전 축에 대해 한다.
+
+어떻게 도는가
+-------------
+한 방향으로 ``step_deg`` 만큼 돌리고, 영상이 따라올 때까지 기다렸다 Q 를 재서
+
+  올랐으면   그 방향을 계속 간다 (되돌아오는 이동이 없다)
+  안 올랐으면 **한 걸음 되돌아가** (직전이 곧 최고점이다) 다음 방향으로 넘어간다
+
+네 방향(±θx·±θy)을 다 해도 안 오르면 지역 최고점이다. ``dwell_s`` 만큼 쉬었다가 다시 훑는다 —
+팬텀이 변하면 최고점도 움직이므로 멈춰 있기만 하면 안 된다.
+
+Q 의 잡음은 작다 (프로브 정지 상태에서 0.6 s 평균의 창 간 변동 95 %p 0.0004). 2° 걸음이 만드는
+Q 변화는 0.05 남짓이라, ``min_gain`` 0.01 이면 잡음에 속지 않으면서 실제 변화를 잡는다.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Optional, Sequence
+
+#: 시험할 방향 — (축, 부호). 축 0·1·2 = θx·θy·θz (프로브 프레임).
+#: 면외 기울임(θx)과 면내 기울임(θy)을 양쪽으로. θz(장축 회전)는 기본에서 뺀다:
+#: 영상면의 방향만 바꾸고 방광을 화면 안으로 끌어오지는 못한다.
+DEFAULT_AXES: tuple[tuple[int, float], ...] = ((0, +1.0), (0, -1.0), (1, +1.0), (1, -1.0))
+
+MOVE, SETTLE, UNDO, UNDO_SETTLE, DWELL = "이동", "측정", "되돌림", "재측정", "대기"
+
+
+@dataclass
+class HillClimbSearch:
+    """측정한 Q 의 오르막을 따라간다. rclpy 없이 돈다 — 시간과 Q 를 밖에서 받는다.
+
+    Args:
+        axes: 시험할 (축, 부호) 목록.
+        step_deg: 한 걸음의 회전각 [°].
+        rate_deg_s: 회전 속도 [°/s]. 러너의 상한과 같게 둔다.
+        settle_s: 걸음 뒤 Q 를 모으는 시간 [s]. 초음파 지연(0.2 s)보다 넉넉해야 한다.
+        min_gain: 이만큼은 올라야 "나아졌다" 로 본다.
+        dwell_s: 네 방향이 모두 실패한 뒤 쉬는 시간 [s].
+    """
+
+    axes: Sequence[tuple[int, float]] = DEFAULT_AXES
+    step_deg: float = 2.0
+    rate_deg_s: float = 3.0
+    settle_s: float = 0.6
+    min_gain: float = 0.01
+    dwell_s: float = 2.0
+
+    phase: str = field(default=MOVE, init=False)
+    best_q: float = field(default=float("nan"), init=False)
+    idx: int = field(default=0, init=False)          # 지금 시험 중인 방향
+    n_fail: int = field(default=0, init=False)       # 연속 실패한 방향 수
+    n_steps: int = field(default=0, init=False)      # 지금 방향으로 연속 전진한 걸음
+    _t0: Optional[float] = field(default=None, init=False)
+    _samples: list = field(default_factory=list, init=False)
+    #: 진단용 — 마지막 판정 ("나아짐" / "제자리")
+    last_decision: str = field(default="", init=False)
+
+    @property
+    def move_s(self) -> float:
+        return self.step_deg / max(self.rate_deg_s, 1e-6)
+
+    def reset(self, t: float, q: float = float("nan")) -> None:
+        self.phase, self._t0, self._samples = MOVE, t, []
+        self.best_q, self.idx, self.n_fail, self.n_steps = q, 0, 0, 0
+        self.last_decision = ""
+
+    def _omega(self, sign: float) -> tuple[float, float, float]:
+        out = [0.0, 0.0, 0.0]
+        axis, direction = self.axes[self.idx]
+        out[axis] = sign * direction * self.rate_deg_s
+        return tuple(out)
+
+    def _enter(self, phase: str, t: float) -> None:
+        self.phase, self._t0, self._samples = phase, t, []
+
+    def update(self, t: float, q: float, blocked: bool = False) -> tuple[float, float, float]:
+        """지금 내보낼 각속도 [°/s]. ``blocked`` 면 이 방향은 더 못 간다고 보고 되돌린다."""
+        if self._t0 is None:
+            self.reset(t, q)
+        dt = t - self._t0
+
+        if self.phase == MOVE:
+            if blocked:                      # 안전 한계 — 간 만큼 되돌리고 다음 방향
+                self.last_decision = "막힘"
+                self._enter(UNDO, t - (self.move_s - min(dt, self.move_s)))
+                return self._omega(-1.0)
+            if dt < self.move_s:
+                return self._omega(+1.0)
+            self._enter(SETTLE, t)
+            return (0.0, 0.0, 0.0)
+
+        if self.phase in (SETTLE, UNDO_SETTLE):
+            if q == q:                       # NaN 이 아니면 모은다
+                self._samples.append(q)
+            if dt < self.settle_s:
+                return (0.0, 0.0, 0.0)
+            measured = sum(self._samples) / len(self._samples) if self._samples else float("nan")
+            if self.phase == UNDO_SETTLE:
+                # 되돌아온 자리에서 다시 재서 기준을 새로 잡는다. 팬텀이 변하면 예전 최고값은
+                # 더 이상 그 자리의 값이 아니다 — 옛 값을 들고 있으면 영영 못 넘는다.
+                if measured == measured:
+                    self.best_q = measured
+                self._advance()
+                self._enter(DWELL if self.n_fail >= len(self.axes) else MOVE, t)
+                return (0.0, 0.0, 0.0)
+            improved = (measured == measured) and (
+                self.best_q != self.best_q or measured > self.best_q + self.min_gain)
+            if improved:
+                self.best_q = measured
+                self.n_fail, self.n_steps = 0, self.n_steps + 1
+                self.last_decision = "나아짐"
+                self._enter(MOVE, t)
+                return self._omega(+1.0)
+            self.last_decision = "제자리"
+            self._enter(UNDO, t)
+            return self._omega(-1.0)
+
+        if self.phase == UNDO:
+            if dt < self.move_s:
+                return self._omega(-1.0)
+            self._enter(UNDO_SETTLE, t)
+            return (0.0, 0.0, 0.0)
+
+        # DWELL — 지역 최고점. 쉬었다가 다시 훑는다 (팬텀이 변한다).
+        if dt < self.dwell_s:
+            return (0.0, 0.0, 0.0)
+        self.n_fail = 0
+        self._enter(MOVE, t)
+        return self._omega(+1.0)
+
+    def _advance(self) -> None:
+        """다음 방향으로. 실패가 한 바퀴를 채우면 지역 최고점이다."""
+        self.n_fail += 1
+        self.n_steps = 0
+        self.idx = (self.idx + 1) % len(self.axes)
+
+    def describe(self) -> str:
+        axis, direction = self.axes[self.idx]
+        name = ("θx", "θy", "θz")[axis]
+        best = f"{self.best_q:.3f}" if self.best_q == self.best_q else "—"
+        return (f"{self.phase} {'+' if direction > 0 else '−'}{name}  최고 Q {best}  "
+                f"연속전진 {self.n_steps}  실패 {self.n_fail}/{len(self.axes)}")

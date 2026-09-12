@@ -127,7 +127,7 @@ def run_episode(args, ep: dict, ep_dir: Path) -> dict:
         cmd += ["--gamma", str(args.gamma)]
     if args.blind:
         cmd.append("--blind")            # 러너도 조작자 화면에서 조건을 가려야 한다
-    if args.execute and ep["condition"] in ("policy", "placebo"):
+    if args.execute and ep["condition"] in ("policy", "placebo", "search"):
         cmd.append("--execute")          # hold·expert 는 애초에 지령하지 않는다
     cmd += args.extra
     print("  $ " + " ".join(cmd))

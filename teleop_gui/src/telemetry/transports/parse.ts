@@ -92,6 +92,15 @@ export function parseTelemetry(raw: unknown, receivedAt: number): RobotTelemetry
     probingMode: oneOf(src.probingMode ?? src.probing_mode, PROBING_MODES),
     inplaneRotation:
       typeof src.inplaneRotation === 'boolean' ? src.inplaneRotation : undefined,
+    // Image quality, both readings. The bridge omits the key when the value is
+    // not finite, and "not measured" must stay distinct from zero — so an
+    // absent key becomes `undefined`, never 0.
+    //
+    // These were added to the types, the bridge and the panel but not here, so
+    // the scores read "—" for a day while the data was arriving every frame
+    // (2026-09-12). A field the parser does not name does not exist.
+    qualitySeg: finiteOr(src.qualitySeg ?? src.quality_seg),
+    qualityRaw: finiteOr(src.qualityRaw ?? src.quality_raw),
     // Passed through as the control stack declared it, for the same reason as
     // the calibration block below.
     teleopFrame: teleopFrame(src.teleopFrame ?? src.teleop_frame),
@@ -233,6 +242,10 @@ function vec3(value: unknown): [number, number, number] | undefined {
  * src — a broken picture and "no signal" look the same on screen otherwise.
  */
 /** A finite number, or null. A missing measurement must not arrive as 0. */
+function finiteOr(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
 function orNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }

@@ -47,6 +47,26 @@ cd ~/FR5-for-RUS/teleop_gui && npm run build          # GUI 를 고쳤다면
 돌아온다** — ±30° 안이면 0.24~0.38 N, 90° 넘게 누이면 0.9 N. 미리 잡아 둔 영점을
 재사용하지 않는다.
 
+### 전원을 껐다 켰다면 — 영점만 다시 잡는다
+
+전원 재기동 뒤 공중에서 몇 N 이 실려 있는 것은 정상이다. 스트레인게이지의 **전기 영점**이
+바뀐 것이고 질량·무게중심·장착 회전은 그대로다 — **다자세 중력 교정을 다시 할 필요가 없다.**
+
+⚠️ GUI 의 **"전자 영점" 버튼으로는 안 고쳐진다.** 그 값(`bias.bias`)은 `compensate()` 안에서
+상쇄되어 사라지고, 실제로 값을 바꾸는 것은 중력 모델의 `residual_bias` 뿐이다 — 이것이
+"zero 버튼이 안 먹힌다" 의 정체다. 아래가 그 자리를 고친다:
+
+```bash
+~/FR5-for-RUS/scripts/start_session.sh --calib --no-us --no-ap        # 다른 창
+python3 ~/FR5-for-RUS/policy_learning/scripts/recalibrate_zero.py     # 공중에서 자세 1~3 곳
+~/FR5-for-RUS/scripts/stop_all.sh && ~/FR5-for-RUS/scripts/start_session.sh
+```
+
+고친 뒤 공중 ‖F‖ 가 1 N 아래인지 보고, 위 1~4 순서로 작업 자세 영점을 잡는다. 스크립트가
+옛 작업 영점은 지운다 — 옛 전기 영점으로 잰 값이라 그대로 두면 두 번 빠진다.
+
+### 그래도 이상하면
+
 의심스러우면 (제어 스택 없이 띄워야 드래그 모드와 안 싸운다):
 
 ```bash

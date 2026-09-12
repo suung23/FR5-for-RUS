@@ -59,7 +59,7 @@ try:
     from rclpy.node import Node
     from rclpy.qos import qos_profile_sensor_data
     from sensor_msgs.msg import Image
-    from std_msgs.msg import String
+    from std_msgs.msg import Float32, String
 except ImportError:                                   # ROS 없이 --help 는 되게 한다
     rclpy = None
     Node = object
@@ -67,6 +67,7 @@ except ImportError:                                   # ROS 없이 --help 는 �
 from _common import add_config_args, config_from_args
 
 from rus_policy.bmode import BmodeConverter
+from rus_policy.view_quality import view_quality
 from rus_policy.perception import TOKEN_NAMES, apply_frame_transform, build_backend
 
 
@@ -103,6 +104,12 @@ class SegmentationNode(Node):
         self.bmode_pub = self.create_publisher(Image, args.bmode_topic, qos_profile_sensor_data)
         self.mask_pub = self.create_publisher(Image, args.mask_topic, qos_profile_sensor_data)
         self.state_pub = self.create_publisher(String, args.state_topic, qos_profile_sensor_data)
+        # 품질 두 값. **러너가 없을 때만** 낸다 — 아래 _publish_quality 참조.
+        self.q_seg_topic = f"{args.robot_namespace}/image_quality_seg"
+        self.q_raw_topic = f"{args.robot_namespace}/image_quality_raw"
+        self.q_seg_pub = self.create_publisher(Float32, self.q_seg_topic, 10)
+        self.q_raw_pub = self.create_publisher(Float32, self.q_raw_topic, 10)
+        self._yielded = False
         # us_frame_node 는 BEST_EFFORT 로 낸다. 기본 QoS 로 구독하면 프레임이 하나도 오지 않는다.
         self.create_subscription(Image, args.image_topic, self._on_image, qos_profile_sensor_data)
 
@@ -110,6 +117,30 @@ class SegmentationNode(Node):
             f"방광 세그멘테이션 — {args.image_topic} → {args.bmode_topic} · {args.mask_topic} · "
             f"{args.state_topic} | 상한 {args.max_hz:.0f} Hz | "
             f"체크포인트 {cfg.resolve(cfg.paths.unet_checkpoint)} ({backend.checkpoint_id})")
+
+    def _publish_quality(self, vec, bmode) -> None:
+        """텔레옵 중에도 화면에 Q 가 뜨도록 낸다 — 단 **러너가 없을 때만**.
+
+        Q 를 내는 주체는 원래 run_policy 하나였다. 그래야 화면의 값과 정책이 보는 값이
+        같기 때문이다. 그런데 러너는 에피소드가 도는 동안에만 살아 있어서, 조작자가 자세를
+        잡는 내내 눈금이 비어 있었다 — 정작 그때가 Q 를 보고 싶은 때다.
+
+        그래서 여기서도 내되, **발행자가 우리뿐일 때만** 낸다. 러너가 뜨면 이 노드는 곧바로
+        입을 닫는다. 같은 토픽에 둘이 쓰면 값이 번갈아 들어가 화면이 두 값 사이를 튄다 —
+        2026-09-12 에 desired_twist 에서 그것 때문에 로봇이 멈췄다. 발행자 등록 수로 판정하는
+        것이 여기서는 옳다: 러너의 발행자는 러너가 살아 있는 동안에만 있고, 살아 있으면 늘 낸다.
+        """
+        alone = self.count_publishers(self.q_seg_topic) <= 1
+        if not alone:
+            if not self._yielded:
+                self._yielded = True
+                self.get_logger().info("러너가 품질을 내기 시작했다 — 이 노드는 품질 발행을 멈춘다")
+            return
+        if self._yielded:
+            self._yielded = False
+            self.get_logger().info("러너가 사라졌다 — 품질 발행을 다시 맡는다")
+        self.q_seg_pub.publish(Float32(data=float(view_quality(vec)[0])))
+        self.q_raw_pub.publish(Float32(data=float(self.backend.raw_quality(bmode))))
 
     # -- 발행 -----------------------------------------------------------------
 
@@ -194,7 +225,7 @@ class SegmentationNode(Node):
 
         t0 = time.time()
         bmode = apply_frame_transform(self.conv(raw)[None], self.cfg.perception.frame_transform)[0]
-        _vec, q, token, e_px, cs = self.backend.step_detailed(bmode)
+        vec, q, token, e_px, cs = self.backend.step_detailed(bmode)
         self.dt_ms = (time.time() - t0) * 1000.0
         self.seq += 1
         self.n_img += 1
@@ -215,6 +246,7 @@ class SegmentationNode(Node):
         self.mask_pub.publish(self._image_msg(mask, stamp))
         self.state_pub.publish(String(data=json.dumps(
             self._state_payload(cs, q, token, e_px), ensure_ascii=False)))
+        self._publish_quality(vec, bmode)
 
         if self.n_img % self.args.report_every == 0:
             self.get_logger().info(
@@ -227,6 +259,8 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     add_config_args(p)
+    p.add_argument("--robot-namespace", default="/fr5_right",
+                   help="품질을 낼 네임스페이스 — GUI 가 보는 곳과 같아야 한다")
     p.add_argument("--image-topic", default="/us/image")
     p.add_argument("--bmode-topic", default="/us/seg/bmode")
     p.add_argument("--mask-topic", default="/us/seg/mask")

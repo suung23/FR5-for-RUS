@@ -43,7 +43,7 @@ import time
 import numpy as np
 import rclpy
 from ament_index_python.packages import get_package_share_directory
-from geometry_msgs.msg import Pose, WrenchStamped
+from geometry_msgs.msg import Pose, Twist, WrenchStamped
 from std_msgs.msg import Bool, Float32, Float64, String
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
@@ -400,6 +400,13 @@ class TelemetryBridge(Node):
         self.create_subscription(
             Float32, f"{ns}/image_quality_raw",
             lambda m: setattr(self, "_q_raw", float(m.data)), 10)
+
+        # 정책이 실제로 내보내는 지령. 조작자는 지금까지 로봇이 움직이는지로만 알 수 있었고,
+        # "지령은 나오는데 안 움직인다" 와 "애초에 지령이 0 이다" 를 화면에서 구별할 수 없었다
+        # (2026-09-12 에 두 경우를 가리느라 여러 번 왕복했다). 값을 그대로 보여 준다.
+        self._cmd_twist = None
+        self._cmd_twist_t = 0.0
+        self.create_subscription(Twist, f"{ns}/desired_twist", self._on_desired_twist, 10)
 
         # 정책 추론 시작/정지 요청. run_policy.py 가 --start-on topic 으로 이 토픽을 본다.
         # 로봇을 움직이는 명령이 아니라 **추론을 시작해도 된다는 허가**다 — 지령은 정책 쪽
@@ -1323,6 +1330,12 @@ class TelemetryBridge(Node):
         if self._teleop_frame is not None:
             frame["teleopFrame"] = self._teleop_frame
 
+        # 지령은 **최근 것만** 싣는다. 러너가 내려간 뒤 마지막 값이 화면에 남아 있으면
+        # 조작자는 아직 지령이 나가는 줄로 읽는다.
+        if self._cmd_twist is not None and (time.time() - self._cmd_twist_t) < 1.0:
+            frame["commandOmegaDegS"] = self._cmd_twist[3:]
+            frame["commandLinearMmS"] = self._cmd_twist[:3]
+
         # NaN 은 JSON 이 못 싣고 "측정 안 됨" 과 0 은 다르므로 **키를 빼서** 없음을 말한다.
         for key, val in (("qualitySeg", self._q_seg), ("qualityRaw", self._q_raw)):
             if val is not None and math.isfinite(val):
@@ -1532,6 +1545,13 @@ class TelemetryBridge(Node):
         else:
             sample.pop("forceWaveform", None)
         return sample
+
+    def _on_desired_twist(self, msg) -> None:
+        """제어 스택으로 가는 지령을 그대로 받아 둔다 (rad/s·m/s → °/s·mm/s)."""
+        deg = 57.29577951308232
+        self._cmd_twist = [msg.linear.x * 1000.0, msg.linear.y * 1000.0, msg.linear.z * 1000.0,
+                           msg.angular.x * deg, msg.angular.y * deg, msg.angular.z * deg]
+        self._cmd_twist_t = time.time()
 
     def calibration_summary(self) -> dict:
         """화면이 그릴 교정 상태 한 벌."""

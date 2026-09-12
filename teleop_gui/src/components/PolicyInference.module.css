@@ -63,3 +63,34 @@
   outline: 2px solid var(--ink);
   outline-offset: -2px;
 }
+
+/* 지령 한 줄. 숫자는 등폭이라 자릿수가 흔들려도 눈이 따라간다. */
+.command {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.25rem 0 0.4rem;
+  border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.08));
+}
+
+.commandLabel {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  opacity: 0.65;
+}
+
+.commandValue {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.commandIdle {
+  opacity: 0.45;
+}
+
+.commandUnit {
+  font-size: 0.68rem;
+  opacity: 0.6;
+}

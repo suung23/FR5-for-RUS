@@ -215,6 +215,7 @@ class PolicyRunner(Node):
         self.f_bar_t = 0.0
         self._warned_no_search = False
         self._warned_two_publishers = False
+        self._warned_excursion = False
         self._last_sent = None          # 우리가 마지막에 보낸 twist (되돌아온 것과 비교)
         self._n_foreign = 0             # 그와 다른 값이 흐른 횟수
         self._idle_reason = ""      # 왜 지령하지 않는가. 바뀔 때와 5 s 마다 알린다.
@@ -626,6 +627,18 @@ class PolicyRunner(Node):
         # 막으므로, 그 뒤의 값만 찍으면 hold 에피소드 내내 "정책이 0 을 낸다" 로 보인다
         # (2026-09-11 에 실제로 그렇게 읽혔다). 모델이 무엇을 원했는지는 지령과 따로 봐야 한다.
         a_policy = a.copy()
+        # 시작 자세에서 너무 멀어지면 **어느 조건이든** 지령을 멈춘다.
+        #
+        # 정책은 한 방향으로 계속 갈 수 있다 (2026-09-12 실측: 후보는 θx 양수 51 % 로 고른데
+        # Q̂ 로 고르면 32 % 가 된다 — 최댓값을 고르는 순간 Q̂ 의 기울어짐이 고정된 방향이 된다).
+        # 90 s × 3 °/s 면 270° 까지 갈 수 있어 조작자가 손으로 멈춰야 했다. 한계에 닿으면
+        # 멈추고 그 사실을 기록한다 — 얼마나 갔는지가 곧 그 조건의 결과다.
+        too_far = self._excursion_deg() > self.args.search_max_excursion_deg
+        if too_far and not self._warned_excursion:
+            self._warned_excursion = True
+            self.get_logger().warn(
+                f"시작 자세에서 {self._excursion_deg():.0f}° — 상한 "
+                f"{self.args.search_max_excursion_deg:.0f}° 에 닿아 지령을 멈춘다 (기록은 계속된다)")
         if self.condition == "search":
             # 학습된 Q̂ 로 고르지 않는다. 실제로 조금 움직여 보고 **잰** Q 로 방향을 고른다 —
             # Q̂ 의 방향 판별은 우연 수준(52~54 %)이고, 후보 64 개 중 최댓값을 고르는 순간
@@ -637,8 +650,10 @@ class PolicyRunner(Node):
             # 크기는 정책이 고른 그대로, 방향만 무의미하게. 크기를 다시 뽑으면 조건 사이에서
             # "움직임의 양" 이 어긋나고, 그것이 이 대조군이 통제하려던 변수다.
             a = randomize_direction(a, self.rng)
-        if self.condition in ("hold", "expert"):
+        if self.condition in ("hold", "expert") or too_far:
             # hold 는 바닥선, expert 는 사람이 지령한다. 둘 다 러너는 **기록만** 한다.
+            # too_far 면 어느 조건이든 멈춘다 — 정책이 한 방향으로 계속 갈 수 있어서다
+            # (2026-09-12: 90 s × 3 °/s = 270° 까지 가 조작자가 손으로 멈춰야 했다).
             self._stop()
             lin, ang = np.zeros(3), np.zeros(3)
         else:

@@ -101,6 +101,8 @@ export function parseTelemetry(raw: unknown, receivedAt: number): RobotTelemetry
     // (2026-09-12). A field the parser does not name does not exist.
     qualitySeg: finiteOr(src.qualitySeg ?? src.quality_seg),
     qualityRaw: finiteOr(src.qualityRaw ?? src.quality_raw),
+    commandOmegaDegS: numberArray(src.commandOmegaDegS, 3),
+    commandLinearMmS: numberArray(src.commandLinearMmS, 3),
     // Passed through as the control stack declared it, for the same reason as
     // the calibration block below.
     teleopFrame: teleopFrame(src.teleopFrame ?? src.teleop_frame),

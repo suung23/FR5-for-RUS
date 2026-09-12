@@ -171,3 +171,20 @@ def test_frames_can_be_saved_so_episodes_become_training_data():
     assert "t=np.asarray(self.frame_t" in save and "frames=np.stack" in save
     # 관측용 링버퍼(20 장)와 따로 쌓아야 한다
     assert "self.frames: list = []" in run and "self.buf.append" in run
+
+
+def test_excursion_cap_stops_every_commanding_condition():
+    """시작 자세에서 멀어지면 **어느 조건이든** 지령을 멈춘다.
+
+    정책은 한 방향으로 계속 갈 수 있다 (2026-09-12 실측: 후보는 θx 양수 51 % 로 고른데 Q̂ 로
+    고르면 32 %). 90 s × 3 °/s 면 270° 까지 가고, 조작자가 손으로 멈춰야 했다.
+    """
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "scripts" / "run_policy.py").read_text()
+    assert src.count("too_far = self._excursion_deg()") == 1, "한 군데에서만 판정해야 한다"
+    assert 'if self.condition in ("hold", "expert") or too_far:' in src, \
+        "탐색 조건에만 걸면 정책이 계속 간다"
+    # 멈춰도 기록은 이어져야 한다 — 얼마나 갔는지가 곧 그 조건의 결과다
+    stop = src[src.index('if self.condition in ("hold", "expert") or too_far:'):]
+    assert "self.rows.append" in stop, "멈춘 tick 이 기록에서 빠지면 안 된다"

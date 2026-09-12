@@ -43,6 +43,8 @@ export function PolicyInference({ telemetry, available, onCommand }: Props) {
   // The stack declares this when the policy holds the regime. That is the confirmation.
   const held = mode === 'contact_probing_policy';
   const contact = known && mode !== 'approach';
+  const omega = available ? telemetry.commandOmegaDegS : undefined;
+  const moving = omega ? omega.some((v) => Math.abs(v) > 0.005) : false;
 
   const send = (enabled: boolean) => {
     if (onCommand({ command: 'policy.enable', enabled })) setRequested(enabled);
@@ -65,6 +67,27 @@ export function PolicyInference({ telemetry, available, onCommand }: Props) {
         </span>
       </div>
       <div className={`plate__body ${styles.body}`}>
+        {/* 지금 무엇이 지령되고 있는가. 로봇이 안 움직일 때, 지령이 0 인 것과 지령은
+            나가는데 실행되지 않는 것은 원인이 다르다 — 팔만 봐서는 구별되지 않는다. */}
+        <div className={styles.command}>
+          <span className={styles.commandLabel}>COMMAND</span>
+          {omega ? (
+            <>
+              <span className={styles.commandValue}>
+                {omega.map((v) => (v >= 0 ? `+${v.toFixed(2)}` : v.toFixed(2))).join('  ')}
+              </span>
+              <span className={styles.commandUnit}>
+                &deg;/s &middot; &omega;x &omega;y &omega;z
+                {moving ? '' : ' \u2014 zero'}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className={`${styles.commandValue} ${styles.commandIdle}`}>&mdash;</span>
+              <span className={styles.commandUnit}>nothing commanded in the last second</span>
+            </>
+          )}
+        </div>
         <div className={styles.choices} role="group" aria-label="Policy inference">
           <button
             type="button"

@@ -89,6 +89,20 @@ export interface RobotTelemetry {
    */
   qualitySeg?: number;
   qualityRaw?: number;
+
+  /**
+   * What the control stack is actually being told to do, as the bridge saw it on
+   * `desired_twist` — angular in deg/s, linear in mm/s, probe frame.
+   *
+   * On screen so that "the policy is commanding but the robot is not moving" and
+   * "the command itself is zero" stop looking the same. They have different causes
+   * and only the second one is visible from the arm.
+   *
+   * Absent when nothing has been commanded in the last second, so a stale value
+   * from a runner that has exited cannot read as a live command.
+   */
+  commandOmegaDegS?: number[];
+  commandLinearMmS?: number[];
   /** How the control stack is mapping the operator's hand onto the robot. */
   teleopFrame?: TeleopFrameState;
   /** Sensor calibration state, forwarded by the bridge. */

@@ -123,6 +123,24 @@ if ! ros2 node list 2>/dev/null | grep -q us_diff_ik_node; then
   exit 1
 fi
 
+# 남아 있는 힘 탐색을 먼저 치운다.
+#
+# 둘이 돌면 **각자 디더를 걸고 각자 설정값을 민다.** 서로의 디더를 잡음으로 읽으므로 경사
+# 추정이 망가지고, 설정값은 두 값 사이를 오간다. 2026-09-12 에 53 분·34 분짜리 두 개가
+# 동시에 돌고 있었다 — 앞 실행이 비정상 종료로 남긴 것을 다음 실행이 눈치채지 못했다.
+# 이 스크립트가 힘 탐색의 주인이므로, 남은 것은 언제나 치우는 것이 맞다.
+# pgrep -f 는 **자기 명령줄에 패턴이 있는 프로세스**도 잡는다. 실행 파일을 직접 확인한다 —
+# 잘못 잡으면 남의 프로세스를 죽이게 된다.
+for pid in $(pgrep -f "lib/fr5_control/force_search" 2>/dev/null); do
+  [[ "$pid" == "$$" ]] && continue
+  cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
+  [[ "$cmd" == *"lib/fr5_control/force_search"* ]] || continue
+  [[ "$cmd" == *bash* ]] && continue
+  echo "남아 있는 힘 탐색 pid $pid 을 정리한다 (둘이 돌면 서로의 디더를 잡음으로 읽는다)"
+  kill "$pid" 2>/dev/null || true
+done
+sleep 1
+
 mkdir -p "$OUT"
 FS_LOG="$OUT/force_search.log"
 

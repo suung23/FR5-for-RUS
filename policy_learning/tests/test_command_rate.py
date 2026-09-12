@@ -108,8 +108,13 @@ def test_runner_detects_a_second_publisher_on_desired_twist():
     실현율 50 % → "힘만 조절하고 안 움직임" 이 됐다. 원인이 두 노드 어디에도 없다.
     """
     src = RUN_POLICY.read_text()
-    assert "def _check_single_publisher" in src
-    assert "self.count_publishers(" in src, "세어 보지 않고 경고만 하면 안 잡힌다"
+    assert "def _on_twist_echo" in src and "def _check_single_publisher" in src
+    # **발행자 수를 세면 안 된다.** teleop 은 정책 인계 중 아무것도 내지 않지만 발행자 객체는
+    # 그대로 남아 늘 2 로 잡힌다 — 2026-09-12 에 그 검사가 정상 상태를 오류로 알렸다.
+    assert "count_publishers(" not in src, "등록 수가 아니라 흐르는 메시지를 봐야 한다"
+    echo = src[src.index("def _on_twist_echo"):src.index("def _check_single_publisher")]
+    assert "self._last_sent" in echo and "self._n_foreign += 1" in echo
+    # 우리가 보낸 값은 두 발행 경로 모두에서 기억해야 한다
+    assert src.count("self._last_sent = ") >= 3, "보낸 값을 기억하지 않는 경로가 있다"
     # 지령을 내보내는 조건에서 실제로 불러야 한다
-    tick = src[src.index("_check_single_publisher()\n        self.prev_net"):]
-    assert tick, "지령 경로에서 검사를 부르지 않는다"
+    assert "_check_single_publisher()\n        self.prev_net" in src, "지령 경로에서 검사를 안 부른다"

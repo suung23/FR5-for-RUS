@@ -132,6 +132,8 @@ class PolicyRunner(Node):
         # `policy_enable` 을 켜도 아무 일이 없다 (2026-09-10 확인).
         ns = args.robot_namespace
         self.twist_pub = self.create_publisher(Twist, f"{ns}/desired_twist", 10)
+        # 우리가 낸 것이 그대로 돌아오는지 듣는다 (다른 발행자 탐지 — _on_twist_echo).
+        self.create_subscription(Twist, f"{ns}/desired_twist", self._on_twist_echo, 10)
         # 실시간 지각이 도는 곳이 여기뿐이라 Q_raw 의 유일한 출처다. force_search 노드가
         # 이걸 받아 힘 설정값을 품질 경사 방향으로 옮긴다 (DESIGN_NOTES §8.4).
         # 지령과 무관하게 항상 낸다 — 정책이 멈춰 있어도 힘 탐색은 품질을 봐야 한다.
@@ -213,6 +215,8 @@ class PolicyRunner(Node):
         self.f_bar_t = 0.0
         self._warned_no_search = False
         self._warned_two_publishers = False
+        self._last_sent = None          # 우리가 마지막에 보낸 twist (되돌아온 것과 비교)
+        self._n_foreign = 0             # 그와 다른 값이 흐른 횟수
         self._idle_reason = ""      # 왜 지령하지 않는가. 바뀔 때와 5 s 마다 알린다.
         self._idle_logged = 0.0
         # 방향 관성. 체크포인트 값(0.2)은 보너스 차 1.60 으로 후보 사이 Q̂ 차(중앙 0.021)의
@@ -395,24 +399,31 @@ class PolicyRunner(Node):
         o = self.pose[1]
         return _quat_angle_deg(self.start_quat, (o.w, o.x, o.y, o.z))
 
-    def _check_single_publisher(self) -> None:
-        """desired_twist 의 발행자가 우리 하나인가 — 아니면 지령이 서로 지워진다.
+    def _on_twist_echo(self, msg) -> None:
+        """desired_twist 에 **우리가 보내지 않은** 값이 흐르는가.
 
-        Touch 텔레옵은 데드맨을 놓아도 0 twist 를 계속 낸다 (워치독이 후퇴를 걸지 않게 하려고,
-        touch_twist_node.cpp §355). 정책도 같은 토픽에 쓰면 제어 노드는 마지막에 온 것만 보므로
-        둘이 번갈아 들어가 서로 지운다 — 2026-09-12 에 실현율이 50 % 로 깎이다가 결국 "힘만
-        조절하고 안 움직임" 이 됐다. 원인이 두 노드 어디에도 없어 코드를 읽어서는 안 보인다.
+        발행자 수를 세면 안 된다. teleop 은 정책 인계 중 아무것도 내지 않지만 발행자 객체는
+        그대로 남아 있어 늘 2 로 잡힌다 — 2026-09-12 에 그 검사가 정상 상태를 오류로 알렸다.
+        중요한 것은 등록이 아니라 **실제로 흐르는 메시지**다.
 
-        경고는 문장이 아니라 **검사**여야 한다. 예전에는 인계 로그에 "두 발행자가 싸운다" 라는
-        주의만 찍고 실제로 세어 보지는 않았다.
+        되돌아온 메시지가 우리가 마지막에 보낸 값과 다르면 다른 노드가 쓰고 있는 것이다.
+        그러면 제어 노드는 마지막에 온 것만 보므로 두 지령이 번갈아 들어가 서로 지운다.
         """
-        n = self.count_publishers(f"{self.args.robot_namespace}/desired_twist")
-        if n > 1 and not self._warned_two_publishers:
+        got = (msg.linear.x, msg.linear.y, msg.linear.z,
+               msg.angular.x, msg.angular.y, msg.angular.z)
+        if self._last_sent is None or got != self._last_sent:
+            self._n_foreign += 1
+
+    def _check_single_publisher(self) -> None:
+        """남의 지령이 섞여 들어오면 알린다 (한 번만)."""
+        if self._n_foreign > 5 and not self._warned_two_publishers:
             self._warned_two_publishers = True
             self.get_logger().error(
-                f"⚠️ {self.args.robot_namespace}/desired_twist 에 발행자가 {n} 개다 — 지령이 서로 "
-                "지워져 로봇이 거의 안 움직인다. teleop 이 정책 인계 중에도 0 을 내고 있는지 "
-                "확인하라 (touch_teleop 을 다시 빌드했다면 세션을 다시 띄워야 한다)")
+                f"⚠️ {self.args.robot_namespace}/desired_twist 에 우리가 보내지 않은 지령이 "
+                f"{self._n_foreign} 번 흘렀다 — 두 지령이 번갈아 들어가 서로 지운다. teleop 이 "
+                "정책 인계 중에도 내고 있는지 확인하라 (touch_teleop 을 다시 빌드했다면 세션을 "
+                "다시 띄워야 반영된다)")
+        self._n_foreign = 0
 
     def _pose_columns(self) -> dict:
         """ee_wrt_base 의 최신값을 기록용 열로. 없으면 NaN."""
@@ -435,6 +446,7 @@ class PolicyRunner(Node):
     # -- 지령 -------------------------------------------------------------
     def _stop(self):
         self._held = None                      # 재발행을 멈춘다
+        self._last_sent = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         if self.args.execute:
             self.twist_pub.publish(Twist())
 
@@ -488,6 +500,8 @@ class PolicyRunner(Node):
         tw.linear.x, tw.linear.y, tw.linear.z = (lin / 1000.0).tolist()
         tw.angular.x, tw.angular.y, tw.angular.z = np.radians(ang).tolist()
         self._held, self._held_t = tw, time.time()   # 다음 추론까지 이 값을 유지한다
+        self._last_sent = (tw.linear.x, tw.linear.y, tw.linear.z,
+                           tw.angular.x, tw.angular.y, tw.angular.z)
         if self.args.execute:
             self.twist_pub.publish(tw)
         return lin, ang

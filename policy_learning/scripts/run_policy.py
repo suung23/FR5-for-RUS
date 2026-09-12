@@ -212,6 +212,7 @@ class PolicyRunner(Node):
         self.f_bar = None           # 힘 탐색이 알리는 설정값
         self.f_bar_t = 0.0
         self._warned_no_search = False
+        self._warned_two_publishers = False
         self._idle_reason = ""      # 왜 지령하지 않는가. 바뀔 때와 5 s 마다 알린다.
         self._idle_logged = 0.0
         # 방향 관성. 체크포인트 값(0.2)은 보너스 차 1.60 으로 후보 사이 Q̂ 차(중앙 0.021)의
@@ -393,6 +394,25 @@ class PolicyRunner(Node):
             return 0.0
         o = self.pose[1]
         return _quat_angle_deg(self.start_quat, (o.w, o.x, o.y, o.z))
+
+    def _check_single_publisher(self) -> None:
+        """desired_twist 의 발행자가 우리 하나인가 — 아니면 지령이 서로 지워진다.
+
+        Touch 텔레옵은 데드맨을 놓아도 0 twist 를 계속 낸다 (워치독이 후퇴를 걸지 않게 하려고,
+        touch_twist_node.cpp §355). 정책도 같은 토픽에 쓰면 제어 노드는 마지막에 온 것만 보므로
+        둘이 번갈아 들어가 서로 지운다 — 2026-09-12 에 실현율이 50 % 로 깎이다가 결국 "힘만
+        조절하고 안 움직임" 이 됐다. 원인이 두 노드 어디에도 없어 코드를 읽어서는 안 보인다.
+
+        경고는 문장이 아니라 **검사**여야 한다. 예전에는 인계 로그에 "두 발행자가 싸운다" 라는
+        주의만 찍고 실제로 세어 보지는 않았다.
+        """
+        n = self.count_publishers(f"{self.args.robot_namespace}/desired_twist")
+        if n > 1 and not self._warned_two_publishers:
+            self._warned_two_publishers = True
+            self.get_logger().error(
+                f"⚠️ {self.args.robot_namespace}/desired_twist 에 발행자가 {n} 개다 — 지령이 서로 "
+                "지워져 로봇이 거의 안 움직인다. teleop 이 정책 인계 중에도 0 을 내고 있는지 "
+                "확인하라 (touch_teleop 을 다시 빌드했다면 세션을 다시 띄워야 한다)")
 
     def _pose_columns(self) -> dict:
         """ee_wrt_base 의 최신값을 기록용 열로. 없으면 NaN."""
@@ -609,6 +629,8 @@ class PolicyRunner(Node):
             lin, ang = np.zeros(3), np.zeros(3)
         else:
             lin, ang = self._publish(a.astype(np.float64))
+        if self.args.execute and self.condition not in ("hold", "expert"):
+            self._check_single_publisher()
         self.prev_net = np.array([net[0], net[1], net[5]], np.float32)   # 레거시 3축 규약
         self.prev_t = time.time()
         self.rows.append({

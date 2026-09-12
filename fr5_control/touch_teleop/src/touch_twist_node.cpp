@@ -2,6 +2,7 @@
 #include <geometry_msgs/msg/twist.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <std_msgs/msg/float32.hpp> // 그리퍼 제어용 메시지
+#include <std_msgs/msg/bool.hpp>    // 정책 인계 (policy_enable)
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 
@@ -9,6 +10,7 @@
 #include <HDU/hduVector.h>
 #include <HDU/hduError.h>
 
+#include <atomic>
 #include <mutex>
 #include <memory>
 #include <chrono>
@@ -55,6 +57,12 @@ public:
         rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr twist_pub;
         rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr gripper_pub;
         rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr stylus_pub;
+        // 정책이 régime 을 쥐고 있는가. 쥐고 있으면 twist 를 **한 줄도 내지 않는다** —
+        // 아래 데드맨 해제 경로가 0 twist 를 계속 내보내는데, 정책도 같은 토픽에 쓰므로
+        // 둘이 번갈아 들어가 서로 지운다 (2026-09-12: 정책 지령이 실현율 50 % 로 깎이다가
+        // 결국 "힘만 조절하고 안 움직임" 이 됐다. 발행자는 하나여야 한다).
+        rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr policy_sub;
+        std::atomic<bool> policy_active{false};
 
         TouchState state;
         std::string prefix; // "touch/left" or "touch/right"
@@ -224,6 +232,18 @@ private:
         std::string gripper_topic = "/fr5_" + side + "/desired_gripper_pose";
 
         ctx->twist_pub = this->create_publisher<geometry_msgs::msg::Twist>(twist_topic, 10);
+        // 래치된 요청이라 늦게 떠도 현재 상태를 받는다 (telemetry_bridge 가 TRANSIENT_LOCAL 로 낸다).
+        auto policy_qos = rclcpp::QoS(1).transient_local().reliable();
+        ctx->policy_sub = this->create_subscription<std_msgs::msg::Bool>(
+            "/fr5_" + side + "/policy_enable", policy_qos,
+            [this, ctx](const std_msgs::msg::Bool::SharedPtr msg) {
+                const bool want = msg->data;
+                if (want != ctx->policy_active.exchange(want)) {
+                    RCLCPP_INFO(this->get_logger(), "[%s] %s", ctx->prefix.c_str(),
+                                want ? "정책 인계 — teleop 발행을 멈춘다 (지령자는 하나여야 한다)"
+                                     : "정책 해제 — teleop 발행을 재개한다");
+                }
+            });
         ctx->gripper_pub = this->create_publisher<std_msgs::msg::Float32>(gripper_topic, 10);
         ctx->stylus_pub = this->create_publisher<geometry_msgs::msg::PoseStamped>(
             "/touch/" + side + "/stylus_pose", 10);
@@ -360,6 +380,18 @@ private:
         // 원하는 것은 후퇴가 아니라 정지다.
         bool is_btn1_pressed = (s.buttons & HD_DEVICE_BUTTON_1) != 0;
 
+        if (ctx->policy_active.load()) {
+            // 정책이 쥐고 있는 동안은 아무것도 내지 않는다. 접촉 프로빙에서는 twist 두절이
+            // 후퇴 사유가 아니므로(us_diff_ik_node §12.2) 워치독이 걸리지 않는다 — 조절기가
+            // 힘을 계속 잡는다. 정책이 Stop 되면 policy_enable 이 false 로 오고 여기가 풀린다.
+            s.filtered_lin_vel.setZero();
+            s.filtered_ang_vel.setZero();
+            s.prev_position = s.position;
+            s.prev_rotation = s.rotation;
+            s.last_time = now;
+            s.was_deadman_engaged = false;
+            return;
+        }
         if (!is_btn1_pressed) {
             ctx->twist_pub->publish(geometry_msgs::msg::Twist());
             s.filtered_lin_vel.setZero();

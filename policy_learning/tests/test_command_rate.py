@@ -98,3 +98,18 @@ def test_log_shows_policy_intent_separately_from_command():
     log = log[:log.index("def _judge_now")]
     assert "정책  ω=" in log and "지령  ω=" in log, "로그가 정책 의도와 지령을 나눠 찍지 않는다"
     assert "a_policy[AX_ANG]" in log, "정책 줄이 a_policy 를 읽지 않는다"
+
+
+def test_runner_detects_a_second_publisher_on_desired_twist():
+    """발행자가 둘이면 지령이 서로 지워진다 — 경고가 아니라 **검사**여야 한다.
+
+    2026-09-12: Touch 텔레옵은 데드맨을 놓아도 0 twist 를 계속 낸다 (워치독이 후퇴를 걸지
+    않게 하려고). 정책도 같은 토픽에 쓰자 제어 노드가 마지막 것만 보아 둘이 번갈아 지웠고,
+    실현율 50 % → "힘만 조절하고 안 움직임" 이 됐다. 원인이 두 노드 어디에도 없다.
+    """
+    src = RUN_POLICY.read_text()
+    assert "def _check_single_publisher" in src
+    assert "self.count_publishers(" in src, "세어 보지 않고 경고만 하면 안 잡힌다"
+    # 지령을 내보내는 조건에서 실제로 불러야 한다
+    tick = src[src.index("_check_single_publisher()\n        self.prev_net"):]
+    assert tick, "지령 경로에서 검사를 부르지 않는다"

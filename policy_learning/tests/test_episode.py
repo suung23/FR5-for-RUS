@@ -224,3 +224,67 @@ def test_gate_treats_unmeasured_q_raw_as_not_met():
     for t in np.arange(0.0, 1.0, 0.1):
         g.update(float(t), _state(area=0.0), float("nan"))
     assert not g.is_open
+
+
+def test_two_phase_separates_finding_from_holding():
+    """찾기와 유지는 다른 능력이다 — 하나의 성공/실패로는 못 가린다.
+
+    2026-09-12 조작자 정의: 방광이 없는 자리에서 시작해 찾고, 그 뒤 주사기로 용적을 바꿔도
+    뷰를 유지하는가 · 그때 힘이 위험하지 않은가. 찾자마자 놓쳐도 기존 판정은 "성공" 이다.
+    """
+    import numpy as np
+
+    from rus_policy.episode import Thresholds, judge, judge_two_phase
+    from rus_policy.perception import STATE_FEATURE_NAMES
+
+    I = {n: i for i, n in enumerate(STATE_FEATURE_NAMES)}
+    thr = Thresholds()
+
+    def frames(area_seq, hz=10.0):
+        st = np.zeros((len(area_seq), len(STATE_FEATURE_NAMES)), np.float32)
+        for i, a in enumerate(area_seq):
+            st[i, I["has_mask"]] = 1.0 if a > 0 else 0.0
+            st[i, I["area_ratio"]] = a
+            st[i, I["largest_component_ratio"]] = 1.0
+            st[i, I["segmentation_confidence"]] = 1.0
+        return np.arange(len(area_seq)) / hz, st
+
+    # 20 s 못 찾다가 4 s 찾고, 그 뒤 6 s 는 절반만 유지
+    seq = [0.0] * 200 + [0.12] * 40 + ([0.12] * 5 + [0.0] * 5) * 6
+    t, st = frames(seq)
+    old = judge(t, st, thr)
+    new = judge_two_phase(t, st, thr)
+    assert old["success"] is True, "기존 판정은 찾기만 본다"
+    assert new["found"] is True
+    assert 19.0 < new["find_time_s"] < 24.0, new["find_time_s"]
+    assert 0.3 < new["hold_good_fraction"] < 0.8, new["hold_good_fraction"]
+    assert new["hold_worst_loss_s"] >= 0.35   # 5 프레임 = 0.4 s (마지막 자릿수는 부동소수점)
+
+    # 못 찾으면 유지 항목은 재지 않는다 (NaN)
+    t2, st2 = frames([0.0] * 100)
+    none = judge_two_phase(t2, st2, thr)
+    assert none["found"] is False and np.isnan(none["hold_good_fraction"])
+
+
+def test_two_phase_reports_force_safety():
+    """'그때의 힘은 위험하지 않은가' 도 같은 판정에서 나와야 한다."""
+    import numpy as np
+
+    from rus_policy.episode import Thresholds, judge_two_phase
+    from rus_policy.perception import STATE_FEATURE_NAMES
+
+    I = {n: i for i, n in enumerate(STATE_FEATURE_NAMES)}
+    thr = Thresholds()
+    st = np.zeros((100, len(STATE_FEATURE_NAMES)), np.float32)
+    st[:, I["has_mask"]] = 1.0
+    st[:, I["area_ratio"]] = 0.12
+    st[:, I["largest_component_ratio"]] = 1.0
+    t = np.arange(100) / 10.0
+    ft = np.arange(100) / 10.0
+    fn = np.full(100, 3.0)
+    fn[50:60] = 4.8            # 1 s 동안 경고선 위
+    fn[70:75] = 5.2            # 0.5 s 동안 한계선 위
+    v = judge_two_phase(t, st, thr, force_t=ft, force_n=fn)
+    assert abs(v["force_max_n"] - 5.2) < 1e-6
+    assert 0.8 < v["time_above_warn_s"] < 1.7, v["time_above_warn_s"]   # 경고선 위 = 4.8·5.2 모두
+    assert 0.4 < v["time_above_limit_s"] < 0.7, v["time_above_limit_s"]

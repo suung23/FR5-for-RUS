@@ -107,6 +107,10 @@ class Thresholds:
     component_min: float = 0.80     # 가장 큰 연결성분 ≥ 80 % (조각난 오검출 배제)
     centroid_max: float = 0.30      # |중심 − 0.5| ≤ 0.30 → 중앙 60 % 폭 (가장자리 뷰 배제)
     hold_s: float = 3.0             # 셋을 **동시에** 연속 3 s
+    # 힘 안전 (probe.yaml safety 와 같은 수). 유지 구간에서 이 선을 얼마나 넘었는지가
+    # "그때의 힘은 위험하지 않은가" 의 답이다.
+    warn_force_n: float = 4.5       # 상승 금지 선
+    limit_force_n: float = 5.0      # 강제 후퇴 선
 
 
 def longest_run_s(t: Sequence[float], ok: Sequence[bool]) -> float:
@@ -123,6 +127,77 @@ def longest_run_s(t: Sequence[float], ok: Sequence[bool]) -> float:
         else:
             run = 0.0
     return float(best)
+
+
+def _first_sustained(t: np.ndarray, ok: np.ndarray, hold_s: float) -> Optional[int]:
+    """``ok`` 가 ``hold_s`` 동안 끊기지 않고 이어진 **첫 지점**의 인덱스 (그 구간의 끝)."""
+    start = None
+    for i, good in enumerate(ok):
+        if not good:
+            start = None
+            continue
+        if start is None:
+            start = i
+        if t[i] - t[start] >= hold_s:
+            return i
+    return None
+
+
+def judge_two_phase(t: Sequence[float], state: np.ndarray, thr: Thresholds,
+                    force_t: Optional[Sequence[float]] = None,
+                    force_n: Optional[Sequence[float]] = None) -> dict:
+    """찾기 → 유지, 두 단계로 잰다.
+
+    평가하려는 것이 두 가지이기 때문이다 (2026-09-12 조작자 정의): **방광이 없는 자리에서
+    시작해 찾아내는가**, 그리고 **찾은 뒤 주사기로 용적을 바꿔도 뷰를 유지하는가 · 그때 힘이
+    위험하지 않은가.** 하나의 성공/실패로는 둘을 가릴 수 없다 — 찾자마자 놓쳐도 "성공" 이
+    되고, 못 찾으면 유지 능력은 재지도 못한다.
+
+    단계를 가르는 지점은 **진단 가능 뷰가 처음으로 hold_s 만큼 이어진 순간**이다. 그 뒤가
+    유지 구간이고, 주사기 조작은 그 안에서 일어난다.
+    """
+    t = np.asarray(t, float)
+    state = np.asarray(state, float)
+    good = ((state[:, HAS_MASK] > 0.5)
+            & (state[:, AREA] >= thr.area_min)
+            & (state[:, COMPONENT] >= thr.component_min)
+            & (np.abs(state[:, CENTROID_DX]) <= thr.centroid_max))
+    from .view_quality import view_quality
+    qv = np.array([view_quality(row)[0] for row in state]) if state.size else np.array([])
+
+    idx = _first_sustained(t, good, thr.hold_s)
+    out = {
+        "found": idx is not None,
+        "find_time_s": float(t[idx] - t[0]) if idx is not None else float("nan"),
+        "hold_window_s": float(t[-1] - t[idx]) if idx is not None and len(t) else 0.0,
+    }
+    if idx is not None and idx < len(t) - 1:
+        h = slice(idx, None)
+        out["hold_good_fraction"] = float(good[h].mean())
+        # 가장 오래 놓친 구간. "얼마나 잘 유지하는가" 는 평균보다 이쪽이 말해 준다 —
+        # 90 % 를 유지해도 한 번에 8 s 를 놓치면 그때 화면은 쓸 수 없다.
+        out["hold_worst_loss_s"] = longest_run_s(t[h], ~good[h])
+        out["hold_q_mean"] = float(np.mean(qv[h])) if qv.size else float("nan")
+        out["hold_q_min"] = float(np.min(qv[h])) if qv.size else float("nan")
+    else:
+        out.update({"hold_good_fraction": float("nan"), "hold_worst_loss_s": float("nan"),
+                    "hold_q_mean": float("nan"), "hold_q_min": float("nan")})
+
+    if force_t is not None and force_n is not None and len(force_t) > 1:
+        ft, fn = np.asarray(force_t, float), np.asarray(force_n, float)
+        keep = np.isfinite(fn)
+        ft, fn = ft[keep], fn[keep]
+        if ft.size > 1:
+            dt = np.diff(ft, prepend=ft[0])
+            in_hold = ft >= t[idx] if idx is not None else np.ones(len(ft), bool)
+            out.update({
+                "force_max_n": float(fn.max()),
+                "force_mean_n": float(fn.mean()),
+                "time_above_warn_s": float(dt[(fn >= thr.warn_force_n)].sum()),
+                "time_above_limit_s": float(dt[(fn >= thr.limit_force_n)].sum()),
+                "hold_force_max_n": float(fn[in_hold].max()) if in_hold.any() else float("nan"),
+            })
+    return out
 
 
 def judge(t: Sequence[float], state: np.ndarray, thr: Thresholds) -> dict:

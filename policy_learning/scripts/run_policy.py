@@ -58,7 +58,7 @@ from _common import setup_logging
 from rus_policy.bmode import BmodeConverter
 from rus_policy.dataset import OBS_VEC_DIM, _resize_frames
 from rus_policy.episode import (CONDITIONS, PlaceboBuffer, StartGate, Thresholds, _quat_angle_deg,
-                                judge, motion_check, randomize_direction)
+                                judge, judge_two_phase, motion_check, randomize_direction)
 from rus_policy.model import ACTION_DIM
 from rus_policy.search import AXES_XY, AXES_XYZ, HillClimbSearch
 from rus_policy.view_quality import view_quality
@@ -765,9 +765,29 @@ class PolicyRunner(Node):
                                  component_min=self.args.success_component_min,
                                  centroid_max=self.args.success_centroid_max,
                                  hold_s=self.args.success_hold_s)
-                verdict = judge([self.state_t[i] for i in m],
-                                np.stack([self.states[i] for i in m]), thr)
-                print("\n판정: " + "  ".join(f"{k}={v}" for k, v in verdict.items()))
+                ts = [self.state_t[i] for i in m]
+                states = np.stack([self.states[i] for i in m])
+                verdict = judge(ts, states, thr)
+                # 두 단계로도 잰다: 찾았는가 · 찾은 뒤 유지했는가 · 그때 힘은 안전했는가.
+                # 하나의 성공/실패로는 둘을 못 가린다 — 찾자마자 놓쳐도 "성공" 이 된다.
+                verdict.update(judge_two_phase(
+                    ts, states, thr,
+                    force_t=[r["t"] for r in self.rows],
+                    force_n=[r["F_n"] for r in self.rows]))
+                print("\n판정: " + "  ".join(
+                    f"{k}={v}" for k, v in verdict.items() if not k.startswith(("hold_", "find_", "force_", "time_above", "found"))))
+                f = verdict.get("find_time_s", float("nan"))
+                print(f"  찾기   {'찾음 ' + format(f, '.1f') + ' s' if verdict.get('found') else '못 찾음'}")
+                if verdict.get("found"):
+                    print(f"  유지   {verdict['hold_window_s']:.0f} s 중 진단 가능 "
+                          f"{verdict['hold_good_fraction']:.0%} · 가장 오래 놓친 구간 "
+                          f"{verdict['hold_worst_loss_s']:.1f} s · Q 평균 {verdict['hold_q_mean']:.3f} "
+                          f"최저 {verdict['hold_q_min']:.3f}")
+                if "force_max_n" in verdict:
+                    print(f"  힘     최대 {verdict['force_max_n']:.2f} N · 평균 "
+                          f"{verdict['force_mean_n']:.2f} · 경고선({thr.warn_force_n:.1f} N) 위 "
+                          f"{verdict['time_above_warn_s']:.1f} s · 한계선({thr.limit_force_n:.1f} N) 위 "
+                          f"{verdict['time_above_limit_s']:.1f} s")
         motion = self._motion_check()
         if motion:
             print(f"움직임: 지령 {motion['commanded_deg']:.1f}° · 실제 {motion['realized_deg']:.1f}° "

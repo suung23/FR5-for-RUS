@@ -69,6 +69,9 @@
   display: flex;
   align-items: baseline;
   gap: 0.5rem;
+  /* 한 줄에 묶는다. 접히면 논문 그림에서 숫자가 두 줄로 흩어진다 (2026-09-12 캡처). */
+  flex-wrap: nowrap;
+  white-space: nowrap;
   padding: 0.25rem 0 0.4rem;
   border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.08));
 }
@@ -82,8 +85,9 @@
 .commandValue {
   font-family: var(--mono, ui-monospace, monospace);
   font-variant-numeric: tabular-nums;
-  font-size: 0.95rem;
+  font-size: 0.88rem;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .commandIdle {

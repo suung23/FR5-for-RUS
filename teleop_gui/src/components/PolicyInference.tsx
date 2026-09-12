@@ -70,21 +70,18 @@ export function PolicyInference({ telemetry, available, onCommand }: Props) {
         {/* 지금 무엇이 지령되고 있는가. 로봇이 안 움직일 때, 지령이 0 인 것과 지령은
             나가는데 실행되지 않는 것은 원인이 다르다 — 팔만 봐서는 구별되지 않는다. */}
         <div className={styles.command}>
-          <span className={styles.commandLabel}>COMMAND</span>
+          <span className={styles.commandLabel}>COMMAND &omega;</span>
           {omega ? (
             <>
-              <span className={styles.commandValue}>
-                {omega.map((v) => (v >= 0 ? `+${v.toFixed(2)}` : v.toFixed(2))).join('  ')}
+              <span className={`${styles.commandValue} ${moving ? '' : styles.commandIdle}`}>
+                {omega.map((v) => (v >= 0 ? `+${v.toFixed(2)}` : v.toFixed(2))).join('\u2002')}
               </span>
-              <span className={styles.commandUnit}>
-                &deg;/s &middot; &omega;x &omega;y &omega;z
-                {moving ? '' : ' \u2014 zero'}
-              </span>
+              <span className={styles.commandUnit}>&deg;/s</span>
             </>
           ) : (
             <>
               <span className={`${styles.commandValue} ${styles.commandIdle}`}>&mdash;</span>
-              <span className={styles.commandUnit}>nothing commanded in the last second</span>
+              <span className={styles.commandUnit}>none for 1 s</span>
             </>
           )}
         </div>

@@ -160,7 +160,13 @@ class PolicyRunner(Node):
         # us_frame_node 는 BEST_EFFORT 로 낸다. 기본 QoS 로 구독하면 프레임이 하나도 오지 않는다.
         self.create_subscription(Image, args.image_topic, self._on_image, qos_profile_sensor_data)
 
-        self.buf: deque = deque(maxlen=self.m)          # (t, bmode, state, quality)
+        self.buf: deque = deque(maxlen=self.m)          # (t, bmode, state, quality) — 관측용 링버퍼
+        # --save-frames 용 별도 보관. buf 는 최근 20 장만 남으므로 여기에 따로 쌓는다.
+        # 이것이 있어야 이 에피소드가 나중에 **학습 데이터**가 된다 — 로봇이 스스로 방향을
+        # 정해 움직이고 결과를 잰 기록은 조작자가 고른 움직임과 달리 방향의 효과가 뒤섞이지
+        # 않는다 (2026-09-12: 손으로 모은 데이터로는 방향 판별이 52~54 % 로 우연 수준이었다).
+        self.frames: list = []
+        self.frame_t: list = []
         self.pose = None
         self.wrench = None
         self.enabled = False
@@ -349,6 +355,12 @@ class PolicyRunner(Node):
             self.n_drop += 1
         now_t = time.time()
         self.buf.append((now_t, bm, state, q))
+        if self.args.save_frames and len(self.frames) < self.args.max_saved_frames:
+            self.frames.append(bm.astype(np.uint8))
+            self.frame_t.append(now_t)
+            if len(self.frames) == self.args.max_saved_frames:
+                self.get_logger().warn(
+                    f"저장할 프레임이 상한 {self.args.max_saved_frames} 장에 닿았다 — 이후는 버린다")
         self.state_t.append(now_t)
         self.states.append(state)
         q_raw = self.backend.raw_quality(bm) if self.backend is not None else float("nan")
@@ -709,6 +721,14 @@ class PolicyRunner(Node):
         if motion:
             print(f"움직임: 지령 {motion['commanded_deg']:.1f}° · 실제 {motion['realized_deg']:.1f}° "
                   f"(처음↔끝 {motion['realized_net_deg']:.1f}°) — {motion['verdict']}")
+        if self.args.save_frames and self.frames:
+            # 관측을 나중에 그대로 다시 만들 수 있어야 한다 — 프레임과 그 시각을 함께 적는다.
+            np.savez_compressed(out / "frames.npz",
+                                t=np.asarray(self.frame_t, np.float64),
+                                frames=np.stack(self.frames).astype(np.uint8))
+            if not quiet:
+                mb = sum(f.nbytes for f in self.frames) / 1e6
+                print(f"프레임 {len(self.frames)} 장 저장 ({mb:.0f} MB 원자료)")
         if self.states:
             # 판정 임계를 나중에 다시 훑으려면 원자료가 있어야 한다 — 파일럿의 목적이
             # "예비 촬영으로 임계를 확정한다" 이므로 판정 결과만 남기면 되돌아갈 수 없다.
@@ -792,6 +812,11 @@ def main() -> int:
     p.add_argument("--placebo-seed", type=int, default=0, help="위약 방향 난수 — 세션을 재현한다")
     p.add_argument("--placebo-delay-s", type=float, default=30.0,
                    help="stale-obs 일 때의 관측 지연 [s]")
+    p.add_argument("--save-frames", action="store_true",
+                   help="B-mode 프레임을 frames.npz 에 남긴다. 이 에피소드를 나중에 학습에 쓰려면 "
+                        "필요하다 (10 fps × 90 s ≈ 900 장 ≈ 압축 20~30 MB)")
+    p.add_argument("--max-saved-frames", type=int, default=4000,
+                   help="--save-frames 의 상한. --loop 은 끝이 없으므로 메모리를 묶어 둔다")
     p.add_argument("--search-axes", default="xyz", choices=["xyz", "xy"],
                    help="탐색이 시험할 회전축. xyz = 면외(θx)·면내(θy)·장축(θz) 양쪽씩 여섯 방향. "
                         "xy 는 장축 회전을 뺀다 (접촉면에 비틀림을 주기 싫을 때)")

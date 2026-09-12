@@ -150,3 +150,24 @@ def test_runner_uses_measured_quality_not_the_learned_head():
 
     exp = (Path(__file__).resolve().parents[1] / "scripts" / "run_experiment.py").read_text()
     assert '("policy", "placebo", "search")' in exp, "드라이버가 search 에 --execute 를 안 준다"
+
+
+def test_frames_can_be_saved_so_episodes_become_training_data():
+    """오늘 돌린 에피소드가 내일의 학습 데이터가 되려면 영상이 남아야 한다.
+
+    2026-09-12 까지 --save-frames 는 도크스트링에만 있고 구현이 없었다. 로봇이 스스로 방향을
+    정해 움직이고 결과를 잰 기록은 조작자가 고른 움직임과 달리 방향의 효과가 뒤섞이지 않아,
+    Q̂ 에게 방향을 가르칠 수 있는 유일한 데이터다.
+    """
+    from pathlib import Path
+
+    run = (Path(__file__).resolve().parents[1] / "scripts" / "run_policy.py").read_text()
+    assert '"--save-frames"' in run, "도크스트링이 약속한 옵션이 없다"
+    assert '"--max-saved-frames"' in run, "--loop 은 끝이 없으므로 상한이 필요하다"
+    assert 'out / "frames.npz"' in run
+    # 관측을 다시 만들려면 프레임과 **그 시각**이 함께 있어야 한다
+    save = run[run.index('if self.args.save_frames and self.frames:'):]
+    save = save[:save.index("if self.states:")]
+    assert "t=np.asarray(self.frame_t" in save and "frames=np.stack" in save
+    # 관측용 링버퍼(20 장)와 따로 쌓아야 한다
+    assert "self.frames: list = []" in run and "self.buf.append" in run

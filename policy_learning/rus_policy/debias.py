@@ -28,6 +28,8 @@
 from __future__ import annotations
 
 import json
+from collections import deque
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -140,3 +142,70 @@ def load_action_bias(path: Path) -> Optional[np.ndarray]:
 def default_bias_path(checkpoint: str | Path) -> Path:
     """체크포인트 옆에 둔다 — 모델이 바뀌면 기울어짐도 달라지므로 한 짝이어야 한다."""
     return Path(str(checkpoint) + ".action_bias.json")
+
+
+# ---- 실행 중에 재는 기울어짐 -------------------------------------------------
+
+@dataclass
+class OnlineActionBias:
+    """로봇이 **지금 보고 있는 영상**에서 기울어짐을 재서 뺀다.
+
+    오프라인 보정은 상수를 학습 데이터(손으로 스캔한 프리핸드)에서 한 번 재어 고정한다.
+    로봇이 보는 것은 팬텀 영상이라 분포가 다르고, 그래서 상수도 다르다 — 2026-09-12 실기에서
+    θx 는 맞았지만(예측 55 % · 실제 49 %) θz 는 빗나갔다(예측 60 % · 실제 23 %).
+
+    모델은 매 결정마다 후보 M 개와 각각의 Σ_k Q̂ 를 이미 계산한다. 그 M 쌍에 직선을 맞추면
+    **이 관측에서의 기울기** 가 나온다 (상수 성분 + 이 관측 고유의 성분). 여러 결정에 걸쳐
+    평균하면 관측 고유의 성분은 부호가 엎치락뒤치락하며 상쇄되고 상수만 남는다.
+
+    ⚠️ **평균 구간이 짧거나 프로브가 한자리에 오래 있으면 신호까지 지운다.** 관측이 서로
+    닮으면 관측 고유의 성분이 상쇄되지 않고, 그것을 상수로 착각해 뺀다. 오프라인에서 θy 에
+    그 일이 있었다 (부호 일치 65 % 인데 뺐더니 고른 방향이 49 % → 34 %). 그래서 여기서도
+    **구간 안에서 부호가 일관된 축만** 뺀다.
+
+    학습이 아니다 — 가중치는 하나도 바뀌지 않고, 저장하지도 않는다. 모델이 이미 낸 값의
+    상수항을 실행 중에 정규화할 뿐이다.
+    """
+
+    window: int = 150                       # 5 Hz 에서 30 s
+    min_count: int = 50                     # 이만큼 쌓이기 전에는 빼지 않는다
+    min_agreement: float = MIN_SIGN_AGREEMENT
+    _buf: deque = field(default_factory=lambda: deque(maxlen=150), init=False)
+
+    def __post_init__(self) -> None:
+        self._buf = deque(maxlen=int(self.window))
+
+    def update(self, net: np.ndarray, q_sum: np.ndarray) -> None:
+        """후보들의 순변위 (M,6) 과 각각의 Σ_k Q̂ (M,) 로 이 결정의 기울기를 잰다."""
+        N = np.asarray(net, float).reshape(-1, ACTION_DIM)
+        y = np.asarray(q_sum, float).reshape(-1)
+        if len(N) < ACTION_DIM + 2 or not np.isfinite(y).all():
+            return
+        A = np.concatenate([N, np.ones((len(N), 1))], 1)     # 절편을 함께 푼다
+        try:
+            sol, *_ = np.linalg.lstsq(A, y, rcond=None)
+        except np.linalg.LinAlgError:
+            return
+        if np.isfinite(sol).all():
+            self._buf.append(sol[:ACTION_DIM])
+
+    @property
+    def n(self) -> int:
+        return len(self._buf)
+
+    def bias(self) -> Optional[np.ndarray]:
+        """구간 평균에서 **부호가 일관된 축만** 남긴 보정값. 아직 모자라면 ``None``."""
+        if len(self._buf) < self.min_count:
+            return None
+        G = np.stack(self._buf)
+        agree = [float(max((G[:, i] > 0).mean(), (G[:, i] < 0).mean()))
+                 for i in range(ACTION_DIM)]
+        return gate_by_agreement(G.mean(0), agree, self.min_agreement)
+
+    def describe(self) -> str:
+        b = self.bias()
+        if b is None:
+            return f"온라인 기울어짐 — {self.n}/{self.min_count} 결정 모으는 중"
+        used = [n for n, v in zip(("x", "y", "z", "θx", "θy", "θz"), b) if v != 0.0]
+        return (f"온라인 기울어짐 {self.n} 결정 · 빼는 축 {', '.join(used) or '없음'} "
+                f"(θx {b[3]:+.5f} θy {b[4]:+.5f} θz {b[5]:+.5f})")

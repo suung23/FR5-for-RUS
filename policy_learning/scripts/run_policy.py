@@ -59,7 +59,7 @@ from rus_policy.bmode import BmodeConverter
 from rus_policy.dataset import OBS_VEC_DIM, _resize_frames
 from rus_policy.episode import (CONDITIONS, PlaceboBuffer, StartGate, Thresholds, _quat_angle_deg,
                                 judge, judge_two_phase, motion_check, randomize_direction)
-from rus_policy.debias import default_bias_path, load_action_bias
+from rus_policy.debias import OnlineActionBias, default_bias_path, load_action_bias
 from rus_policy.model import ACTION_DIM
 from rus_policy.search import AXES_XY, AXES_XYZ, HillClimbSearch
 from rus_policy.view_quality import view_quality
@@ -233,7 +233,13 @@ class PolicyRunner(Node):
         # (2026-09-12: θx 기울기 부호가 관측 98 % 에서 같고, 그것이 만드는 점수 차 0.012 가
         # 후보 사이의 실제 차 0.021 과 맞먹는다). rus_policy.debias 참조.
         self.action_bias = None
-        if args.action_bias != "off":
+        self.online_bias = None
+        if args.action_bias == "online":
+            self.online_bias = OnlineActionBias(window=int(args.bias_window))
+            self.get_logger().info(
+                f"행동 기울어짐 보정 — **실행 중에 잰다** (구간 {args.bias_window} 결정 ≈ "
+                f"{args.bias_window / cfg.timing.policy_hz:.0f} s). 저장된 상수는 쓰지 않는다")
+        elif args.action_bias != "off":
             path = (default_bias_path(args.checkpoint) if args.action_bias == "auto"
                     else Path(args.action_bias))
             self.action_bias = load_action_bias(path)
@@ -637,9 +643,15 @@ class PolicyRunner(Node):
             self.get_logger().warn(f"대기 해제 — {self._idle_reason}")
             self._idle_reason = ""
         with torch.no_grad():
+            bias = self.online_bias.bias() if self.online_bias is not None else self.action_bias
             sel = self.model.select_action(obs, n_samples=self.args.z_samples,
-                                           gamma=self.gamma, action_bias=self.action_bias,
+                                           gamma=self.gamma, action_bias=bias,
                                            prev_dy=torch.as_tensor([self.prev_net[1]], device=self.dev))
+        if self.online_bias is not None and "q_sum" in sel:
+            # 이 결정의 기울기를 재 둔다. 보정 **전** Σ Q̂ 를 써야 한다 — 보정된 값으로 재면
+            # 이미 뺀 만큼을 다시 재게 되어 추정이 0 으로 수렴한다.
+            self.online_bias.update(sel["candidates"][0, :, -1, :].cpu().numpy(),
+                                    sel["q_sum"][0].cpu().numpy())
         a = sel["a"][0, 0].cpu().numpy()                    # 첫 스텝 속도 (B,k,6) → (6,)
         net = sel["net"][0].cpu().numpy()
         qhat = float(sel["Q_hat"][0].mean())
@@ -720,6 +732,8 @@ class PolicyRunner(Node):
                        "search": "search — 재 보고 고른다"}.get(self.condition, self.condition)
                 if self.condition == "search":
                     tag += f" · {self.search.describe()} · 시작에서 {self._excursion_deg():.0f}°"
+                if self.online_bias is not None:
+                    tag += f" · {self.online_bias.describe()}"
                 self.get_logger().info(
                     f"{head}  [{tag}]\n"
                     f"    정책  ω=({pw[0]:+5.2f},{pw[1]:+5.2f},{pw[2]:+5.2f})°/s   "
@@ -831,6 +845,9 @@ class PolicyRunner(Node):
             "z_samples": self.args.z_samples, "start_force_N": self.args.start_force,
             "gamma_mode_consistency": self.gamma,
             "action_bias": None if self.action_bias is None else list(map(float, self.action_bias)),
+            "action_bias_mode": self.args.action_bias,
+            "action_bias_online": (None if self.online_bias is None or self.online_bias.bias() is None
+                                   else list(map(float, self.online_bias.bias()))),
             "max_mm_s": self.args.max_mm_s, "max_deg_s": self.args.max_deg_s,
             "condition": self.condition, "duration_s": self.args.duration,
             "episode_started": self.t_start is not None,
@@ -923,7 +940,11 @@ def main() -> int:
                    help="조작자 화면에서 조건을 가린다 (expert 제외). 기록에는 그대로 남는다")
     p.add_argument("--action-bias", default="auto",
                    help="Q̂ 의 관측과 무관한 행동 기울어짐을 뺀다. auto = <체크포인트>"
-                        ".action_bias.json 이 있으면 쓴다 · off = 안 뺀다 · 경로를 직접 줘도 된다")
+                        ".action_bias.json 이 있으면 쓴다 · online = 실행 중에 직접 잰다 "
+                        "(로봇이 보는 분포에 맞는다) · off = 안 뺀다 · 경로를 직접 줘도 된다")
+    p.add_argument("--bias-window", type=int, default=150,
+                   help="online 일 때 기울기를 평균낼 결정 수 (5 Hz 에서 150 = 30 s). 짧으면 "
+                        "관측 고유의 몫까지 상수로 착각해 뺀다")
     p.add_argument("--gamma", type=float, default=None,
                    help="방향 관성 (모드 일관성 보너스). 없으면 체크포인트 값(0.2). 0.2 는 후보 사이 "
                         "Q̂ 차의 75 배라 방향이 절대 안 바뀐다. 0.005 면 Q̂ 가 약 20 %% 를 정한다")

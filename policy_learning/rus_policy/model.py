@@ -318,6 +318,7 @@ class ActPolicy(nn.Module):
         _, P_hat, _, _ = self.decode(mem_rep, pad_rep, B * n_samples, z)
         Q = self.predict_quality(pooled_rep, P_hat)                           # (B*M,k)
         score = Q.sum(1)
+        q_sum = score.reshape(B, n_samples).clone()   # 보정·보너스 **전** 값 (온라인 추정용)
         P = P_hat.reshape(B, n_samples, self.k + 1, ACTION_DIM)
         if action_bias is not None:
             b = torch.as_tensor(action_bias, dtype=P.dtype, device=dev).reshape(ACTION_DIM)
@@ -337,6 +338,7 @@ class ActPolicy(nn.Module):
         margin = torch.where(opp.any(1), margin, torch.full_like(margin, float("nan")))
         return {"P": P_best, "a": (P_best[:, 1:] - P_best[:, :-1]) / self.dt, "Q_hat": Qm[ar, best],
                 "net": P_best[:, -1], "mode_margin": margin, "candidates": P, "scores": score,
+                "q_sum": q_sum,
                 "vy_spread": P[:, :, -1, Y_AXIS].std(1)}
 
 

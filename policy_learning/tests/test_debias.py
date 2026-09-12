@@ -57,7 +57,55 @@ def test_runner_loads_the_bias_next_to_the_checkpoint():
 
     src = (Path(__file__).resolve().parents[1] / "scripts" / "run_policy.py").read_text()
     assert 'p.add_argument("--action-bias"' in src
-    assert "action_bias=self.action_bias" in src, "선택에 실제로 넘기지 않는다"
+    assert "action_bias=bias" in src, "선택에 실제로 넘기지 않는다"
+    assert "bias = self.online_bias.bias() if self.online_bias is not None else self.action_bias" in src
     assert '"action_bias": None if self.action_bias is None' in src, "쓴 값이 meta 에 안 남는다"
     assert str(default_bias_path("x.pt")).endswith("x.pt.action_bias.json")
     assert load_action_bias(Path("/nonexistent/none.json")) is None, "없으면 None 이어야 한다"
+
+
+def test_online_bias_recovers_a_planted_constant_tilt():
+    """상수 기울어짐을 심어 두면 온라인 추정이 그것을 찾아낸다 — 관측 고유의 몫은 상쇄된다."""
+    from rus_policy.debias import OnlineActionBias
+
+    rng = np.random.default_rng(0)
+    true_tilt = np.array([0.0, 0.0, 0.0, -0.0031, 0.0, 0.0029])
+    est = OnlineActionBias(window=200, min_count=50)
+    for _ in range(200):
+        net = rng.normal(0, 2.0, size=(64, 6))                  # 후보들 (±2° 남짓)
+        # 관측 고유의 몫을 실측 수준으로 둔다: θx 는 평균 −0.00307 · 표준편차 0.00312 인데
+        # 부호 일치가 98 % 였다 — 분포가 한쪽으로 몰려 있어서다. 정규분포로 흉내 내려면
+        # 표준편차를 평균의 절반쯤으로 잡아야 같은 일치율이 나온다.
+        per_obs = rng.normal(0, 0.0015, size=6)
+        q = net @ (true_tilt + per_obs) + rng.normal(0, 1e-4, 64)
+        est.update(net, q)
+    b = est.bias()
+    assert b is not None
+    assert abs(b[3] - true_tilt[3]) < 0.0008, (b[3], true_tilt[3])
+    assert abs(b[5] - true_tilt[5]) < 0.0008, (b[5], true_tilt[5])
+    assert b[4] == 0.0, "일관되지 않은 축을 뺐다"      # 참값 0 → 부호가 엎치락뒤치락
+
+
+def test_online_bias_waits_until_it_has_enough():
+    """모자란 표본으로 빼면 관측 고유의 몫을 상수로 착각한다."""
+    from rus_policy.debias import OnlineActionBias
+
+    rng = np.random.default_rng(1)
+    est = OnlineActionBias(window=150, min_count=50)
+    for _ in range(10):
+        net = rng.normal(0, 2.0, size=(64, 6))
+        est.update(net, net @ rng.normal(0, 0.004, 6))
+    assert est.bias() is None and est.n == 10
+
+
+def test_runner_uses_pre_correction_scores_for_the_estimate():
+    """보정된 값으로 다시 재면 추정이 0 으로 수렴해 보정이 스스로 풀린다."""
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "scripts" / "run_policy.py").read_text()
+    assert 'self.online_bias.update(sel["candidates"][0, :, -1, :].cpu().numpy(),' in src
+    assert 'sel["q_sum"][0].cpu().numpy())' in src, "보정 전 Σ Q̂ 를 써야 한다"
+    model = (Path(__file__).resolve().parents[1] / "rus_policy" / "model.py").read_text()
+    i_q = model.index("q_sum = score.reshape(B, n_samples).clone()")
+    i_bias = model.index("if action_bias is not None:")
+    assert i_q < i_bias, "q_sum 을 보정 뒤에 뜨고 있다"

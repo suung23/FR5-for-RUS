@@ -240,7 +240,19 @@ class TrainConfig:
     # exp1(β=0.5 고정)은 ep5~7 붕괴 → ep19 누설로 넘어갔다. 고정 β 하나로는 양쪽을 다 못 피한다.
     # 고정 β 스윕을 하려면 beta_adapt=false.
     beta_adapt: bool = True
-    beta_adapt_target_sigma: float = 1.0      # 누설 상한: leak_gap ≤ 이 값 × σ_net,y
+    # 어느 축의 누설로 β 를 조이는가. "rot" = θx·θy·θz 중 최악 (기본) · "all" = 6 축 최악 ·
+    # "y" = 옛 규약(y 병진 하나).
+    #
+    # 2026-09-12 실측 (qres2_ep25, test 480): 축별 누설/σ 가 θy 0.84 · x 0.85 · θx 0.79 인데
+    # **감시하던 y 병진만 0.35** 였다. y 는 가속도 이중적분 라벨이라 흘려보낼 신호 자체가 적다
+    # (QC: 1~2 s 구간 변위오차 15 mm, 데이터셋 중앙 순변위 9 mm). 제어기는 그 0.35 를 보고
+    # "누설 없음" 으로 읽어 β 를 계속 풀었고, 그동안 θy 는 사후 0.39° 대 사전 4.23° 로 벌어졌다 —
+    # 관측→행동 정보가 통째로 z 로만 흘렀다. 병진 축은 라벨이 오차 지배라 누설 기준으로 쓰면
+    # 안 되고, 회전 축은 중력·자이로로 직접 관측돼 믿을 수 있다 (로봇 FK 대조 RMS 0.8~1.95°).
+    leak_axes: str = "rot"                    # "rot" | "all" | "y"
+    # 누설 상한. 단위는 **라벨 퍼짐의 배수** (train.py 의 leak_<축>_sigma). 0.3 이면 "그 축 신호의
+    # 3 할 넘게 잃지 마라". qres2_ep25 실측은 θy 0.84 · x 0.85 · θx 0.79 — 거의 다 잃고 있었다.
+    beta_adapt_target_sigma: float = 0.3
     beta_adapt_collapse_sigma: float = 0.25   # 붕괴 하한: vy_std < 이 값 × σ_net,y
     beta_adapt_rate: float = 1.5              # epoch 당 최대 배율
     # z 다양성은 Q̂ 가 그중에서 옳은 걸 고를 수 있을 때만 값어치가 있다. 선택기가 우연 수준이면

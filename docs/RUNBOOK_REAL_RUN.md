@@ -195,7 +195,8 @@ python3 ~/FR5-for-RUS/policy_learning/scripts/analyze_experiment.py \
 
 ## G. 멈출 때
 
-콘솔 `Stop` → Touch 데드맨 놓기(워치독 후퇴) → 터미널 ② Ctrl-C → 터미널 ① Ctrl-C
+콘솔 `Stop` (프로브가 접촉에서 스스로 빠진다 — 최대 15 mm, 3 s) → 터미널 ② Ctrl-C
+→ 터미널 ① Ctrl-C
 → `~/FR5-for-RUS/scripts/stop_all.sh`
 
 ---
@@ -205,6 +206,9 @@ python3 ~/FR5-for-RUS/policy_learning/scripts/analyze_experiment.py \
 1. **접촉이 먼저다.** `Start inference` 를 누르면 조작자 축이 0 이 되어 접촉을 만들 수단이
    없다.
 2. **`Stop` 을 눌러야** régime 이 풀리고 Touch 가 돌아온다. 다음 자세로 가려면 반드시.
+   Stop 을 누르면 프로브가 **스스로 접촉에서 빠진다** (프로브 −z 로 5 mm/s, ‖F‖ 0.2 N
+   아래까지, 최대 3 s = 15 mm). 그동안 스타일러스를 움직이면 즉시 접고 조작자에게 넘긴다.
+   끄려면 `teleop.release_retreat: false`.
    GUI 에 `TELEOP` 이 뜨고 Velocity limits 가 `APPROACH` 로 돌아오면 처음 상태다. 90 s 전에
    누르면 그 에피소드는 거기서 닫힌다 (`meta.json` 의 `stopped_by_operator_s`) — 터미널 ② 가
    곧바로 다음 자세를 묻는다.

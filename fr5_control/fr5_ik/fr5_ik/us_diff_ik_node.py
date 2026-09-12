@@ -30,6 +30,7 @@ from std_msgs.msg import Bool, Float32MultiArray, Float64, String
 
 from fr5_ik.dls_solver import DlsSolver
 from fr5_ik.force_regulator import ForceRegulator, RegulatorOutput
+from fr5_ik.release_retreat import ReleaseRetreat
 from fr5_ik.probing_mode import APPROACH, CONTACT_PROBING, ProbingModeSwitch, gate_axes
 from fr5_ik.teleop_frame import TeleopFrameMapper
 
@@ -94,6 +95,16 @@ class UsDiffIkNode(Node):
         #: twist 두절 중 힘 조절을 잇는다는 안내를 이미 냈는가.
         self._force_hold_announced = False
         self.max_retreat = float(self.get_parameter("watchdog.max_retreat_s").value)
+        # 정책이 놓는 순간의 이탈 후퇴. 워치독 후퇴와 **같은 동작·같은 상한**을 쓴다
+        # (release_retreat.py 에 이유가 있다). 조작자가 지령을 내면 즉시 접는다.
+        self.release_retreat = ReleaseRetreat(
+            speed_m_s=self.retreat_speed,
+            until_force_n=self.retreat_force,
+            max_s=self.max_retreat,
+            enabled=bool(self.get_parameter("teleop.release_retreat").value),
+        )
+        self._release_retreat_started = None
+        self._release_retreat_announced = False
 
         # 접근 상한. freespace:=true 면 launch 가 덮어쓴 값이 여기로 들어온다.
         self.approach_linear = float(self.get_parameter("safety.max_linear_vel_m_s").value)
@@ -461,6 +472,7 @@ class UsDiffIkNode(Node):
         self.declare_parameter("watchdog.twist_timeout_s", 0.1)
         self.declare_parameter("watchdog.twist_hold_s", 0.04)
         self.declare_parameter("watchdog.joint_state_timeout_s", 0.2)
+        self.declare_parameter("teleop.release_retreat", True)
         self.declare_parameter("watchdog.retreat_speed_m_s", 0.005)
         self.declare_parameter("watchdog.retreat_until_force_n", 0.2)
         self.declare_parameter("watchdog.max_retreat_s", 3.0)
@@ -750,6 +762,17 @@ class UsDiffIkNode(Node):
             self._enter_contact_probing()
         elif was and not now:
             self._leave_contact_probing()
+            # **놓는 쪽이 물러난다.** Stop 은 régime 만 풀 뿐 프로브는 눌린 채로 남는다
+            # (2026-09-12 마지막 에피소드의 종료 접촉력 3.39 N). 그 상태로 z 를 넘기면
+            # 조작자의 지령이 접촉에 맞서고, 서보의 지령 선행분이 0.5° 에서 3.6° 로
+            # 뛴다 — "Stop 뒤에 텔레옵이 안 된다" 의 정체다. release_retreat.py 참조.
+            if self.release_retreat.arm(self._control_force()):
+                self._release_retreat_started = self.get_clock().now()
+                self._release_retreat_announced = False
+                self.get_logger().warn(
+                    f"이탈 후퇴 — 프로브 −z 로 {self.retreat_speed * 1000:.0f} mm/s, "
+                    f"F {self._control_force():.2f} → {self.retreat_force:.2f} N "
+                    f"(상한 {self.max_retreat:.1f} s). 스타일러스를 움직이면 즉시 접는다.")
         else:
             self._publish_mode()
 
@@ -1098,6 +1121,34 @@ class UsDiffIkNode(Node):
             self._retreat_announced = True
         return np.array([0.0, 0.0, -self.retreat_speed, 0.0, 0.0, 0.0])
 
+    def _release_retreat_step(self, now) -> np.ndarray | None:
+        """정책이 놓은 뒤의 이탈 후퇴 한 주기. 후퇴하지 않으면 ``None``.
+
+        판정은 rclpy 없는 :mod:`fr5_ik.release_retreat` 에 있다 — 여기서는 시각과
+        wrench 신선도만 대 준다.
+        """
+        if self._release_retreat_started is None:
+            return None
+        elapsed = (now - self._release_retreat_started).nanoseconds / 1e9
+        wrench_fresh = (
+            self.wrench_stamp is not None
+            and (now - self.wrench_stamp).nanoseconds / 1e9 < 0.5
+        )
+        decision = self.release_retreat.update(
+            elapsed_s=elapsed,
+            force_n=self._control_force(),
+            wrench_fresh=wrench_fresh,
+            operator_cmd_max=float(np.max(np.abs(self.twist_cmd))),
+        )
+        if decision.reason:
+            self.get_logger().warn(decision.reason)
+        if decision.finished or decision.v_z is None:
+            self._release_retreat_started = None
+            return None
+        if not self._release_retreat_announced:
+            self._release_retreat_announced = True
+        return np.array([0.0, 0.0, decision.v_z, 0.0, 0.0, 0.0])
+
     def _apply_force_regulation(self, twist: np.ndarray) -> np.ndarray:
         """접촉 프로빙에서 침투축을 로봇이 잡는다.
 
@@ -1270,10 +1321,17 @@ class UsDiffIkNode(Node):
             self.retreat_started = None
             self._retreat_gave_up = False
             self._force_hold_announced = False
-            twist = self._clamp(self.twist_cmd) * self._hold_fade(now)
-            twist = self._remap_twist(twist)
-            twist = self._apply_force_regulation(twist)
-            self.retreat_pub.publish(Bool(data=False))
+            release = self._release_retreat_step(now)
+            if release is not None:
+                # 후퇴는 조작자 의도가 아니라 프로브 −z 라는 기하학적 정의이므로
+                # _remap_twist 를 태우지 않는다 (워치독 후퇴와 같은 규약).
+                twist = release
+                self.retreat_pub.publish(Bool(data=True))
+            else:
+                twist = self._clamp(self.twist_cmd) * self._hold_fade(now)
+                twist = self._remap_twist(twist)
+                twist = self._apply_force_regulation(twist)
+                self.retreat_pub.publish(Bool(data=False))
 
         try:
             joint_velocity, error = self.solver.solve_with_diagnostics(

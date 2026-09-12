@@ -1,0 +1,297 @@
+% References for the ICRA draft.
+%
+% Every entry below was taken from a reference list this group already wrote:
+%   S  = docs/build_sonologger_manuscript.py  (Sonologger manuscript)
+%   F  = Paper/build_force_hold_abstract.py   (force hold validation abstract)
+%   L  = Paper/build_lateral_instruction_manuscript.py (U-Net / action token)
+% The source is noted on each entry. Entries carried over keep whatever the
+% earlier draft recorded; two of them were already marked TO BE CONFIRMED there
+% and are marked NEEDS-CHECK here.
+
+% --- Robotic ultrasound (S, F) ----------------------------------------------
+@article{jiang2023robotic,
+  title   = {Robotic Ultrasound Imaging: State-of-the-Art and Future Perspectives},
+  author  = {Jiang, Zhongliang and Salcudean, Septimiu E. and Navab, Nassir},
+  journal = {Medical Image Analysis},
+  volume  = {89},
+  pages   = {102878},
+  year    = {2023}
+}
+
+@article{priester2013robotic,
+  title   = {Robotic Ultrasound Systems in Medicine},
+  author  = {Priester, Alan M. and Natarajan, Shyam and Culjat, Martin O.},
+  journal = {IEEE Transactions on Ultrasonics, Ferroelectrics, and Frequency Control},
+  volume  = {60},
+  number  = {3},
+  pages   = {507--523},
+  year    = {2013}
+}
+
+@article{vonhaxthausen2021medical,
+  title   = {Medical Robots for Ultrasound Imaging: Current Systems and Future Trends},
+  author  = {von Haxthausen, Felix and B{\"o}ttger, Sven and Wulff, Daniel and Hagenah, Jannis and Garc{\'i}a-V{\'a}zquez, Ver{\'o}nica and Ipsen, Svenja},
+  journal = {Current Robotics Reports},
+  volume  = {2},
+  pages   = {55--71},
+  year    = {2021}
+}
+
+@article{li2021overview,
+  title   = {An Overview of Systems and Techniques for Autonomous Robotic Ultrasound Acquisitions},
+  author  = {Li, Keyu and Xu, Yangxin and Meng, Max Q.-H.},
+  journal = {IEEE Transactions on Medical Robotics and Bionics},
+  volume  = {3},
+  number  = {2},
+  pages   = {510--524},
+  year    = {2021}
+}
+
+% --- Force control and confidence driven servoing (F) ------------------------
+@article{hennersperger2017towards,
+  title   = {Towards MRI-Based Autonomous Robotic US Acquisitions: A First Feasibility Study},
+  author  = {Hennersperger, Christoph and Fuerst, Bernhard and Virga, Salvatore and others},
+  journal = {IEEE Transactions on Medical Imaging},
+  volume  = {36},
+  number  = {2},
+  pages   = {538--548},
+  year    = {2017}
+}
+
+@article{gilbertson2015force,
+  title   = {Force and Position Control System for Freehand Ultrasound},
+  author  = {Gilbertson, Matthew W. and Anthony, Brian W.},
+  journal = {IEEE Transactions on Robotics},
+  volume  = {31},
+  number  = {4},
+  pages   = {835--849},
+  year    = {2015}
+}
+
+@article{chatelain2017confidence,
+  title   = {Confidence-Driven Control of an Ultrasound Probe},
+  author  = {Chatelain, Pierre and Krupa, Alexandre and Navab, Nassir},
+  journal = {IEEE Transactions on Robotics},
+  volume  = {33},
+  number  = {6},
+  pages   = {1410--1424},
+  year    = {2017}
+}
+
+% --- Learning from demonstration, action chunking, hand held capture (S) -----
+@inproceedings{zhao2023act,
+  title     = {Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware},
+  author    = {Zhao, Tony Z. and Kumar, Vikash and Levine, Sergey and Finn, Chelsea},
+  booktitle = {Robotics: Science and Systems (RSS)},
+  year      = {2023}
+}
+
+@inproceedings{chi2024umi,
+  title     = {Universal Manipulation Interface: In-the-Wild Robot Teaching Without In-the-Wild Robots},
+  author    = {Chi, Cheng and Xu, Zhenjia and Pan, Chuer and Cousineau, Eric and Burchfiel, Benjamin and Feng, Siyuan and Tedrake, Russ and Song, Shuran},
+  booktitle = {Robotics: Science and Systems (RSS)},
+  year      = {2024}
+}
+
+@article{argall2009survey,
+  title   = {A Survey of Robot Learning from Demonstration},
+  author  = {Argall, Brenna D. and Chernova, Sonia and Veloso, Manuela and Browning, Brett},
+  journal = {Robotics and Autonomous Systems},
+  volume  = {57},
+  number  = {5},
+  pages   = {469--483},
+  year    = {2009}
+}
+
+@article{ravichandar2020recent,
+  title   = {Recent Advances in Robot Learning from Demonstration},
+  author  = {Ravichandar, Harish and Polydoros, Athanasios S. and Chernova, Sonia and Billard, Aude},
+  journal = {Annual Review of Control, Robotics, and Autonomous Systems},
+  volume  = {3},
+  pages   = {297--330},
+  year    = {2020}
+}
+
+% --- Freehand ultrasound without external tracking (S) -----------------------
+@article{prager1999stradx,
+  title   = {Stradx: Real-Time Acquisition and Visualization of Freehand Three-Dimensional Ultrasound},
+  author  = {Prager, Richard W. and Gee, Andrew and Berman, Laurence},
+  journal = {Medical Image Analysis},
+  volume  = {3},
+  number  = {2},
+  pages   = {129--140},
+  year    = {1999}
+}
+
+@article{housden2007sensorless,
+  title   = {Sensorless Reconstruction of Unconstrained Freehand 3D Ultrasound Data},
+  author  = {Housden, R. James and Treece, Graham M. and Gee, Andrew H. and Prager, Richard W.},
+  journal = {Ultrasound in Medicine and Biology},
+  volume  = {33},
+  number  = {3},
+  pages   = {408--419},
+  year    = {2007}
+}
+
+@article{prevost2018freehand,
+  title   = {3D Freehand Ultrasound Without External Tracking Using Deep Learning},
+  author  = {Prevost, Raphael and Salehi, Mehrdad and Jagoda, Simon and Kumar, Navneet and Sprung, Julian and Ladikos, Alexander and Bauer, Robert and Zettinig, Oliver and Wein, Wolfgang},
+  journal = {Medical Image Analysis},
+  volume  = {48},
+  pages   = {187--202},
+  year    = {2018}
+}
+
+% --- Inertial sensing, ZUPT, magnetic disturbance (S) ------------------------
+@inproceedings{madgwick2011estimation,
+  title     = {Estimation of IMU and MARG Orientation Using a Gradient Descent Algorithm},
+  author    = {Madgwick, Sebastian O. H. and Harrison, Andrew J. L. and Vaidyanathan, Ravi},
+  booktitle = {IEEE International Conference on Rehabilitation Robotics (ICORR)},
+  pages     = {1--7},
+  year      = {2011}
+}
+
+@article{foxlin2005pedestrian,
+  title   = {Pedestrian Tracking with Shoe-Mounted Inertial Sensors},
+  author  = {Foxlin, Eric},
+  journal = {IEEE Computer Graphics and Applications},
+  volume  = {25},
+  number  = {6},
+  pages   = {38--46},
+  year    = {2005}
+}
+
+@article{skog2010zerovelocity,
+  title   = {Zero-Velocity Detection: An Algorithm Evaluation},
+  author  = {Skog, Isaac and H{\"a}ndel, Peter and Nilsson, John-Olof and Rantakokko, Jouni},
+  journal = {IEEE Transactions on Biomedical Engineering},
+  volume  = {57},
+  number  = {11},
+  pages   = {2657--2666},
+  year    = {2010}
+}
+
+@article{devries2009magnetic,
+  title   = {Magnetic Distortion in Motion Labs, Implications for Validating Inertial Magnetic Sensors},
+  author  = {de Vries, W. H. K. and Veeger, H. E. J. and Baten, C. T. M. and van der Helm, F. C. T.},
+  journal = {Gait and Posture},
+  volume  = {29},
+  number  = {4},
+  pages   = {535--541},
+  year    = {2009}
+}
+
+@article{sabatini2011estimating,
+  title   = {Estimating Three-Dimensional Orientation of Human Body Parts by Inertial/Magnetic Sensing},
+  author  = {Sabatini, Angelo Maria},
+  journal = {Sensors},
+  volume  = {11},
+  number  = {2},
+  pages   = {1489--1525},
+  year    = {2011}
+}
+
+% --- Segmentation and bladder ultrasound (L) ---------------------------------
+@inproceedings{ronneberger2015unet,
+  title     = {U-Net: Convolutional Networks for Biomedical Image Segmentation},
+  author    = {Ronneberger, Olaf and Fischer, Philipp and Brox, Thomas},
+  booktitle = {Medical Image Computing and Computer-Assisted Intervention (MICCAI)},
+  series    = {LNCS},
+  volume    = {9351},
+  pages     = {234--241},
+  year      = {2015},
+  publisher = {Springer}
+}
+
+@article{saini2026bwsnet,
+  title   = {BWS-Net: An Optimal Deep Learning Architecture for the Anterior Bladder Wall Segmentation Using Ultrasound Imaging},
+  author  = {Saini, Manik and Jiang, Yun and Gangopadhyay, Tapabrata and Rosen, Daniel P. and Alizad, Azra and Fatemi, Mostafa},
+  journal = {IEEE Journal of Biomedical and Health Informatics},
+  year    = {2026},
+  doi     = {10.1109/JBHI.2026.3675965}
+}
+
+@article{song2023memory,
+  title   = {Memory-Efficient Low-Compute Segmentation Algorithms for Bladder-Monitoring Smart Ultrasound Devices},
+  author  = {Song, Zhiyu and Asiedu, Michael and Wang, Shan and Li, Qian and Ozturk, Arinc and Mittal, Vinay and Schoen Jr., Scott and Ramaswamy, Sheila and Pierce, Theodore T. and Samir, Anthony E. and Eldar, Yonina C. and Chandrakasan, Anantha and Kumar, Viksit},
+  journal = {Scientific Reports},
+  volume  = {13},
+  pages   = {16450},
+  year    = {2023}
+}
+
+@article{hsu2026active,
+  title   = {Active Guidance in Ultrasound Bladder Scanning Using Reinforcement Learning},
+  author  = {Hsu, Hsiang-Ling and Zahiri, Mohsen and Li, Guang Yang and Al Mukaddim, Rashid and Lee, Hyunwoo and Wilson, Mark G. and Grube, Jonathan and Schmidt, Sabine and Ghoshal, Goutam and Raju, Balasundar},
+  journal = {Scientific Reports},
+  volume  = {16},
+  pages   = {5273},
+  year    = {2026}
+}
+
+@article{solismartin2026pfus1,
+  title   = {PFUS1: Premier Pelvic Floor Ultrasound Segmentation Dataset. A Resource for Advancing Research},
+  author  = {Sol{\'i}s-Mart{\'i}n, David and Sainz, Jos{\'e} Antonio and Gal{\'a}n-P{\'a}ez, Juan and Borrego-D{\'i}az, Joaqu{\'i}n and Garc{\'i}a-Mejido, Jos{\'e} Antonio},
+  journal = {Data in Brief},
+  volume  = {64},
+  pages   = {112346},
+  year    = {2026}
+}
+
+@article{garciamejido2024applicability,
+  title   = {Applicability of Deep Learning to Dynamically Identify the Different Organs of the Pelvic Floor in the Midsagittal Plane},
+  author  = {Garc{\'i}a-Mejido, Jos{\'e} Antonio and Sol{\'i}s-Mart{\'i}n, David and Mart{\'i}n-Mor{\'a}n, Mar{\'i}a and Fern{\'a}ndez-Conde, Cristina and Fern{\'a}ndez-Palac{\'i}n, Fernando and Sainz-Bueno, Jos{\'e} Antonio},
+  journal = {International Urogynecology Journal},
+  volume  = {35},
+  number  = {12},
+  pages   = {2285--2293},
+  year    = {2024}
+}
+
+% --- Clinical background (L, S) ----------------------------------------------
+@article{jang2024selftraining,
+  title   = {Effect of Self-Training Using Virtual Reality Head-Mounted Display Simulator on the Acquisition of Holmium Laser Enucleation of the Prostate Surgical Skills},
+  author  = {Jang, Taejin and Kong, Hyoun-Joong and Baek, Chanwoo and Kim, Jaeyoung and Choo, Min Soo and Oh, Seung-June},
+  journal = {International Neurourology Journal},
+  volume  = {28},
+  number  = {2},
+  pages   = {138--146},
+  year    = {2024}
+}
+
+@incollection{trinkler2019bladder,
+  title     = {Ultrasound of the Urinary Bladder},
+  author    = {Trinkler, Friedrich and Dietrich, Christoph F.},
+  booktitle = {EFSUMB Course Book},
+  publisher = {European Federation of Societies for Ultrasound in Medicine and Biology},
+  year      = {2019}
+}
+
+@article{robles2025holep,
+  author  = {Robles, J. and others},
+  title   = {NEEDS-CHECK: full author list, title, volume and pages},
+  journal = {Journal of Endourology},
+  year    = {2025},
+  note    = {Carried over as TO BE CONFIRMED from the Sonologger manuscript}
+}
+
+@article{tzou2020urology,
+  author  = {Tzou, D. and others},
+  title   = {NEEDS-CHECK: full author list, title, volume and pages},
+  journal = {Urology},
+  year    = {2020},
+  note    = {Carried over as TO BE CONFIRMED from the Sonologger manuscript}
+}
+
+% --- Phantom (author supplied, 2026-09-12) -----------------------------------
+% Expand the author list before submission; the citation as given ends in "et al".
+@article{fernandez2024phantom,
+  title   = {A Dynamic Ultrasound Phantom with Tissue-Mimicking Mechanical and Acoustic Properties},
+  author  = {Fernandez, Sophia V. and Kim, Jin-Hoon and Sadat, David and others},
+  journal = {Advanced Science},
+  volume  = {11},
+  number  = {19},
+  pages   = {2400271},
+  year    = {2024},
+  doi     = {10.1002/advs.202400271}
+}

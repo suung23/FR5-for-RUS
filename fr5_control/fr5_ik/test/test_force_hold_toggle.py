@@ -60,6 +60,9 @@ class _Logger:
 
 class _Switch:
     in_contact_probing = True
+    # gate_axes 가 이것으로 정책 통로를 가른다 (2026-09-11 신설). 껍데기에 없으면
+    # 힘 조절 경로 전체가 AttributeError 로 죽는데, 그것은 이 파일이 재는 것이 아니다.
+    policy_requested = False
 
 
 class _Node:

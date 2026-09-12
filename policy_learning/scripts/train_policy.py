@@ -36,7 +36,8 @@ def main() -> int:
     history = trainer.fit()
     last = history[-1] if history else {}
     print(f"\n완료: {trainer.out}  best {cfg.train.checkpoint_metric} {trainer.best:.4f}")
-    keys = ["val/select_nmae", "val/leak_gap_mm", "val/sigma_net_y_mm", "val/qual",
+    keys = ["val/select_nmae", "val/leak_worst_sigma",
+            *[f"val/leak_{n}_sigma" for n in AXIS_NAMES], "val/qual",
             *[f"val/select_mae_{n}_{u}" for n, u in zip(AXIS_NAMES, AXIS_UNITS)],
             *[f"val/mae_{n}_{u}" for n, u in zip(AXIS_NAMES, AXIS_UNITS)],
             "val/vy_sign_acc", "val/mode_collapse_vy_std", "val/mode_margin", "val/select_vy_sign_acc"]

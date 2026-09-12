@@ -41,7 +41,8 @@ def test_finds_the_peak_from_a_blind_start():
     assert q_end > q_start + 0.3, (q_start, q_end)
     assert q_end > 0.9, q_end
     end = traj[-1][1]
-    assert np.linalg.norm(end - np.array([6.0, -4.0])) < 4.0, end
+    # 봉우리 근처의 분해능은 걸음 크기가 정한다 — 허용치를 걸음에 맞춘다
+    assert np.linalg.norm(end - np.array([6.0, -4.0])) < max(4.0, 1.5 * s.step_deg), end
 
 
 def test_steps_back_when_quality_drops():
@@ -52,7 +53,7 @@ def test_steps_back_when_quality_drops():
     assert UNDO in phases, "봉우리에 있는데 되돌림이 한 번도 없었다"
     # 되돌림 뒤에는 출발 자세 근처로 돌아와 있어야 한다
     after = [a for _, a, _, p in traj if p == MOVE]
-    assert max(np.linalg.norm(a) for a in after) < 4.0
+    assert max(np.linalg.norm(a) for a in after) < 1.5 * s.step_deg
 
 
 def test_tries_every_direction_then_dwells():
@@ -63,10 +64,26 @@ def test_tries_every_direction_then_dwells():
 
 
 def test_noise_below_min_gain_is_not_taken_as_improvement():
-    """Q 잡음(실측 0.0004 수준)으로 방향을 바꾸면 안 된다."""
+    """Q 잡음으로 방향을 바꾸면 안 된다.
+
+    잡음 크기는 실기 실측이다 (2026-09-12 eval_v1): 프로브가 사실상 멈춰 있을 때
+    (1.3 s 동안 자세 변화 0.5° 미만) |ΔQ| 가 중앙 0.001 · 75 %p 0.007 이었다.
+    기본 ``min_gain`` 0.02 는 그 위에 있다.
+    """
     rng = np.random.default_rng(0)
-    s, traj = _run(lambda ang: 0.5 + rng.normal(0, 0.0005), n_ticks=400, min_gain=0.01)
+    s, traj = _run(lambda ang: 0.5 + rng.normal(0, 0.005), n_ticks=400)
     assert DWELL in [p for _, _, _, p in traj], "잡음을 개선으로 읽어 계속 전진했다"
+
+
+def test_defaults_keep_the_step_above_the_measured_noise():
+    """기본 걸음이 만드는 Q 변화가 정지 잡음보다 확실히 커야 한다 (2026-09-12 실측).
+
+    dQ/dθ ≈ 0.005 /° · 정지 잡음 75 %p = 0.007. 둘 중 하나를 되돌리면 여기서 걸린다.
+    """
+    s = HillClimbSearch()
+    expected_gain = 0.005 * s.step_deg
+    assert expected_gain > 3 * 0.007, f"걸음 {s.step_deg}° 는 잡음에 묻힌다"
+    assert 0.007 < s.min_gain < expected_gain, s.min_gain
 
 
 def test_blocked_direction_is_undone_and_abandoned():
@@ -188,3 +205,44 @@ def test_excursion_cap_stops_every_commanding_condition():
     # 멈춰도 기록은 이어져야 한다 — 얼마나 갔는지가 곧 그 조건의 결과다
     stop = src[src.index('if self.condition in ("hold", "expert") or too_far:'):]
     assert "self.rows.append" in stop, "멈춘 tick 이 기록에서 빠지면 안 된다"
+
+
+# --- 걸음 좁히기 (2026-09-12) -------------------------------------------------
+
+def test_step_narrows_at_a_local_peak():
+    """한 바퀴 다 실패하면 걸음을 좁힌다 — 봉우리를 곱게 잡기 위해."""
+    s = HillClimbSearch()
+    _run(lambda ang: 0.5, n_ticks=600)          # 평평한 지형: 모든 방향 실패
+    s2, _ = _run(lambda ang: 0.5, n_ticks=600)
+    assert s2.current_step < s.step_deg, "지역 최고점인데 걸음이 그대로다"
+    assert s2.current_step >= s2.step_min_deg, "바닥 아래로 줄었다 — 잡음에 묻힌다"
+
+
+def test_step_returns_to_coarse_when_the_view_is_lost():
+    """Q 가 크게 떨어지면 거친 걸음으로 되돌아간다 — 좁은 걸음으로는 못 찾는다.
+
+    되돌림은 **떨어진 직후**를 본다. 계속 평평하면 다시 좁혀지는 것이 정상이다.
+    """
+    s = HillClimbSearch()
+    t, q = 0.0, 0.9
+    for _ in range(600):                         # 평평한 봉우리에서 걸음이 좁아진다
+        s.update(t, q); t += 0.2
+    narrowed = s.current_step
+    assert narrowed < s.step_deg, narrowed
+    q = 0.2                                      # 방광이 시야에서 벗어난다
+    for _ in range(40):
+        s.update(t, q); t += 0.2
+        if s.current_step == pytest.approx(s.step_deg):
+            return
+    raise AssertionError(f"시야를 잃었는데 걸음이 {s.current_step}° 로 좁은 채다")
+
+
+def test_peak_is_resolved_more_finely_than_the_coarse_step():
+    """좁히기가 봉우리를 더 곱게 잡는지 — 끝 자세와 봉우리의 거리로 본다."""
+    peak = _gauss(center=(0.0, 0.0), width=8.0)
+    fine, tf = _run(peak, start=(-10.0, 10.0), n_ticks=6000)
+    _, tc = _run(peak, start=(-10.0, 10.0), n_ticks=6000, step_min_deg=5.0)
+    # 마지막 20 % 구간에서 봉우리까지의 평균 거리 — 끝점 하나는 걸음 위상에 좌우된다
+    tail = lambda tr: np.mean([np.linalg.norm(a) for _, a, _, _ in tr[int(len(tr) * 0.8):]])
+    assert fine.current_step < 5.0, fine.current_step
+    assert tail(tf) < tail(tc), (tail(tf), tail(tc))

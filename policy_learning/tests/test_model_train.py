@@ -243,7 +243,9 @@ def test_checkpoint_metric_is_leak_immune_and_beta_adapts(built_dataset, tmp_pat
     tr.fit()
     rows = [json.loads(l) for l in (tmp_path / "run" / "metrics.jsonl").read_text().splitlines()]
     for key in ("val/select_nmae", "val/select_mae_x_mm", "val/select_mae_z_mm",
-                "val/select_mae_thy_deg", "val/sigma_net_y_mm"):
+                "val/select_mae_thy_deg", "val/sigma_net_y_mm",
+                "val/leak_thy_sigma", "val/leak_worst_sigma", "val/spread_thy_deg",
+                "val/select_dir_thy", "val/select_dir_err"):
         assert key in rows[-1] and np.isfinite(rows[-1][key]), key
     # σ_net,y 는 라벨 설정에서 나온다: 0.7 · τ^1.5, τ = k / f_p
     tau = cfg.timing.chunk_steps / cfg.timing.policy_hz
@@ -261,20 +263,23 @@ def test_checkpoint_metric_is_leak_immune_and_beta_adapts(built_dataset, tmp_pat
     assert tr2.beta_mult == pytest.approx(tr.beta_mult)
 
     # 조정 규칙 자체를 직접 검증한다 (합성 데이터의 우연에 기대지 않는다)
+    # 누설은 축별 leak_<축>_sigma (라벨 퍼짐 배수) 로 준다 — leak_gap_mm 은 척도가 달라 안 쓴다.
     sig, rate = 1.0, cfg.train.beta_adapt_rate
     tr.epoch = max(1, cfg.train.beta_warmup_epochs)
     base = {"sigma_net_y_mm": sig, "mode_collapse_vy_std": 0.01 * sig}
+    over = 2.0 * cfg.train.beta_adapt_target_sigma               # 목표를 넘는 누설
+    under = 0.1 * cfg.train.beta_adapt_target_sigma              # 0.5×목표 아래 = 여유
 
     tr.beta_mult = 1.0                                          # 누설 → 좁힌다
-    tr.adapt_beta({**base, "leak_gap_mm": 5.0 * sig, "select_vy_sign_acc": 0.9})
+    tr.adapt_beta({**base, "leak_thy_sigma": over, "select_vy_sign_acc": 0.9})
     assert tr.beta_mult == pytest.approx(rate)
 
     tr.beta_mult = 1.0                                          # 선택기가 우연 수준이면 넓히지 않는다
-    tr.adapt_beta({**base, "leak_gap_mm": 0.0, "select_vy_sign_acc": 0.5})
+    tr.adapt_beta({**base, "leak_thy_sigma": under, "select_vy_sign_acc": 0.5})
     assert tr.beta_mult == pytest.approx(1.0)
 
     tr.beta_mult = 1.0                                          # 선택기가 쓸 만하면 최소 β 쪽으로
-    tr.adapt_beta({**base, "leak_gap_mm": 0.0, "select_vy_sign_acc": 0.9})
+    tr.adapt_beta({**base, "leak_thy_sigma": under, "select_vy_sign_acc": 0.9})
     assert tr.beta_mult == pytest.approx(1.0 / rate)
 
 

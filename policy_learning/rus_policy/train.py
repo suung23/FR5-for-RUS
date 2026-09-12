@@ -2,9 +2,17 @@
 
 진단 (§5.3g · §6 "조용한 실패"):
   * mode_collapse_vy_std  검증 관측에서 z 를 M 개 뽑아 v_y 순변위의 표준편차. 0 으로 가면 붕괴.
-  * leak_gap_mm           select_mae_y (사전분포 z) − mae_y (사후분포 z). σ_net 을 크게 넘으면 **누설** —
-                          인코더가 라벨을 z 로 흘려보내고 디코더가 관측을 무시한다 (§5.3g 2026-09-08).
-                          β 선택 규칙: gap ≤ σ_net 이면서 vy_std > 0 인 최소 β.
+  * leak_<축>_sigma       (select_mae − mae) / std(라벨_축) — 사전분포 경로와 사후분포 경로의 오차 차이를
+                          축별 **라벨 퍼짐**으로 정규화한 값. 1 에 가까우면 그 축은 관측→행동 정보가
+                          **z 로만** 흘렀다는 뜻이다 (인코더가 라벨을 흘려보내고 디코더가 관측을 무시).
+                          라벨 불확도(batch sigma_net, 회전 0.1°)로 정규화하면 안 된다 — 목표 1.0 이
+                          "사전분포 경로가 사후분포 경로를 0.1° 안에서 따라잡아라" 가 되어 도달할 수 없고,
+                          제어기가 어느 축을 보든 β 를 상한까지 밀기만 한다 (2026-09-12).
+  * leak_worst_sigma      train.leak_axes 가 고른 축 집합(기본 회전 3 축)의 최악값. β 제어기 기준.
+                          β 선택 규칙: leak_worst ≤ beta_adapt_target_sigma 이면서 vy_std > 0 인 최소 β.
+  * leak_gap_mm           옛 규약 (y 병진 하나, mm). 호환을 위해 계속 기록만 한다 — **기준으로 쓰지 않는다.**
+                          2026-09-12 실측에서 y 만 0.35σ 인데 θy 0.84σ · x 0.85σ 였다. y 는 가속도
+                          이중적분 라벨이라 흘려보낼 신호가 적어 구조적으로 작게 나온다.
   * KL 워밍업             β 를 train.beta_warmup_epochs 동안 0 → loss.beta_kl 로 올린다.
   * mode_margin           Q̂ 로 고른 모드와 반대 부호 모드의 점수 차. 잡음 수준이면 대칭 붕괴 (L11).
   * vy_sign_acc           |Δy| > σ 인 샘플에서 v_y 부호 정확도.
@@ -34,6 +42,7 @@ from .config import PolicyConfig, save_config
 from .dataset import PolicyH5Dataset
 from .losses import compute_loss
 from .model import AXIS_NAMES, AXIS_UNITS, Y_AXIS, ActPolicy, build_policy, count_parameters
+from .perception import STATE_FEATURE_NAMES
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +82,37 @@ def make_loaders(cfg: PolicyConfig, dataset_path: Optional[Path] = None
     tl = DataLoader(tr, batch_size=cfg.train.batch_size, shuffle=True, drop_last=len(tr) > cfg.train.batch_size, **kw)
     vl = DataLoader(va, batch_size=cfg.train.batch_size, shuffle=False, **kw) if len(va) else None
     return tl, vl, tr, va if len(va) else None
+
+
+#: 누설을 어느 축에서 볼지. 병진은 라벨이 이중적분 오차 지배라 기준으로 못 쓴다 (config 참조).
+LEAK_AXIS_SETS = {"rot": ("thx", "thy", "thz"), "all": AXIS_NAMES, "y": ("y",)}
+
+
+#: 방광이 이만큼은 치우쳐야 "어느 쪽" 이 뜻을 가진다 (2026-09-12 분석과 같은 문턱).
+DX_OFFSET_MIN = 0.05
+DX_FEATURE = STATE_FEATURE_NAMES.index("centroid_dx")
+HAS_MASK_FEATURE = STATE_FEATURE_NAMES.index("has_mask")
+
+
+def _spearman(x: np.ndarray, y: np.ndarray) -> float:
+    """순위상관. 표본이 모자라거나 한쪽이 상수면 NaN."""
+    if len(x) < 3 or np.std(x) == 0 or np.std(y) == 0:
+        return float("nan")
+    rx, ry = np.argsort(np.argsort(x)), np.argsort(np.argsort(y))
+    return float(np.corrcoef(rx, ry)[0, 1])
+
+
+def _masked_mean(ok: torch.Tensor, mask: torch.Tensor) -> float:
+    """``mask`` 가 참인 곳의 평균. 하나도 없으면 NaN (그 배치는 집계에서 빠진다)."""
+    return ok[mask].float().mean().item() if bool(mask.any()) else float("nan")
+
+
+def _worst_leak(res: dict[str, float], which: str) -> Optional[tuple[str, float]]:
+    """``leak_<축>_sigma`` 중 가장 큰 것 → (축 이름, 값). 후보가 없으면 ``None``."""
+    got = [(nm, res[f"leak_{nm}_sigma"])
+           for nm in LEAK_AXIS_SETS.get(which, LEAK_AXIS_SETS["rot"])
+           if np.isfinite(res.get(f"leak_{nm}_sigma", np.nan))]
+    return max(got, key=lambda kv: kv[1]) if got else None
 
 
 class Trainer:
@@ -194,29 +234,33 @@ class Trainer:
         if self.epoch < max(1, int(t.beta_warmup_epochs)):    # 워밍업 중에는 건드리지 않는다
             return
         sig = va.get("sigma_net_y_mm")
-        gap = va.get("leak_gap_mm")
         vy = va.get("mode_collapse_vy_std")
-        if sig is None or gap is None or not np.isfinite(sig) or not np.isfinite(gap) or sig <= 0:
+        # 누설은 **σ 로 정규화한 최악 축**으로 본다 (t.leak_axes, 기본 회전 3 축). 옛 규약처럼
+        # y 병진 하나만 보면 그 축이 이중적분 라벨이라 누설이 구조적으로 작게 나와, 정작 신호가
+        # 있는 회전 축이 통째로 새는 동안 제어기가 β 를 계속 풀어 준다 (2026-09-12).
+        worst = _worst_leak(va, t.leak_axes)
+        if worst is None:
             return
-        target = t.beta_adapt_target_sigma * sig
+        leak_axis, gap_sigma = worst
+        target = t.beta_adapt_target_sigma
         before = self.beta_mult
         acc = va.get("select_vy_sign_acc")
         selector_ok = acc is not None and np.isfinite(acc) and acc > t.beta_adapt_selector_acc
-        if gap > target:                                              # 누설 — 좁힌다 (최우선)
+        if gap_sigma > target:                                        # 누설 — 좁힌다 (최우선)
             self.beta_mult *= t.beta_adapt_rate
         elif not selector_ok:
             pass                    # Q̂ 가 못 고르는 동안은 z 를 넓혀 봐야 실행시 오차만 커진다
         elif vy is not None and np.isfinite(vy) and vy < t.beta_adapt_collapse_sigma * sig:
             self.beta_mult /= t.beta_adapt_rate                       # 붕괴 — 넓힌다
-        elif gap < 0.5 * target:                                      # 여유 — 최소 β 쪽으로
+        elif gap_sigma < 0.5 * target:                                # 여유 — 최소 β 쪽으로
             self.beta_mult /= t.beta_adapt_rate
         lo = t.beta_min / self.cfg.loss.beta_kl
         hi = t.beta_max / self.cfg.loss.beta_kl
         self.beta_mult = float(np.clip(self.beta_mult, lo, hi))
         if self.beta_mult != before:
-            logger.info("    β %.3f → %.3f  (gap %.2f / 목표 %.2fmm, vy_std %s)",
+            logger.info("    β %.3f → %.3f  (누설 최악 %s %.2fσ / 목표 %.2fσ, vy_std %s)",
                         self.cfg.loss.beta_kl * before, self.cfg.loss.beta_kl * self.beta_mult,
-                        gap, target, "n/a" if vy is None else f"{vy:.2f}")
+                        leak_axis, gap_sigma, target, "n/a" if vy is None else f"{vy:.2f}")
 
     def train_epoch(self) -> dict[str, float]:
         self.model.train()
@@ -254,7 +298,9 @@ class Trainer:
         self.model.eval()
         agg: dict[str, list[float]] = {}
         spreads, margins, sel_sign = [], [], []
-        sel_ae, sel_nae, sig_y = [], [], []
+        sel_ae, sel_nae, sig_y, lab_net, sel_dir = [], [], [], [], []
+        sel_net, obs_dx, obs_seen = [], [], []
+        dir_thr = self._dir_threshold(loader).to(self.device)
         for batch in loader:
             batch = to_device(batch, self.device)
             out = self.model(batch, use_posterior=True)
@@ -278,9 +324,27 @@ class Trainer:
             sel_ae.append(sel_ae_b.mean(0).cpu().numpy())
             sel_nae.append((sel_ae_b / batch["sigma_net"].clamp_min(1e-6)).mean().item())
             sig_y.append(batch["sigma_net"][:, 1].cpu().numpy())
+            # 누설은 **라벨 퍼짐**으로 정규화한다 — sigma_net 은 라벨 불확도(회전 0.1°)라
+            # 그 단위로 재면 목표 1.0σ 가 "사전분포 경로가 사후분포 경로를 0.1° 안에서 따라잡아라"
+            # 가 되어 도달할 수 없고, 제어기는 어느 축을 보든 β 를 상한까지 밀기만 한다.
+            # 퍼짐으로 재면 0~1 이 "신호의 몇 할을 잃었나" 가 된다 (2026-09-12).
+            lab_net.append(P_lab[:, -1].cpu().numpy())
             big = P_lab[:, -1, Y_AXIS].abs() > batch["sigma_net"][:, Y_AXIS]
             if big.any():
                 sel_sign.append((torch.sign(sel["net"][big, Y_AXIS]) == torch.sign(P_lab[big, -1, Y_AXIS])).float().mean().item())
+            # 축별 **방향** 정확도. MAE 로는 방향 학습이 안 보인다 — centroid_dx→θy 선형 프로브가
+            # test 상관 0.575 를 내면서 MAE 는 2.36→2.37 로 제자리였다 (2026-09-12). 크기는 대부분
+            # 0 근처 표본이 정하고, 방향은 크게 움직인 표본에만 있다. 그래서 |라벨| 이 큰 쪽만 본다.
+            ok = torch.sign(sel["net"]) == torch.sign(P_lab[:, -1])
+            sel_dir.append(np.stack([
+                _masked_mean(ok[:, i], P_lab[:, -1, i].abs() > dir_thr[i]) for i in range(len(AXIS_NAMES))]))
+            # 관측→행동 규칙을 직접 잰다: 방광이 치우친 쪽과 고른 행동의 상관.
+            # 부호 정확도만으로는 안 된다 — 시연자 라벨은 자기상관이 세서(직전 chunk 부호로
+            # 찍으면 θy 93 % · θx 83 %) "직전 움직임 이어가기" 만으로 높은 점수가 나온다.
+            # 이 상관은 시연자 +0.665 (θy) 가 목표값이고, 지금 모델은 +0.02 다 (2026-09-12).
+            sel_net.append(sel["net"].cpu().numpy())
+            obs_dx.append(batch["state"][:, -1, DX_FEATURE].cpu().numpy())
+            obs_seen.append((batch["state"][:, -1, HAS_MASK_FEATURE] > 0.5).cpu().numpy())
         res = {k: float(np.mean(v)) for k, v in agg.items()}
         if spreads:
             res["mode_collapse_vy_std"] = float(np.mean(spreads))
@@ -297,8 +361,44 @@ class Trainer:
         if sel_sign:
             res["select_vy_sign_acc"] = float(np.mean(sel_sign))
         if "select_mae_y_mm" in res and "mae_y_mm" in res:
-            res["leak_gap_mm"] = res["select_mae_y_mm"] - res["mae_y_mm"]
+            res["leak_gap_mm"] = res["select_mae_y_mm"] - res["mae_y_mm"]   # 옛 규약 (호환용)
+        if lab_net:
+            spread = np.concatenate(lab_net).std(axis=0)
+            for i, (nm, un) in enumerate(zip(AXIS_NAMES, AXIS_UNITS)):
+                res[f"spread_{nm}_{un}"] = float(spread[i])
+                a, c = res.get(f"mae_{nm}_{un}"), res.get(f"select_mae_{nm}_{un}")
+                if a is not None and c is not None and spread[i] > 0:
+                    res[f"leak_{nm}_sigma"] = float((c - a) / spread[i])
+            worst = _worst_leak(res, self.cfg.train.leak_axes)
+            if worst is not None:
+                res["leak_worst_sigma"] = worst[1]
+        if sel_dir:
+            d = np.nanmean(np.stack(sel_dir), axis=0)
+            for i, nm in enumerate(AXIS_NAMES):
+                if np.isfinite(d[i]):
+                    res[f"select_dir_{nm}"] = float(d[i])
+            axes = LEAK_AXIS_SETS.get(self.cfg.train.leak_axes, LEAK_AXIS_SETS["rot"])
+            got = [res[f"select_dir_{nm}"] for nm in axes if f"select_dir_{nm}" in res]
+            if got:
+                # 낮을수록 좋은 값으로 둔다 — checkpoint_metric 은 최솟값을 고른다.
+                res["select_dir_err"] = float(1.0 - np.mean(got))
+        if sel_net:
+            net, dx = np.concatenate(sel_net), np.concatenate(obs_dx)
+            keep = np.concatenate(obs_seen) & (np.abs(dx) > DX_OFFSET_MIN)
+            if keep.sum() >= 30:
+                for i, nm in enumerate(AXIS_NAMES):
+                    res[f"select_corr_dx_{nm}"] = _spearman(dx[keep], net[keep, i])
+                res["n_corr"] = float(keep.sum())
+                # 면내 규칙을 얼마나 배웠나. 시연자 +0.665 가 목표, 낮을수록 좋게 부호를 뒤집는다.
+                res["inplane_err"] = float(1.0 - res["select_corr_dx_thy"])
         return res
+
+    def _dir_threshold(self, loader: DataLoader) -> np.ndarray:
+        """방향을 셀 표본을 고르는 문턱 — 축별 라벨 퍼짐. 검증셋마다 한 번만 잰다."""
+        if getattr(self, "_dir_thr", None) is None:
+            lab = np.concatenate([b["P"][:, -1].numpy() for b in loader])
+            self._dir_thr = torch.from_numpy(lab.std(axis=0).astype(np.float32))
+        return self._dir_thr
 
     # ------------------------------------------------------------------ 전체
     def fit(self) -> list[dict[str, Any]]:

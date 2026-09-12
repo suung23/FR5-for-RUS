@@ -297,9 +297,9 @@ class ActPolicy(nn.Module):
         dev = batch["frames"].device
         if self.head_type == "discrete":
             out = self.forward(batch, use_posterior=False)
-            centers = self.bin_centers(dev)                                    # (3,n)
+            centers = self.bin_centers(dev)                                    # (6,n_bins)
             prob = out.logits.softmax(-1)
-            net = (prob * centers[None]).sum(-1)                               # 기대값 (B,3)
+            net = (prob * centers[None]).sum(-1)                               # 기대값 (B,6)
             idx = out.logits.argmax(-1)
             net_argmax = torch.gather(centers[None].expand(B, -1, -1), 2, idx[..., None]).squeeze(-1)
             ramp = torch.linspace(0, 1, self.k + 1, device=dev)[None, :, None]

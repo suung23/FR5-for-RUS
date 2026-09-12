@@ -25,8 +25,35 @@
 여섯 방향(±θx·±θy·±θz)을 다 해도 안 오르면 지역 최고점이다. ``dwell_s`` 만큼 쉬었다가 다시 훑는다 —
 팬텀이 변하면 최고점도 움직이므로 멈춰 있기만 하면 안 된다.
 
-Q 의 잡음은 작다 (프로브 정지 상태에서 0.6 s 평균의 창 간 변동 95 %p 0.0004). 2° 걸음이 만드는
-Q 변화는 0.05 남짓이라, ``min_gain`` 0.01 이면 잡음에 속지 않으면서 실제 변화를 잡는다.
+걸음 크기와 문턱은 실기 데이터로 정했다 (2026-09-12, eval_v1 15 에피소드 · 8975 표본)
+------------------------------------------------------------------------------------
+처음 값(2° · min_gain 0.01)은 **걸음 효과가 잡음에 묻혀** 제대로 돌지 않았다. 실측:
+
+    1.3 s 동안의 실제 자세 변화        |ΔQ| 중앙    75 %p
+      0.0~0.5°  (사실상 정지)            0.001      0.007
+      0.5~1.5°                           0.007      0.039
+      1.5~3.0°                           0.012      0.029
+
+즉 **dQ/dθ ≈ 0.005 /°** 이고, 프로브가 멈춰 있어도 Q 는 0.007 (75 %p) 만큼 저 혼자 움직인다.
+2° 걸음이 만드는 0.010 은 그 잡음과 거의 같아, 실제 탐색 170 걸음에서 걸음당 |ΔQ| 중앙이
+0.018 인데 멈춤 중 가짜 차이의 90 %p 가 0.077 이었다 — 판정의 상당수가 잡음이었다.
+
+**평균을 길게 잡아도 소용없다.** 창을 0.6 s 에서 4 s 로 늘려도 창 간 변동은 0.148 → 0.210 으로
+줄지 않는다 (수 초 규모의 실제 시야 변동이라 고주파 잡음이 아니다). A-B-A 대칭 비교로 선형
+드리프트를 상쇄해도 0.004 → 0.003 뿐이다 (간헐적 점프라 선형이 아니다). 남은 지렛대는
+**걸음을 키우는 것**뿐이다: 5° 면 기대 ΔQ 0.025 로 정지 잡음 75 %p(0.007) 의 3.5 배가 된다.
+
+``min_gain`` 0.02 는 정지 잡음 75 %p 위, 5° 걸음의 기대 효과 아래에 둔 값이다.
+
+걸음은 **찾을 때 거칠게, 봉우리에서 좁게**
+-------------------------------------------
+큰 걸음은 잡음을 이기지만 봉우리를 거칠게 잡는다 (가상 지형에서 2° 는 Q 0.97 까지, 5° 는
+0.85 까지). 평가가 "방광을 찾고 → 용적이 변하는 동안 유지" 라 둘 다 필요하다. 그래서
+
+  모든 방향이 실패하면 (지역 최고점)  걸음을 ``step_decay`` 배로 줄인다 (``step_min_deg`` 까지)
+  Q 가 최고점보다 ``reset_drop`` 넘게 떨어지면  시야가 바뀐 것이므로 거친 걸음으로 되돌린다
+
+``step_min_deg`` 3° 는 기대 효과 0.015 로 정지 잡음(0.007) 의 두 배 — 더 줄이면 잡음에 묻힌다.
 """
 
 from __future__ import annotations
@@ -64,12 +91,16 @@ class HillClimbSearch:
     """
 
     axes: Sequence[tuple[int, float]] = DEFAULT_AXES
-    step_deg: float = 2.0
+    step_deg: float = 5.0        # 2° 는 잡음에 묻혔다 — 위 표 참조
     rate_deg_s: float = 3.0
-    settle_s: float = 0.6
-    min_gain: float = 0.01
+    settle_s: float = 0.6        # 늘려도 창 간 변동이 안 줄어 그대로 둔다
+    min_gain: float = 0.02       # 정지 잡음 75 %p(0.007) 위
+    step_min_deg: float = 3.0    # 이보다 줄이면 걸음 효과가 잡음에 묻힌다
+    step_decay: float = 0.6      # 지역 최고점에서 걸음을 좁히는 배율
+    reset_drop: float = 0.15     # 최고점 대비 이만큼 떨어지면 거친 걸음으로 되돌린다
     dwell_s: float = 2.0
 
+    step: float = field(default=float("nan"), init=False)   # 지금 쓰는 걸음 [°]
     phase: str = field(default=MOVE, init=False)
     best_q: float = field(default=float("nan"), init=False)
     idx: int = field(default=0, init=False)          # 지금 시험 중인 방향
@@ -82,12 +113,17 @@ class HillClimbSearch:
 
     @property
     def move_s(self) -> float:
-        return self.step_deg / max(self.rate_deg_s, 1e-6)
+        return self.current_step / max(self.rate_deg_s, 1e-6)
+
+    @property
+    def current_step(self) -> float:
+        """지금 쓰는 걸음. ``reset`` 전에는 설정값."""
+        return self.step_deg if self.step != self.step else self.step
 
     def reset(self, t: float, q: float = float("nan")) -> None:
         self.phase, self._t0, self._samples = MOVE, t, []
         self.best_q, self.idx, self.n_fail, self.n_steps = q, 0, 0, 0
-        self.last_decision = ""
+        self.step, self.last_decision = float(self.step_deg), ""
 
     def _omega(self, sign: float) -> tuple[float, float, float]:
         out = [0.0, 0.0, 0.0]
@@ -124,6 +160,11 @@ class HillClimbSearch:
                 # 되돌아온 자리에서 다시 재서 기준을 새로 잡는다. 팬텀이 변하면 예전 최고값은
                 # 더 이상 그 자리의 값이 아니다 — 옛 값을 들고 있으면 영영 못 넘는다.
                 if measured == measured:
+                    if (self.best_q == self.best_q
+                            and measured < self.best_q - self.reset_drop):
+                        # 방광이 시야에서 크게 벗어났다 — 좁은 걸음으로는 못 돌아온다
+                        self.step = float(self.step_deg)
+                        self.n_fail = 0
                     self.best_q = measured
                 self._advance()
                 self._enter(DWELL if self.n_fail >= len(self.axes) else MOVE, t)
@@ -154,14 +195,17 @@ class HillClimbSearch:
         return self._omega(+1.0)
 
     def _advance(self) -> None:
-        """다음 방향으로. 실패가 한 바퀴를 채우면 지역 최고점이다."""
+        """다음 방향으로. 실패가 한 바퀴를 채우면 지역 최고점이다 — 걸음을 좁힌다."""
         self.n_fail += 1
         self.n_steps = 0
         self.idx = (self.idx + 1) % len(self.axes)
+        if self.n_fail >= len(self.axes):
+            self.step = max(self.step_min_deg, self.current_step * self.step_decay)
 
     def describe(self) -> str:
         axis, direction = self.axes[self.idx]
         name = ("θx", "θy", "θz")[axis]
         best = f"{self.best_q:.3f}" if self.best_q == self.best_q else "—"
         return (f"{self.phase} {'+' if direction > 0 else '−'}{name}  최고 Q {best}  "
+                f"걸음 {self.current_step:.1f}°  "
                 f"연속전진 {self.n_steps}  실패 {self.n_fail}/{len(self.axes)}")

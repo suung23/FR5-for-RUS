@@ -861,6 +861,10 @@ class PolicyRunner(Node):
                            "centroid_max": self.args.success_centroid_max,
                            "hold_s": self.args.success_hold_s},
             "placebo_mode": self.args.placebo_mode, "placebo_seed": self.args.placebo_seed,
+            # 에피소드가 스스로를 설명하게 둔다 — 평가 도중에 이 값을 바꾼 적이 있다 (2026-09-12).
+            "search": {"axes": self.args.search_axes, "step_deg": self.args.search_step_deg,
+                       "settle_s": self.args.search_settle_s, "min_gain": self.args.search_min_gain,
+                       "max_excursion_deg": self.args.search_max_excursion_deg},
             "verdict": verdict,
             "n_ticks": len(self.rows), "n_frames": self.n_img, "n_slow_perception": self.n_drop,
             "bmode": self.conv.describe() if self.conv else None,
@@ -924,15 +928,17 @@ def main() -> int:
     p.add_argument("--save-frames", action="store_true",
                    help="B-mode 프레임을 frames.npz 에 남긴다. 이 에피소드를 나중에 학습에 쓰려면 "
                         "필요하다 (10 fps × 90 s ≈ 900 장 ≈ 압축 20~30 MB)")
-    p.add_argument("--max-saved-frames", type=int, default=4000,
-                   help="--save-frames 의 상한. --loop 은 끝이 없으므로 메모리를 묶어 둔다")
+    p.add_argument("--max-saved-frames", type=int, default=1200,
+                   help="--save-frames 의 상한. --loop 은 끝이 없으므로 메모리를 묶어 둔다. "
+                        "10 fps 이므로 1200 장 ≈ 120 s — 180 s 에피소드는 앞 2/3 이 남는다")
     p.add_argument("--search-axes", default="xyz", choices=["xyz", "xy"],
                    help="탐색이 시험할 회전축. xyz = 면외(θx)·면내(θy)·장축(θz) 양쪽씩 여섯 방향. "
                         "xy 는 장축 회전을 뺀다 (접촉면에 비틀림을 주기 싫을 때)")
-    p.add_argument("--search-step-deg", type=float, default=2.0, help="탐색 한 걸음의 회전각")
+    p.add_argument("--search-step-deg", type=float, default=5.0,
+                   help="탐색 한 걸음의 회전각. 2° 는 dQ/dθ≈0.005/° 라 정지 잡음(0.007)에 묻힌다")
     p.add_argument("--search-settle-s", type=float, default=0.6,
                    help="걸음 뒤 Q 를 모으는 시간. 초음파 지연 0.2 s 보다 넉넉해야 한다")
-    p.add_argument("--search-min-gain", type=float, default=0.01,
+    p.add_argument("--search-min-gain", type=float, default=0.02,
                    help="이만큼 올라야 '나아졌다'. 실측 Q 잡음(0.6 s 평균, 창 간 95%%p 0.0004)의 25 배")
     p.add_argument("--search-max-excursion-deg", type=float, default=30.0,
                    help="에피소드 시작 자세에서 이 각을 넘으면 그 방향은 막고 되돌린다")

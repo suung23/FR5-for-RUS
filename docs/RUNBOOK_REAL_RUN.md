@@ -98,6 +98,16 @@ python3 ~/FR5-for-RUS/policy_learning/scripts/diag_wrench_poses.py
 
 조건으로 넣어 비교하려면 `--conditions hold,search` 처럼 준다.
 
+**행동 기울어짐 보정** — Q̂ 에는 영상과 무관하게 한 방향을 좋게 보는 상수가 섞여 있다.
+빼지 않으면 정책이 한 방향으로만 간다 (H-12). `--action-bias online` 이 실행 중에 재서 뺀다:
+
+```bash
+~/FR5-for-RUS/scripts/start_policy_eval.sh --pilot --gamma 0.005 --duration 180 \
+        --conditions hold,search,policy \
+        --out ~/FR5-for-RUS/policy_learning/runs/pilot_v2 \
+        -- --save-frames --action-bias online
+```
+
 **방향 관성** — 뒤에 `--gamma 0.005` 를 붙이면 정책이 방향을 바꿀 수 있다. 기본(체크포인트
 값 0.2)은 방향을 **절대** 안 바꾼다 (H-9). gamma 를 바꾸면 방법이 바뀌므로 **새 폴더**로
 돌려 한 파일럿 안에서 섞이지 않게 한다:
@@ -224,6 +234,10 @@ python3 ~/FR5-for-RUS/policy_learning/scripts/analyze_experiment.py \
     양수로 고른데, Q̂ 로 고르면 32 % (Q_area 재학습 헤드는 9 %) 가 된다. 최댓값을 고르는
     순간 Q̂ 의 작은 기울어짐이 고정된 방향이 되기 때문이다. Q̂ 자체의 방향 판별은 52~54 %
     (찍으면 50 %). **재학습한 헤드를 선택에 쓰면 더 나빠진다.**
+12. **정책이 한 방향으로만 가면 기울어짐 보정을 확인하라.** Q̂ 의 행동 기울기는 부호가
+    관측과 무관하게 거의 같다 (θx 98 % · θz 95 %). 보정 없이 돈 에피소드는 θx 지령이
+    99 % 음수였고, 보정 뒤 49 % 로 돌아왔다. 저장된 상수(`--action-bias auto`)는 학습
+    데이터에서 잰 것이라 로봇이 보는 분포와 다를 수 있다 — 실기에서는 `online` 이 맞는다.
 11. **Q_seg 는 유무가 가장 무겁다** (유무 41 % · 면적 21 % · 중심 14 %): 없음 0.07 ·
     겨우 보임(0.5 %) 0.77 · 성공(8 %) 0.97. 방광을 보는 것이 주 목적이므로 "겨우 보이는
     것" 과 "안 보이는 것" 의 차이가 가장 크다.

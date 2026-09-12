@@ -6,7 +6,7 @@
 #   ./scripts/start_policy_eval.sh --dry                    # 지령 없이 (축·중력·지각 확인)
 #   ./scripts/start_policy_eval.sh --pilot                  # 파일럿 6 자세 × 3 조건 = 18
 #   ./scripts/start_policy_eval.sh --main 25                # 본 시험 25 자세 × 4 조건
-#   ./scripts/start_policy_eval.sh --pilot --conditions hold,search   # 조건을 바꿔서
+#   ./scripts/start_policy_eval.sh --pilot --conditions hold,search --duration 180
 #   ./scripts/start_policy_eval.sh -- --condition search    # 실험 아님 — 탐색만 한 번 돌려 본다
 #   ./scripts/start_policy_eval.sh --out runs/eval_2        # 기록 위치
 #   ./scripts/start_policy_eval.sh -- --max-deg-s 5         # `--` 뒤는 러너로 그대로
@@ -35,6 +35,7 @@ EXECUTE="--execute"
 MODE="loop"          # loop | pilot | main
 POSES=""
 CONDITIONS=""        # 비면 파일럿 hold,placebo,policy · 본시험 +expert
+DURATION="90"        # 에피소드 길이 [s]
 EXTRA=()
 
 while (( $# )); do
@@ -42,6 +43,7 @@ while (( $# )); do
     --dry)        EXECUTE=""; shift ;;
     --pilot)      MODE="pilot"; shift ;;
     --conditions) CONDITIONS="${2:-}"; shift; (( $# )) && shift ;;
+    --duration)   DURATION="${2:-90}"; shift; (( $# )) && shift ;;
     # `shift 2` 는 인자가 하나뿐일 때 **실패하고 아무것도 안 옮긴다.** set -e 가 없으므로
     # 루프는 계속 돌고 같은 case 가 다시 잡힌다 — 무한 루프다. 값이 있든 없든 한 번은
     # 반드시 옮기고, 값이 있을 때만 한 번 더 옮긴다.
@@ -156,7 +158,7 @@ echo "체크포인트  $CKPT"
 echo "기록        $OUT"
 echo "모드        ${EXECUTE:-DRY-RUN (지령 없음)}"
 case "$MODE" in
-  pilot) echo "실험        파일럿 — 6 자세 × ${CONDITIONS:-hold,placebo,policy} , 90 s, 눈가림" ;;
+  pilot) echo "실험        파일럿 — 6 자세 × ${CONDITIONS:-hold,placebo,policy} · ${DURATION} s · 눈가림" ;;
   main)  echo "실험        본 시험 — $POSES 자세 × 4 조건 = $((POSES * 4)) 에피소드, 90 s, 눈가림" ;;
   *)     echo "실험        아님 (자유 루프 평가)" ;;
 esac
@@ -183,13 +185,13 @@ case "$MODE" in
   pilot)
     python3 scripts/run_experiment.py "$CKPT" --out "$OUT" \
             --poses 6 --conditions "${CONDITIONS:-hold,placebo,policy}" \
-            --duration 90 --blind $EXECUTE \
+            --duration "$DURATION" --blind $EXECUTE \
             --axes rot --max-deg-s 3 ${EXTRA[@]+"${EXTRA[@]}"}
     ;;
   main)
     python3 scripts/run_experiment.py "$CKPT" --out "$OUT" \
             --poses "$POSES" --conditions "${CONDITIONS:-hold,placebo,policy,expert}" \
-            --duration 90 --blind $EXECUTE \
+            --duration "$DURATION" --blind $EXECUTE \
             --axes rot --max-deg-s 3 ${EXTRA[@]+"${EXTRA[@]}"}
     ;;
   *)

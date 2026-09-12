@@ -48,7 +48,11 @@ while (( $# )); do
     --main)       MODE="main"; POSES="${2:-}"; shift; (( $# )) && shift ;;
     --ckpt)       CKPT="${2:-}"; shift; (( $# )) && shift ;;
     --out)        OUT="${2:-}"; shift; (( $# )) && shift ;;
-    --)           shift; EXTRA=("$@"); break ;;
+    # `--` 앞에서 모은 것을 **덮지 않는다.** 예전에는 대입이라
+    #   --pilot --gamma 0.005 -- --save-frames
+    # 에서 --gamma 0.005 가 통째로 사라졌고, 조작자는 gamma 를 바꿨다고 믿은 채 기본값으로
+    # 돌렸다 (meta.json 을 열어 보기 전에는 알 수 없다).
+    --)           shift; EXTRA+=("$@"); break ;;
     -h|--help)    sed -n '2,26p' "$0" | sed 's/^# \?//'; exit 0 ;;
     *)            EXTRA+=("$1"); shift ;;
   esac

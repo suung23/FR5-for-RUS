@@ -282,8 +282,17 @@ class ActPolicy(nn.Module):
     # ------------------------------------------------------------------ 실행시 선택 (§3.3 · §3.5)
     @torch.no_grad()
     def select_action(self, batch: dict[str, torch.Tensor], n_samples: int = 32, gamma: float = 0.2,
-                      prev_dy: Optional[torch.Tensor] = None) -> dict[str, Any]:
-        """z 후보 M 개 → Q̂ + 모드 일관성 보너스 (3.3) 로 선택. 이산 헤드는 argmax."""
+                      prev_dy: Optional[torch.Tensor] = None,
+                      action_bias: Optional[torch.Tensor] = None) -> dict[str, Any]:
+        """z 후보 M 개 → Q̂ + 모드 일관성 보너스 (3.3) 로 선택. 이산 헤드는 argmax.
+
+        Args:
+            action_bias: (6,) — Q̂ 의 **관측과 무관한** 행동 기울기. 주면 후보 점수에서
+                ``bias · net`` 을 빼, 그 상수가 순위를 정하지 못하게 한다. 2026-09-12 실측에서
+                θx 기울기의 부호가 관측 98 % 에서 같았고, 그것이 만드는 점수 차(0.012)가 후보
+                사이의 실제 차(중앙 0.021)와 맞먹어 64 개 중 최댓값이 늘 같은 방향이었다
+                (rus_policy.debias 참조).
+        """
         B = batch["frames"].shape[0]
         dev = batch["frames"].device
         if self.head_type == "discrete":
@@ -310,6 +319,9 @@ class ActPolicy(nn.Module):
         Q = self.predict_quality(pooled_rep, P_hat)                           # (B*M,k)
         score = Q.sum(1)
         P = P_hat.reshape(B, n_samples, self.k + 1, ACTION_DIM)
+        if action_bias is not None:
+            b = torch.as_tensor(action_bias, dtype=P.dtype, device=dev).reshape(ACTION_DIM)
+            score = score - (P[:, :, -1, :] * b).sum(-1).reshape(-1)
         Qm = Q.reshape(B, n_samples, self.k)
         score = score.reshape(B, n_samples)
         if prev_dy is not None and gamma > 0:

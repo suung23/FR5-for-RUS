@@ -59,6 +59,7 @@ from rus_policy.bmode import BmodeConverter
 from rus_policy.dataset import OBS_VEC_DIM, _resize_frames
 from rus_policy.episode import (CONDITIONS, PlaceboBuffer, StartGate, Thresholds, _quat_angle_deg,
                                 judge, judge_two_phase, motion_check, randomize_direction)
+from rus_policy.debias import default_bias_path, load_action_bias
 from rus_policy.model import ACTION_DIM
 from rus_policy.search import AXES_XY, AXES_XYZ, HillClimbSearch
 from rus_policy.view_quality import view_quality
@@ -228,6 +229,25 @@ class PolicyRunner(Node):
         self.get_logger().info(
             f"방향 관성 gamma {self.gamma:g} (보너스 차 {self.gamma * cfg.timing.chunk_steps:.3f}"
             + (", 체크포인트 값" if args.gamma is None else ", --gamma 로 지정") + ")")
+        # Q̂ 의 관측과 무관한 행동 기울어짐. 빼지 않으면 64 후보 중 최댓값이 늘 같은 방향이다
+        # (2026-09-12: θx 기울기 부호가 관측 98 % 에서 같고, 그것이 만드는 점수 차 0.012 가
+        # 후보 사이의 실제 차 0.021 과 맞먹는다). rus_policy.debias 참조.
+        self.action_bias = None
+        if args.action_bias != "off":
+            path = (default_bias_path(args.checkpoint) if args.action_bias == "auto"
+                    else Path(args.action_bias))
+            self.action_bias = load_action_bias(path)
+            if self.action_bias is not None:
+                self.get_logger().info(
+                    f"행동 기울어짐 보정 켬 — {path} "
+                    f"(θx {self.action_bias[3]:+.5f} θy {self.action_bias[4]:+.5f} "
+                    f"θz {self.action_bias[5]:+.5f} /°)")
+            elif args.action_bias != "auto":
+                self.get_logger().error(f"행동 기울어짐 파일이 없다: {path}")
+            else:
+                self.get_logger().warn(
+                    "행동 기울어짐 보정 꺼짐 — 파일이 없다. 정책이 한 방향으로만 갈 수 있다. "
+                    "python3 scripts/measure_action_bias.py <체크포인트> 로 만들어라")
         self.create_timer(1.0 / cfg.timing.policy_hz, self._tick)
         # 추론 사이를 메우는 재발행. 워치독이 기대하는 발행 주기(50 Hz)에 맞춘다 —
         # _republish 의 주석에 이유가 있다. 0 이면 옛 거동(추론할 때만 발행).
@@ -618,7 +638,7 @@ class PolicyRunner(Node):
             self._idle_reason = ""
         with torch.no_grad():
             sel = self.model.select_action(obs, n_samples=self.args.z_samples,
-                                           gamma=self.gamma,
+                                           gamma=self.gamma, action_bias=self.action_bias,
                                            prev_dy=torch.as_tensor([self.prev_net[1]], device=self.dev))
         a = sel["a"][0, 0].cpu().numpy()                    # 첫 스텝 속도 (B,k,6) → (6,)
         net = sel["net"][0].cpu().numpy()
@@ -810,6 +830,7 @@ class PolicyRunner(Node):
             "checkpoint": self.args.checkpoint, "axes": self.args.axes, "execute": self.args.execute,
             "z_samples": self.args.z_samples, "start_force_N": self.args.start_force,
             "gamma_mode_consistency": self.gamma,
+            "action_bias": None if self.action_bias is None else list(map(float, self.action_bias)),
             "max_mm_s": self.args.max_mm_s, "max_deg_s": self.args.max_deg_s,
             "condition": self.condition, "duration_s": self.args.duration,
             "episode_started": self.t_start is not None,
@@ -900,6 +921,9 @@ def main() -> int:
                    help="에피소드 시작 자세에서 이 각을 넘으면 그 방향은 막고 되돌린다")
     p.add_argument("--blind", action="store_true",
                    help="조작자 화면에서 조건을 가린다 (expert 제외). 기록에는 그대로 남는다")
+    p.add_argument("--action-bias", default="auto",
+                   help="Q̂ 의 관측과 무관한 행동 기울어짐을 뺀다. auto = <체크포인트>"
+                        ".action_bias.json 이 있으면 쓴다 · off = 안 뺀다 · 경로를 직접 줘도 된다")
     p.add_argument("--gamma", type=float, default=None,
                    help="방향 관성 (모드 일관성 보너스). 없으면 체크포인트 값(0.2). 0.2 는 후보 사이 "
                         "Q̂ 차의 75 배라 방향이 절대 안 바뀐다. 0.005 면 Q̂ 가 약 20 %% 를 정한다")

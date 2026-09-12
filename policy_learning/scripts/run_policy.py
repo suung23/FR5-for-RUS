@@ -60,7 +60,7 @@ from rus_policy.dataset import OBS_VEC_DIM, _resize_frames
 from rus_policy.episode import (CONDITIONS, PlaceboBuffer, StartGate, Thresholds, _quat_angle_deg,
                                 judge, motion_check, randomize_direction)
 from rus_policy.model import ACTION_DIM
-from rus_policy.search import HillClimbSearch
+from rus_policy.search import AXES_XY, AXES_XYZ, HillClimbSearch
 from rus_policy.view_quality import view_quality
 from rus_policy.perception import STATE_DIM, apply_frame_transform, build_backend
 from rus_policy.train import load_policy
@@ -173,10 +173,10 @@ class PolicyRunner(Node):
         # 에피소드 틀 (실험용). duration 0 이면 예전처럼 계속 돈다.
         self.condition = args.condition
         # 측정한 Q 로 방향을 고르는 탐색기 (condition=search). 회전 상한을 그대로 쓴다.
-        self.search = HillClimbSearch(rate_deg_s=float(args.max_deg_s),
-                                      step_deg=float(args.search_step_deg),
-                                      settle_s=float(args.search_settle_s),
-                                      min_gain=float(args.search_min_gain))
+        self.search = HillClimbSearch(
+            axes=AXES_XYZ if args.search_axes == "xyz" else AXES_XY,
+            rate_deg_s=float(args.max_deg_s), step_deg=float(args.search_step_deg),
+            settle_s=float(args.search_settle_s), min_gain=float(args.search_min_gain))
         self.start_quat = None          # 에피소드 시작 자세 — 너무 멀리 가지 않게
         self.gate = StartGate(area_max=args.gate_area_max, quality_min=args.gate_quality_min,
                               confirm_s=args.gate_confirm_s)
@@ -792,6 +792,9 @@ def main() -> int:
     p.add_argument("--placebo-seed", type=int, default=0, help="위약 방향 난수 — 세션을 재현한다")
     p.add_argument("--placebo-delay-s", type=float, default=30.0,
                    help="stale-obs 일 때의 관측 지연 [s]")
+    p.add_argument("--search-axes", default="xyz", choices=["xyz", "xy"],
+                   help="탐색이 시험할 회전축. xyz = 면외(θx)·면내(θy)·장축(θz) 양쪽씩 여섯 방향. "
+                        "xy 는 장축 회전을 뺀다 (접촉면에 비틀림을 주기 싫을 때)")
     p.add_argument("--search-step-deg", type=float, default=2.0, help="탐색 한 걸음의 회전각")
     p.add_argument("--search-settle-s", type=float, default=0.6,
                    help="걸음 뒤 Q 를 모으는 시간. 초음파 지연 0.2 s 보다 넉넉해야 한다")

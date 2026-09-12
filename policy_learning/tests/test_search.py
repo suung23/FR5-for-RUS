@@ -100,6 +100,29 @@ def test_rebases_the_best_after_stepping_back():
     assert s.best_q == pytest.approx(0.4, abs=1e-6), "되돌아온 자리의 값으로 기준을 다시 잡지 않았다"
 
 
+def test_long_axis_rotation_is_included_by_default():
+    """장축 회전(θz)은 기본에 들어 있어야 한다.
+
+    제어 스택은 θz 를 그대로 실행한다 (gate_axes 가 회전 세 축을 통과시키고, 접촉 상한
+    0.2 rad/s = 11.5 °/s 는 3 °/s 보다 훨씬 크다). 못 내보내는 것은 정책의 디코더뿐이다
+    (후보 산포 0.46° 대 시연 6.29°). 처음에 뺐던 근거("영상면 방향만 바꾼다")는 틀렸다 —
+    빔축 둘레로 돌리면 보는 단면 자체가 바뀐다.
+    """
+    from rus_policy.search import AXES_XY, AXES_XYZ
+
+    s = HillClimbSearch()
+    assert {a for a, _ in s.axes} == {0, 1, 2}, s.axes
+    assert set(AXES_XYZ) - set(AXES_XY) == {(2, +1.0), (2, -1.0)}
+    # 평평한 지형에서는 모든 방향을 훑으므로 θz 차례가 실제로 온다
+    seen, t, s2 = set(), 0.0, HillClimbSearch()
+    for _ in range(1200):
+        for i, v in enumerate(s2.update(t, 0.5)):
+            if abs(v) > 1e-9:
+                seen.add(i)
+        t += 0.1
+    assert 2 in seen, f"θz 지령이 한 번도 안 나갔다: {seen}"
+
+
 def test_describe_is_readable():
     s = HillClimbSearch()
     s.update(0.0, 0.6)

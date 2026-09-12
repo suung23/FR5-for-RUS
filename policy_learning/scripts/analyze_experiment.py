@@ -58,6 +58,37 @@ def sample_size_two_proportions(p_b: float, p_c: float, alpha: float = 0.05,
     return int(math.ceil(num / (p_c - p_b) ** 2))
 
 
+#: 탐색 설정이 다르면 **다른 조건**이다. 2026-09-12 에 걸음 2°→5° · min_gain 0.01→0.02 로
+#: 바꿨고(dQ/dθ≈0.005/° 라 2° 는 정지 잡음 0.007 에 묻혔다), 그 전후를 한 팔로 묶으면 안 된다.
+#: 그날 이전 에피소드는 meta 에 설정이 없다 — 그때 값은 2.0° · 0.01 이었다.
+UNRECORDED = "설정미기록"
+
+
+def search_variant(meta: dict) -> str:
+    s = meta.get("search")
+    if not isinstance(s, dict):
+        return UNRECORDED
+    step, gain = s.get("step_deg"), s.get("min_gain")
+    return f"{step:g}°/{gain:g}" if None not in (step, gain) else UNRECORDED
+
+
+def variants_by_dir(root: Path) -> dict[str, str]:
+    """에피소드 폴더 이름 → 탐색 설정 꼬리표. search 가 아닌 조건은 담지 않는다."""
+    out = {}
+    for meta in sorted(root.glob("ep*/meta.json")):
+        m = json.loads(meta.read_text(encoding="utf-8"))
+        if str(m.get("condition")) == "search":
+            out[meta.parent.name] = search_variant(m)
+    return out
+
+
+def split_search(cond: str, key: str, variants: dict[str, str]) -> str:
+    """설정이 여러 가지면 ``search`` 를 설정별로 가른다. 하나뿐이면 그대로 둔다."""
+    if cond != "search" or len(set(variants.values())) < 2:
+        return cond
+    return f"search[{variants.get(key, UNRECORDED)}]"
+
+
 def load_episodes(root: Path) -> list[dict]:
     rows = []
     path = root / "summary.csv"
@@ -70,6 +101,7 @@ def load_episodes(root: Path) -> list[dict]:
 def rejudge(root: Path, thr: Thresholds) -> dict[str, list[bool]]:
     """저장된 상태 시계열로 임계를 바꿔 다시 판정한다."""
     out: dict[str, list[bool]] = {}
+    variants = variants_by_dir(root)
     for d in sorted(root.glob("ep*/")):
         npz, meta = d / "states.npz", d / "meta.json"
         if not (npz.is_file() and meta.is_file()):
@@ -82,7 +114,8 @@ def rejudge(root: Path, thr: Thresholds) -> dict[str, list[bool]]:
         keep = t >= t0
         if not keep.any():
             continue
-        out.setdefault(str(m.get("condition", "?")), []).append(
+        cond = split_search(str(m.get("condition", "?")), d.name, variants)
+        out.setdefault(cond, []).append(
             bool(judge(t[keep], st[keep], thr)["success"]))
     return out
 
@@ -108,6 +141,14 @@ def main() -> int:
     print(f"\n에피소드 {n} · 시작함 {len(started)} · 폐기 {n - len(started)}")
     p_, lo, hi = wilson(n - len(started), n)
     print(f"  ④ 시작조건 폐기율  {p_:.1%}  [{lo:.1%}, {hi:.1%}]   ← 본 시험 자세 수를 정할 때 나눗셈")
+
+    variants = variants_by_dir(root)
+    for r in started:
+        r["condition"] = split_search(r["condition"], r.get("dir", ""), variants)
+    if len(set(variants.values())) > 1:
+        print(f"\n⚠️ 탐색 설정이 {len(set(variants.values()))} 가지다 — 팔을 나눠 센다 "
+              f"({', '.join(sorted(set(variants.values())))}). "
+              f"{UNRECORDED} 은 2026-09-12 이전(걸음 2° · min_gain 0.01)이다.")
 
     print("\n조건별 성공률 (Wilson 95 %)")
     rate = {}

@@ -62,6 +62,7 @@ from rus_policy.episode import (CONDITIONS, PlaceboBuffer, StartGate, Thresholds
 from rus_policy.debias import OnlineActionBias, default_bias_path, load_action_bias
 from rus_policy.model import ACTION_DIM
 from rus_policy.search import AXES_XY, AXES_XYZ, HillClimbSearch
+from rus_policy.axis_probe import AxisProbe
 from rus_policy.view_quality import view_quality
 from rus_policy.perception import STATE_DIM, apply_frame_transform, build_backend
 from rus_policy.train import load_policy
@@ -186,6 +187,11 @@ class PolicyRunner(Node):
             axes=AXES_XYZ if args.search_axes == "xyz" else AXES_XY,
             rate_deg_s=float(args.max_deg_s), step_deg=float(args.search_step_deg),
             settle_s=float(args.search_settle_s), min_gain=float(args.search_min_gain))
+        # 축별 기하 이득 측정 (condition=axis_probe). 회전 진폭은 지령 상한을 그대로 쓴다.
+        self.axis_probe = AxisProbe(amp_deg=float(args.max_deg_s), amp_mm_s=float(args.max_mm_s),
+                                    move_s=float(args.probe_move_s),
+                                    rest_s=float(args.probe_rest_s),
+                                    repeats=int(args.probe_repeats))
         self.start_quat = None          # 에피소드 시작 자세 — 너무 멀리 가지 않게
         self.gate = StartGate(area_max=args.gate_area_max, quality_min=args.gate_quality_min,
                               confirm_s=args.gate_confirm_s)
@@ -678,6 +684,10 @@ class PolicyRunner(Node):
             far = self._excursion_deg() > self.args.search_max_excursion_deg
             w = self.search.update(t, self.q_view, blocked=far)
             a = np.array([0.0, 0.0, 0.0, w[0], w[1], w[2]], dtype=float)
+        if self.condition == "axis_probe":
+            # 실험이 아니라 측정이다 — 정해진 순서로 한 축씩 흔들어 기하 이득을 잰다.
+            # 정책도 Q̂ 도 쓰지 않는다.
+            a, _ = self.axis_probe.update(t)
         if self.condition == "placebo" and self.placebo is None:
             # 크기는 정책이 고른 그대로, 방향만 무의미하게. 크기를 다시 뽑으면 조건 사이에서
             # "움직임의 양" 이 어긋나고, 그것이 이 대조군이 통제하려던 변수다.
@@ -704,6 +714,7 @@ class PolicyRunner(Node):
             "condition": self.condition, "t_episode": t - self.t_start,
             "Q_raw": self.q_raw,
             "Q_view": self.q_view,       # 새 Q_seg. Q_now 는 옛 정의 그대로 (정책 입력)
+            "probe_label": self.axis_probe.label if self.condition == "axis_probe" else "",
             "search_phase": self.search.phase if self.condition == "search" else "",
             "search_best_q": self.search.best_q if self.condition == "search" else float("nan"),
             "excursion_deg": self._excursion_deg(),
@@ -931,6 +942,12 @@ def main() -> int:
     p.add_argument("--max-saved-frames", type=int, default=1200,
                    help="--save-frames 의 상한. --loop 은 끝이 없으므로 메모리를 묶어 둔다. "
                         "10 fps 이므로 1200 장 ≈ 120 s — 180 s 에피소드는 앞 2/3 이 남는다")
+    p.add_argument("--probe-move-s", type=float, default=1.5,
+                   help="axis_probe: 한 축을 흔드는 시간")
+    p.add_argument("--probe-rest-s", type=float, default=1.5,
+                   help="axis_probe: 흔든 뒤 쉬는 시간 — 기준선을 잡는 구간")
+    p.add_argument("--probe-repeats", type=int, default=2,
+                   help="axis_probe: 축·부호마다 반복 횟수. 기본이면 5 축 × 2 부호 × 2 회 = 60 s")
     p.add_argument("--search-axes", default="xyz", choices=["xyz", "xy"],
                    help="탐색이 시험할 회전축. xyz = 면외(θx)·면내(θy)·장축(θz) 양쪽씩 여섯 방향. "
                         "xy 는 장축 회전을 뺀다 (접촉면에 비틀림을 주기 싫을 때)")

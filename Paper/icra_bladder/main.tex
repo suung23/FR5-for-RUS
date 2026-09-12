@@ -140,7 +140,7 @@ keeps a view; the decisions that follow from the view remain the surgeon's.
 \begin{figure}[t]
 \centering
 % \includegraphics[width=\linewidth]{fig1_overview.pdf}
-\figspace{42mm}
+\figspace{34mm}
 \caption{\textbf{From the sonographer's hand to the robot's.} (a) Demonstration
 capture: the clinical probe carries a six axis inertial sensor, and ultrasound
 and inertial data are joined on one host clock. (b) The robot: FR5 arm, Hall
@@ -404,17 +404,6 @@ $k = 8$ step chunk of \SI{1.6}{\second} at \SI{5}{\hertz}. All demonstrations
 come from one bladder phantom and one operator, so the validation and test
 splits measure reproducibility on that phantom, not generalisation.
 
-\begin{figure}[t]
-\centering
-% \includegraphics[width=\linewidth]{fig2_pipeline.pdf}
-\figspace{40mm}
-\caption{\textbf{Demonstration pipeline.} Freehand scanning is cut into still,
-move, still intervals; rotation labels come from six axis fusion and
-translation from zero velocity bracketed integration; ultrasound frames are scan
-converted, segmented and reduced to a perception state; the pair becomes an
-observation and action chunk.}
-\label{fig:pipeline}
-\end{figure}
 
 \section{Perception and the Two Quality Functions}
 \label{sec:percep}
@@ -472,43 +461,35 @@ image quality score this behaves well: on the public test split it ranks frames
 by Dice with $\rho = \num{0.766}$ and detects $\mathrm{Dice} \ge \num{0.80}$
 with AUROC \num{0.891}.
 
-As a \emph{task} objective it is nearly flat, and this matters for
-Sec.~\ref{sec:negative}. Substituting area alone into the same function gives
-\num{0.89} when no bladder is visible and \num{0.95} when the bladder is
-perfectly captured, a span of \num{0.06}; a starting pose with
-\SI{2}{\percent} area scores \num{0.88}, and in one recorded episode the value
-varied by \num{1.4e-7} over 636 decisions. A policy objective that barely
-distinguishes ``bladder found'' from ``bladder absent'' cannot teach a value
-head where to look.
-
-We therefore redefined the reported score on the same axis as the success
-criterion, with presence, area and lateral centring carrying \SI{76}{\percent}
-of the weight: it reads \num{0.07} with no bladder, \num{0.77} when the
-bladder is barely visible at \SI{0.5}{\percent} of the frame, and \num{0.97} at
-the \SI{8}{\percent} success threshold. The redefined score is used for
-display, logging and reporting only. The policy's input feature and its trained
-target remain the original definition, because changing the input of a trained
-policy mid-experiment would silently change the model; making the policy pursue
-the new score requires relabelling and retraining, which we report as future
-work.
+As a \emph{task} objective it is nearly flat, which matters for
+Sec.~\ref{sec:negative}: varying area alone moves it from \num{0.89} with no
+bladder to \num{0.95} with the bladder perfectly captured, a span of
+\num{0.06}, and in one recorded episode it varied by \num{1.4e-7} over 636
+decisions. An objective that barely separates ``bladder found'' from ``bladder
+absent'' cannot teach a value head where to look. We therefore redefined the
+reported score on the axis of the success criterion, with presence, area and
+lateral centring carrying \SI{76}{\percent} of the weight: \num{0.07} with no
+bladder, \num{0.77} at \SI{0.5}{\percent} area, \num{0.97} at the
+\SI{8}{\percent} success threshold. The redefined score is reported and
+displayed only; the policy's input and trained target remain the original
+definition, since changing a trained policy's input mid-experiment would
+silently change the model.
 
 \subsection{$Q_\mathrm{raw}$, the force objective}
 
 $Q_\mathrm{raw}$ is computed from the B-mode image alone, with no network, no
-mask and no previous frame, and measures whether the image is well formed. It
-averages four sub scores: near field echo against a reference level (weight
-\num{1.0}), contact continuity, the fraction of A-lines that are not dark
-(\num{1.5}), total echo energy as a plateau about a target level (\num{0.5}),
-and a shadow penalty counting A-lines whose far field has collapsed relative to
-the frame's own 90th percentile (\num{1.0}). The near field is the shallowest
-\SI{15}{\percent} of the depth range and the far field the deepest
-\SI{35}{\percent}. When fewer than 16 A-lines are usable the score is not zero
-but undefined, and the consumer must treat it as missing. Its numerical
-constants are provisional, and the monotonicity of each sub score in contact
-force has not been verified. It is deliberately not the policy's objective. Because
-the freehand demonstrations carry no force channel, and the force label is
-invalid in every sample, contact force cannot be imitated. Instead the set point
-is found online by square wave dither extremum seeking on $Q_\mathrm{raw}$: the
+mask and no previous frame. It averages four sub scores: near field echo against
+a reference level (weight \num{1.0}), contact continuity, the fraction of
+A-lines that are not dark (\num{1.5}), total echo energy as a plateau about a
+target level (\num{0.5}), and a shadow penalty counting A-lines whose far field
+has collapsed relative to the frame's own 90th percentile (\num{1.0}); the near
+field is the shallowest \SI{15}{\percent} of the depth range and the far field
+the deepest \SI{35}{\percent}. Below 16 usable A-lines the score is undefined
+rather than zero. Its constants are provisional and the monotonicity of each sub
+score in contact force is unverified. It is deliberately not the policy's
+objective: the freehand demonstrations carry no valid force label, so contact
+force cannot be imitated and the set point is instead found online by square
+wave dither extremum seeking on $Q_\mathrm{raw}$. The
 set point is dithered by \SI{\pm 0.25}{\newton} with a \SI{5}{\second} period,
 the gradient is demodulated once per period, and the set point moves by at most
 \SI{0.1}{\newton} per period within \SIrange{1.0}{4.5}{\newton}, the upper bound
@@ -516,12 +497,11 @@ being the warning line rather than the hard limit.
 
 On this phantom the measured gradient is small,
 $\partial Q_\mathrm{raw} / \partial F \in
-\numrange{0.0003}{0.008}\,\si{\per\newton}$ near \SI{3}{\newton}. The loop gain
-of \SI{20}{\newton} per quality unit per newton is set so that a typical
-gradient produces a step at the per period limit; with unit gain the set point
-would move less than \SI{0.09}{\newton} over a 90 second episode. The flatness
-is itself a result: on this phantom the image is nearly indifferent to contact
-force above coupling, so the safe strategy is the light one.
+\numrange{0.0003}{0.008}\,\si{\per\newton}$ near \SI{3}{\newton}. The loop gain of \SI{20}{\newton} per quality unit per newton
+makes a typical gradient produce a step at the per period limit; at unit gain
+the set point would move less than \SI{0.09}{\newton} in a 90 second episode.
+The flatness is itself a result: above coupling, the image on this phantom is
+nearly indifferent to contact force, so the light strategy is the safe one.
 
 \section{Policy}
 \label{sec:policy}
@@ -592,14 +572,13 @@ Three phantoms are used, each for one question.
 \textbf{Air tube phantom: is the force envelope safe under disturbance?} We
 built this one from an ordinary display mannequin with an inflatable balloon
 tube laid inside its torso, the tube's line running out to a
-\SI{500}{\milli\litre} syringe (Fig.~\ref{fig:forcerig}). Inflating and deflating the tube lifts and drops the
-surface under the probe on demand while the robot holds a commanded force, and
-the mannequin shell gives the probe the same standoff and curvature it would
-meet on an abdomen. Air rather than liquid makes the
-disturbance compliant as well as large: the tube stores part of the injected
-volume as pressure, so a step of the plunger produces a surface displacement
-that keeps settling after the operator stops pushing, which is the behaviour a
-breathing abdomen presents to a held probe. Eight set points from \SIrange{0.5}{4.0}{\newton} in \SI{0.5}{\newton} steps were held
+\SI{500}{\milli\litre} syringe (Fig.~\ref{fig:benches}a). Inflating and deflating the tube lifts and drops the
+surface under the probe while the robot holds a commanded force, and the
+mannequin shell gives the probe an abdominal standoff and curvature. Air rather
+than liquid makes the disturbance compliant as well as large: the tube stores
+part of the injected volume as pressure, so a plunger step produces a surface
+displacement that keeps settling after the operator stops pushing, as a
+breathing abdomen does to a held probe. Eight set points from \SIrange{0.5}{4.0}{\newton} in \SI{0.5}{\newton} steps were held
 for \SI{30}{\second} each in two independently calibrated sessions, giving 16
 holds, and at each set point five injections and five withdrawals were then
 applied with force hold enabled and with it disabled, the disabled arm serving
@@ -622,7 +601,7 @@ tissue mimicking recipe of Fernandez \emph{et al.}~\cite{fernandez2024phantom}.
 The lumen is a pair of water balloons, one inside the other, so that a
 puncture of the inner wall does not end the run; it is filled and emptied with
 water through a syringe line, so that its volume and the motion of its surface
-can be varied while the robot is holding a view (Fig.~\ref{fig:setup}). The
+can be varied while the robot is holding a view (Fig.~\ref{fig:benches}b). The
 doubled wall also gives the lumen a boundary the segmentation can see, since a
 single balloon collapses against the gel when partly filled. The two phantoms therefore drive the
 disturbance differently: air in the force experiments, where compressibility is
@@ -630,7 +609,7 @@ part of what the loop must absorb, and water here, where the lumen is what the
 image has to keep. Its contact stiffness was measured with the robot's
 own force sensor and forward kinematics, using a printed probe replica so that
 the measurement needs neither the scanner nor the control stack
-(Fig.~\ref{fig:stiffness}): over an indentation span of
+(Fig.~\ref{fig:benches}c): over an indentation span of
 \SI{4.7}{\milli\metre} and a force span of \SI{2.5}{\newton} the secant
 stiffness is \SI{0.52}{\newton\per\milli\metre} ($R^2 = \num{0.997}$), with
 tangent stiffness ranging from \SIrange{0.43}{0.66}{\newton\per\milli\metre}.
@@ -645,27 +624,27 @@ Because $k$ belongs to the phantom and the tip together, the absolute value
 holds for this replica geometry rather than for the clinical probe.
 
 
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.74\linewidth]{figures/force_rig_syringe.jpg}
-\caption{\textbf{Force experiment rig.} An inflatable air tube inside a torso
-mannequin is inflated and deflated through a \SI{500}{\milli\litre} syringe
-while the robot holds a commanded contact force on the surface above it. The console at the left
-shows the live contact force and the commanded set point.}
-\label{fig:forcerig}
-\end{figure}
 
 
-\begin{figure}[t]
+
+
+\begin{figure*}[t]
 \centering
-\includegraphics[width=0.74\linewidth]{figures/final_setup.jpg}
-\caption{\textbf{Final experimental setup.} The robot holds the clinical convex
-probe against the gel bladder phantom, which sits in a water bath; the syringe in
-the foreground fills and empties the phantom lumen through a line during the
-run, and the console at the left shows the image, the contact force and the two
-quality readings that the operator watches.}
-\label{fig:setup}
-\end{figure}
+\includegraphics[width=0.315\textwidth]{figures/force_rig_syringe.jpg}\hfill
+\includegraphics[width=0.315\textwidth]{figures/final_setup.jpg}\hfill
+\includegraphics[width=0.315\textwidth]{figures/stiffness_measurement.jpg}
+\caption{\textbf{The three benches.} (a) Force experiments: an inflatable air
+tube inside a torso mannequin, inflated and deflated through a
+\SI{500}{\milli\litre} syringe while the robot holds a commanded force.
+(b) Final setup: the clinical probe on the gel bladder phantom in its water bath,
+with the syringe line that fills and empties the lumen and the console the
+operator watches. (c) Contact stiffness: a printed probe replica indents the gel
+while force comes from the force/torque sensor and depth from forward
+kinematics, so neither the scanner nor the control stack is involved (force
+noise \SI{0.015}{\newton}, depth noise \SI{0.4}{\micro\metre}, indentation
+steps about \SI{1}{\milli\metre}).}
+\label{fig:benches}
+\end{figure*}
 
 \subsection{Pre-registered policy evaluation}
 
@@ -700,17 +679,6 @@ the safety indicators are poor, the system is unusable regardless of success
 rate.
 
 
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.74\linewidth]{figures/stiffness_measurement.jpg}
-\caption{\textbf{Contact stiffness of the dynamic bladder phantom.} A printed
-probe replica indents the gel phantom while contact force comes from the
-force/torque sensor and depth from forward kinematics, so that no scanner and no
-control stack are involved. Force noise is \SI{0.015}{\newton} and depth noise
-\SI{0.4}{\micro\metre}, against indentation steps of about
-\SI{1}{\milli\metre}.}
-\label{fig:stiffness}
-\end{figure}
 
 \section{Results}
 \label{sec:results}
@@ -829,7 +797,7 @@ reached the success criterion.}
 \begin{figure}[t]
 \centering
 % \includegraphics[width=\linewidth]{fig3_results.pdf}
-\figspace{45mm}
+\figspace{38mm}
 \caption{\textbf{Closed loop behaviour on the dynamic bladder phantom.}
 \TODO{caption once the runs are complete}}
 \label{fig:results}

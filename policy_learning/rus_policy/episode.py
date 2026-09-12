@@ -38,7 +38,9 @@ from .perception import STATE_FEATURE_NAMES
 #: 조건. expert 는 로봇이 아니라 사람이 지령하므로 러너는 기록만 한다.
 #: search = 학습된 Q̂ 로 고르지 않고 **실제로 움직여 재 본 Q** 로 방향을 고른다
 #: (rus_policy.search — Q̂ 의 방향 판별이 52~54 % 로 우연 수준이라 2026-09-12 에 더했다).
-CONDITIONS = ("hold", "placebo", "policy", "expert", "search")
+#: "axis_probe" 는 실험 조건이 아니라 **측정 모드**다 — 축별 기하 이득을 재려고 정해진
+#: 순서로 한 축씩 흔든다 (rus_policy.axis_probe). 성공/실패를 세지 않는다.
+CONDITIONS = ("hold", "placebo", "policy", "expert", "search", "axis_probe")
 
 _IDX = {name: i for i, name in enumerate(STATE_FEATURE_NAMES)}
 AREA = _IDX["area_ratio"]

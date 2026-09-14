@@ -1,0 +1,291 @@
+{
+  "created": "2026-09-14 13:17:42",
+  "checkpoint": "/home/rosotauser/FR5-for-RUS/policy_learning/runs/qres2_ep25.pt",
+  "duration_s": 180.0,
+  "seed": 0,
+  "conditions": [
+    "rule",
+    "hold",
+    "search"
+  ],
+  "poses": 8,
+  "repeats": 1,
+  "plan": [
+    {
+      "index": 1,
+      "pose": 1,
+      "order_in_pose": 1,
+      "condition": "rule",
+      "status": "done",
+      "gate_met_at_start": false,
+      "verdict": {
+        "success": true,
+        "best_run_s": 21.99772548675537,
+        "good_fraction": 0.24024526198439242,
+        "q_mean": 0.82597389586328,
+        "q_final_10s": 0.7309486243394342,
+        "q_view_mean": 0.6543874409305083,
+        "q_view_final_10s": 0.33019071662046684,
+        "area_max": 0.0676550418138504,
+        "n_samples": 1794,
+        "found": true,
+        "find_time_s": 104.1486234664917,
+        "hold_window_s": 75.49540710449219,
+        "hold_good_fraction": 0.49603174603174605,
+        "hold_worst_loss_s": 31.60160803794861,
+        "hold_q_mean": 0.6929774336756713,
+        "hold_q_min": 0.06896551724137931,
+        "hold_q_pass_fraction": 0.32407407407407407,
+        "hold_q_pass_run_s": 17.69819951057434,
+        "force_max_n": 4.742985248565674,
+        "force_mean_n": 2.812196023994022,
+        "time_above_warn_s": 1.8054780960083008,
+        "time_above_limit_s": 0.0,
+        "hold_force_max_n": 4.383401870727539
+      }
+    },
+    {
+      "index": 2,
+      "pose": 1,
+      "order_in_pose": 2,
+      "condition": "search",
+      "status": "done",
+      "gate_met_at_start": false,
+      "verdict": {
+        "success": true,
+        "best_run_s": 86.77923536300659,
+        "good_fraction": 0.9315906562847609,
+        "q_mean": 0.9658670577741704,
+        "q_final_10s": 0.9926646086249021,
+        "q_view_mean": 0.9530834003265825,
+        "q_view_final_10s": 0.9938009336379275,
+        "area_max": 0.13832294940948486,
+        "start_area": 0.07761835177307544,
+        "start_has_mask": 1.0,
+        "n_samples": 1798,
+        "found": true,
+        "find_time_s": 6.38885498046875,
+        "hold_window_s": 173.2567856311798,
+        "hold_good_fraction": 0.9353348729792148,
+        "hold_worst_loss_s": 4.303038120269775,
+        "hold_q_mean": 0.9527860467953784,
+        "hold_q_min": 0.06896551724137931,
+        "hold_q_pass_fraction": 0.9301385681293303,
+        "hold_q_pass_run_s": 83.400803565979,
+        "force_max_n": 4.979450702667236,
+        "force_mean_n": 2.605876158666444,
+        "time_above_warn_s": 1.003910779953003,
+        "time_above_limit_s": 0.0,
+        "hold_force_max_n": 4.979450702667236
+      }
+    },
+    {
+      "index": 3,
+      "pose": 1,
+      "order_in_pose": 3,
+      "condition": "hold",
+      "status": "pending",
+      "gate_met_at_start": null,
+      "verdict": {}
+    },
+    {
+      "index": 4,
+      "pose": 2,
+      "order_in_pose": 1,
+      "condition": "search",
+      "status": "pending",
+      "gate_met_at_start": false,
+      "verdict": {
+        "success": true,
+        "best_run_s": 71.65053462982178,
+        "good_fraction": 0.8944444444444445,
+        "q_mean": 0.9383137206567659,
+        "q_final_10s": 0.9727076208591461,
+        "q_view_mean": 0.9423225604044833,
+        "q_view_final_10s": 0.9374091241662872,
+        "area_max": 0.12489932030439377,
+        "start_area": 0.07878432584845502,
+        "start_has_mask": 1.0,
+        "n_samples": 1800,
+        "found": true,
+        "find_time_s": 3.0556719303131104,
+        "hold_window_s": 176.59562611579895,
+        "hold_good_fraction": 0.8924731182795699,
+        "hold_worst_loss_s": 8.497242212295532,
+        "hold_q_mean": 0.942577167040973,
+        "hold_q_min": 0.06896551724137931,
+        "hold_q_pass_fraction": 0.8455008488964346,
+        "hold_q_pass_run_s": 57.500664949417114,
+        "force_max_n": 5.0829854011535645,
+        "force_mean_n": 2.798189683380553,
+        "time_above_warn_s": 3.5998129844665527,
+        "time_above_limit_s": 0.19983577728271484,
+        "hold_force_max_n": 5.0829854011535645
+      }
+    },
+    {
+      "index": 5,
+      "pose": 2,
+      "order_in_pose": 2,
+      "condition": "hold",
+      "status": "pending",
+      "gate_met_at_start": null,
+      "verdict": {}
+    },
+    {
+      "index": 6,
+      "pose": 2,
+      "order_in_pose": 3,
+      "condition": "rule",
+      "status": "pending"
+    },
+    {
+      "index": 7,
+      "pose": 3,
+      "order_in_pose": 1,
+      "condition": "rule",
+      "status": "pending"
+    },
+    {
+      "index": 8,
+      "pose": 3,
+      "order_in_pose": 2,
+      "condition": "hold",
+      "status": "pending"
+    },
+    {
+      "index": 9,
+      "pose": 3,
+      "order_in_pose": 3,
+      "condition": "search",
+      "status": "pending"
+    },
+    {
+      "index": 10,
+      "pose": 4,
+      "order_in_pose": 1,
+      "condition": "rule",
+      "status": "pending"
+    },
+    {
+      "index": 11,
+      "pose": 4,
+      "order_in_pose": 2,
+      "condition": "search",
+      "status": "pending"
+    },
+    {
+      "index": 12,
+      "pose": 4,
+      "order_in_pose": 3,
+      "condition": "hold",
+      "status": "pending"
+    },
+    {
+      "index": 13,
+      "pose": 5,
+      "order_in_pose": 1,
+      "condition": "rule",
+      "status": "pending"
+    },
+    {
+      "index": 14,
+      "pose": 5,
+      "order_in_pose": 2,
+      "condition": "search",
+      "status": "pending"
+    },
+    {
+      "index": 15,
+      "pose": 5,
+      "order_in_pose": 3,
+      "condition": "hold",
+      "status": "pending"
+    },
+    {
+      "index": 16,
+      "pose": 6,
+      "order_in_pose": 1,
+      "condition": "hold",
+      "status": "pending"
+    },
+    {
+      "index": 17,
+      "pose": 6,
+      "order_in_pose": 2,
+      "condition": "rule",
+      "status": "pending"
+    },
+    {
+      "index": 18,
+      "pose": 6,
+      "order_in_pose": 3,
+      "condition": "search",
+      "status": "pending"
+    },
+    {
+      "index": 19,
+      "pose": 7,
+      "order_in_pose": 1,
+      "condition": "hold",
+      "status": "pending"
+    },
+    {
+      "index": 20,
+      "pose": 7,
+      "order_in_pose": 2,
+      "condition": "rule",
+      "status": "pending"
+    },
+    {
+      "index": 21,
+      "pose": 7,
+      "order_in_pose": 3,
+      "condition": "search",
+      "status": "pending"
+    },
+    {
+      "index": 22,
+      "pose": 8,
+      "order_in_pose": 1,
+      "condition": "search",
+      "status": "pending"
+    },
+    {
+      "index": 23,
+      "pose": 8,
+      "order_in_pose": 2,
+      "condition": "rule",
+      "status": "pending"
+    },
+    {
+      "index": 24,
+      "pose": 8,
+      "order_in_pose": 3,
+      "condition": "hold",
+      "status": "pending"
+    }
+  ],
+  "pose_start": {
+    "1": [
+      -0.482631591796875,
+      -0.3490361328125,
+      0.4156098937988281,
+      -0.10382522677417666,
+      -0.34658274251050414,
+      0.9302005032462697,
+      -0.06186880182753919
+    ]
+  },
+  "pose_last_end": {
+    "1": [
+      -0.43889382934570315,
+      -0.36730487060546874,
+      0.4029267578125,
+      0.168918372095343,
+      0.31825869552811614,
+      -0.931519172083567,
+      -0.04949765984515554
+    ]
+  }
+}

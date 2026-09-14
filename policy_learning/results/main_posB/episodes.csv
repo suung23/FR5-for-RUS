@@ -1,0 +1,2 @@
+episode,condition,mtime,success,start_area,area_max,qview_max,mask_frac,n_ticks,find,hold,home,force_max_n,find_axes,align_axis
+ep0001_pose01_rule,rule,1789382215,False,0.0,0.0,0.0,0.0,590,590,0,0,5.066,"thx,y",thy

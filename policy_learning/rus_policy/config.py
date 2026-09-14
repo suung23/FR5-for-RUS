@@ -240,7 +240,12 @@ class TrainConfig:
     # 체크포인트 기준 (§5.3g 2026-09-10). "select_nmae" = 실행시 경로(사전분포 z + Q̂)의 σ 정규화 오차.
     # "total" 은 사후분포 경로(라벨이 z 로 들어감)라 누설이 심해질수록 좋아진다 — exp1 은 그 기준으로
     # ep19 의 가장 많이 누설된 체크포인트를 best 로 골랐다.
-    checkpoint_metric: str = "select_nmae"    # "select_nmae" | "total"
+    checkpoint_metric: str = "select_nmae"    # "select_nmae" | "total" | 임의의 val 키
+    # 이 에폭 이전은 best 후보에서 뺀다. β 워밍업 동안(기본 5 epoch)의 모델은 잠재변수가
+    # 거의 안 쓰여 사실상 선형 반응이라, 방향 상관 같은 **척도 없는** 지표가 과장된다 —
+    # 2026-09-14: epoch 1 이 corr −0.904 로 1 등인데 sel_nmae 15.6 · θy mae 2.54° 였고,
+    # 실제로 쓸 만한 epoch 43 은 corr −0.800 · sel_nmae 13.4 · 1.79° 였다.
+    checkpoint_min_epoch: int = 0
     # β 자동 조정 — train.py 헤더의 선택 규칙(gap ≤ σ_net 이면서 vy_std > 0 인 최소 β)을 epoch 마다 적용.
     # exp1(β=0.5 고정)은 ep5~7 붕괴 → ep19 누설로 넘어갔다. 고정 β 하나로는 양쪽을 다 못 피한다.
     # 고정 β 스윕을 하려면 beta_adapt=false.

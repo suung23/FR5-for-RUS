@@ -437,7 +437,7 @@ class Trainer:
             logger.info(msg)
             self.adapt_beta(va)          # 저장 전에 — last.pt 는 다음 epoch 에 쓸 β 를 담아야 한다
             self.save("last.pt")
-            if score < self.best:
+            if score < self.best and self.epoch > int(getattr(self.cfg.train, "checkpoint_min_epoch", 0)):
                 self.best = score
                 self.save("best.pt")
         return self.history

@@ -1,0 +1,213 @@
+{
+  "created": "2026-09-14 12:09:08",
+  "checkpoint": "/home/rosotauser/FR5-for-RUS/policy_learning/runs/qres2_ep25.pt",
+  "duration_s": 180.0,
+  "seed": 0,
+  "conditions": [
+    "rule",
+    "hold",
+    "search"
+  ],
+  "poses": 8,
+  "repeats": 1,
+  "plan": [
+    {
+      "index": 1,
+      "pose": 1,
+      "order_in_pose": 1,
+      "condition": "rule",
+      "status": "done",
+      "gate_met_at_start": false,
+      "verdict": {
+        "success": true,
+        "best_run_s": 40.19185757637024,
+        "good_fraction": 0.595,
+        "q_mean": 0.8701091217332416,
+        "q_final_10s": 0.8640037190796125,
+        "q_view_mean": 0.7357672554737885,
+        "q_view_final_10s": 0.7861791210027071,
+        "area_max": 0.0731736421585083,
+        "n_samples": 1800,
+        "found": true,
+        "find_time_s": 6.9663543701171875,
+        "hold_window_s": 172.67731642723083,
+        "hold_good_fraction": 0.5960648148148148,
+        "hold_worst_loss_s": 21.039647579193115,
+        "hold_q_mean": 0.7395750563769496,
+        "hold_q_min": 0.06896551724137931,
+        "hold_q_pass_fraction": 0.5075231481481481,
+        "hold_q_pass_run_s": 37.396695613861084,
+        "force_max_n": 5.431859493255615,
+        "force_mean_n": 2.732224225865175,
+        "time_above_warn_s": 5.000213861465454,
+        "time_above_limit_s": 0.19971847534179688,
+        "hold_force_max_n": 5.431859493255615
+      }
+    },
+    {
+      "index": 2,
+      "pose": 1,
+      "order_in_pose": 2,
+      "condition": "search",
+      "status": "gate_reject",
+      "gate_met_at_start": null,
+      "verdict": {}
+    },
+    {
+      "index": 3,
+      "pose": 1,
+      "order_in_pose": 3,
+      "condition": "hold",
+      "status": "gate_reject",
+      "gate_met_at_start": null,
+      "verdict": {}
+    },
+    {
+      "index": 4,
+      "pose": 2,
+      "order_in_pose": 1,
+      "condition": "search",
+      "status": "pending"
+    },
+    {
+      "index": 5,
+      "pose": 2,
+      "order_in_pose": 2,
+      "condition": "hold",
+      "status": "pending"
+    },
+    {
+      "index": 6,
+      "pose": 2,
+      "order_in_pose": 3,
+      "condition": "rule",
+      "status": "pending"
+    },
+    {
+      "index": 7,
+      "pose": 3,
+      "order_in_pose": 1,
+      "condition": "rule",
+      "status": "pending"
+    },
+    {
+      "index": 8,
+      "pose": 3,
+      "order_in_pose": 2,
+      "condition": "hold",
+      "status": "pending"
+    },
+    {
+      "index": 9,
+      "pose": 3,
+      "order_in_pose": 3,
+      "condition": "search",
+      "status": "pending"
+    },
+    {
+      "index": 10,
+      "pose": 4,
+      "order_in_pose": 1,
+      "condition": "rule",
+      "status": "pending"
+    },
+    {
+      "index": 11,
+      "pose": 4,
+      "order_in_pose": 2,
+      "condition": "search",
+      "status": "pending"
+    },
+    {
+      "index": 12,
+      "pose": 4,
+      "order_in_pose": 3,
+      "condition": "hold",
+      "status": "pending"
+    },
+    {
+      "index": 13,
+      "pose": 5,
+      "order_in_pose": 1,
+      "condition": "rule",
+      "status": "pending"
+    },
+    {
+      "index": 14,
+      "pose": 5,
+      "order_in_pose": 2,
+      "condition": "search",
+      "status": "pending"
+    },
+    {
+      "index": 15,
+      "pose": 5,
+      "order_in_pose": 3,
+      "condition": "hold",
+      "status": "pending"
+    },
+    {
+      "index": 16,
+      "pose": 6,
+      "order_in_pose": 1,
+      "condition": "hold",
+      "status": "pending"
+    },
+    {
+      "index": 17,
+      "pose": 6,
+      "order_in_pose": 2,
+      "condition": "rule",
+      "status": "pending"
+    },
+    {
+      "index": 18,
+      "pose": 6,
+      "order_in_pose": 3,
+      "condition": "search",
+      "status": "pending"
+    },
+    {
+      "index": 19,
+      "pose": 7,
+      "order_in_pose": 1,
+      "condition": "hold",
+      "status": "pending"
+    },
+    {
+      "index": 20,
+      "pose": 7,
+      "order_in_pose": 2,
+      "condition": "rule",
+      "status": "pending"
+    },
+    {
+      "index": 21,
+      "pose": 7,
+      "order_in_pose": 3,
+      "condition": "search",
+      "status": "pending"
+    },
+    {
+      "index": 22,
+      "pose": 8,
+      "order_in_pose": 1,
+      "condition": "search",
+      "status": "pending"
+    },
+    {
+      "index": 23,
+      "pose": 8,
+      "order_in_pose": 2,
+      "condition": "rule",
+      "status": "pending"
+    },
+    {
+      "index": 24,
+      "pose": 8,
+      "order_in_pose": 3,
+      "condition": "hold",
+      "status": "pending"
+    }
+  ]
+}

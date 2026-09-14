@@ -1,0 +1,191 @@
+{
+  "created": "2026-09-14 19:34:49",
+  "checkpoint": "/home/rosotauser/FR5-for-RUS/policy_learning/runs/final_v2/best.pt",
+  "duration_s": 120.0,
+  "seed": 0,
+  "conditions": [
+    "rule",
+    "hold",
+    "hybrid"
+  ],
+  "poses": 6,
+  "repeats": 1,
+  "plan": [
+    {
+      "index": 1,
+      "pose": 1,
+      "order_in_pose": 1,
+      "condition": "rule",
+      "status": "done",
+      "gate_met_at_start": false,
+      "verdict": {
+        "success": false,
+        "best_run_s": 0.0,
+        "good_fraction": 0.0,
+        "q_mean": 0.7213060869254209,
+        "q_final_10s": 0.7213061094284058,
+        "q_view_mean": 0.0,
+        "q_view_final_10s": 0.0,
+        "area_max": 0.0,
+        "start_area": 0.0,
+        "start_has_mask": 0.0,
+        "n_samples": 1202,
+        "found": false,
+        "find_time_s": NaN,
+        "hold_window_s": 0.0,
+        "hold_good_fraction": NaN,
+        "hold_worst_loss_s": NaN,
+        "hold_q_mean": NaN,
+        "hold_q_min": NaN,
+        "hold_q_pass_fraction": NaN,
+        "hold_q_pass_run_s": NaN,
+        "force_max_n": 5.066051483154297,
+        "force_mean_n": 2.9397647896055448,
+        "time_above_warn_s": 6.216012716293335,
+        "time_above_limit_s": 0.19992780685424805,
+        "hold_force_max_n": 5.066051483154297
+      }
+    },
+    {
+      "index": 2,
+      "pose": 1,
+      "order_in_pose": 2,
+      "condition": "hybrid",
+      "status": "pending"
+    },
+    {
+      "index": 3,
+      "pose": 1,
+      "order_in_pose": 3,
+      "condition": "hold",
+      "status": "pending"
+    },
+    {
+      "index": 4,
+      "pose": 2,
+      "order_in_pose": 1,
+      "condition": "hybrid",
+      "status": "pending"
+    },
+    {
+      "index": 5,
+      "pose": 2,
+      "order_in_pose": 2,
+      "condition": "hold",
+      "status": "pending"
+    },
+    {
+      "index": 6,
+      "pose": 2,
+      "order_in_pose": 3,
+      "condition": "rule",
+      "status": "pending"
+    },
+    {
+      "index": 7,
+      "pose": 3,
+      "order_in_pose": 1,
+      "condition": "rule",
+      "status": "pending"
+    },
+    {
+      "index": 8,
+      "pose": 3,
+      "order_in_pose": 2,
+      "condition": "hold",
+      "status": "pending"
+    },
+    {
+      "index": 9,
+      "pose": 3,
+      "order_in_pose": 3,
+      "condition": "hybrid",
+      "status": "pending"
+    },
+    {
+      "index": 10,
+      "pose": 4,
+      "order_in_pose": 1,
+      "condition": "rule",
+      "status": "pending"
+    },
+    {
+      "index": 11,
+      "pose": 4,
+      "order_in_pose": 2,
+      "condition": "hybrid",
+      "status": "pending"
+    },
+    {
+      "index": 12,
+      "pose": 4,
+      "order_in_pose": 3,
+      "condition": "hold",
+      "status": "pending"
+    },
+    {
+      "index": 13,
+      "pose": 5,
+      "order_in_pose": 1,
+      "condition": "rule",
+      "status": "pending"
+    },
+    {
+      "index": 14,
+      "pose": 5,
+      "order_in_pose": 2,
+      "condition": "hybrid",
+      "status": "pending"
+    },
+    {
+      "index": 15,
+      "pose": 5,
+      "order_in_pose": 3,
+      "condition": "hold",
+      "status": "pending"
+    },
+    {
+      "index": 16,
+      "pose": 6,
+      "order_in_pose": 1,
+      "condition": "hold",
+      "status": "pending"
+    },
+    {
+      "index": 17,
+      "pose": 6,
+      "order_in_pose": 2,
+      "condition": "rule",
+      "status": "pending"
+    },
+    {
+      "index": 18,
+      "pose": 6,
+      "order_in_pose": 3,
+      "condition": "hybrid",
+      "status": "pending"
+    }
+  ],
+  "pose_start": {
+    "1": [
+      -0.5130045776367187,
+      -0.3607225341796875,
+      0.4143643798828125,
+      -0.006974493983955537,
+      -0.34726544280680494,
+      0.9371347446600449,
+      -0.033712594335263024
+    ]
+  },
+  "pose_last_end": {
+    "1": [
+      -0.4701087951660156,
+      -0.31464224243164063,
+      0.41385659790039064,
+      -0.05130301160305299,
+      -0.3446268639255191,
+      0.93593828220846,
+      -0.05118454413195353
+    ]
+  }
+}

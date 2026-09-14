@@ -1,0 +1,9 @@
+episode,condition,mtime,success,start_area,area_max,qview_max,mask_frac,n_ticks,find,hold,home,force_max_n,find_axes,align_axis
+ep0001_pose01_rule,rule,1789366441,True,0.0672,0.1245,0.9011,1.0,600,19,581,0,5.045,"thx,thy,y",thy
+ep0002_pose01_search,search,1789366441,True,0.1194,0.12,0.923,0.9192,600,0,0,0,4.508,,
+ep0003_pose01_hold,hold,1789366441,True,0.0744,0.0779,0.8124,1.0,601,0,0,0,4.099,,
+ep0004_pose02_search,search,1789366441,True,0.033,0.0934,0.8893,0.9809,599,0,0,0,5.189,,
+ep0005_pose02_hold,hold,1789366441,True,0.0873,0.1296,0.9514,1.0,601,0,0,0,4.636,,
+ep0006_pose02_rule,rule,1789366441,True,0.1143,0.1177,0.9791,0.827,570,193,377,0,2.779,"thx,thy,y",thy
+ep0007_pose03_rule,rule,1789366441,True,0.0309,0.1119,0.9353,0.9644,550,233,284,33,4.164,"thx,thy,y",thy
+ep0008_pose03_hold,hold,1789366441,True,0.0332,0.0695,0.4679,0.9994,601,0,0,0,3.841,,

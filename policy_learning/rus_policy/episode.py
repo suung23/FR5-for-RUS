@@ -41,7 +41,11 @@ from .perception import STATE_FEATURE_NAMES
 #: "axis_probe" 는 실험 조건이 아니라 **측정 모드**다 — 축별 기하 이득을 재려고 정해진
 #: 순서로 한 축씩 흔든다 (rus_policy.axis_probe). 성공/실패를 세지 않는다.
 #: "rule" 은 학습된 정책 없이 U-Net 마스크만 보고 도는 규칙 제어기 (rus_policy.rule_control).
-CONDITIONS = ("hold", "placebo", "policy", "expert", "search", "axis_probe", "rule")
+#: ``hybrid`` 는 **찾기는 규칙, 정렬은 정책**이다. 면외(찾기)는 단일 2D 프레임에서 구조적으로
+#: 관측 불가능하므로(ρ = −0.026) 학습이 풀 대상이 아니고, 학습이 겨냥한 것은 면내(정렬)다
+#: (docs/PROTOCOL_SONOLOGGER_INPLANE.md §1). ``policy`` 혼자서는 빈 화면에서 되돌릴 중심
+#: 편차가 없어 시작조차 못 한다 — 2026-09-14 ep0025 가 221 틱 내내 마스크 0 % 였다.
+CONDITIONS = ("hold", "placebo", "policy", "expert", "search", "axis_probe", "rule", "hybrid")
 
 _IDX = {name: i for i, name in enumerate(STATE_FEATURE_NAMES)}
 AREA = _IDX["area_ratio"]

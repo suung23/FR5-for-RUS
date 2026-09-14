@@ -1,0 +1,140 @@
+{
+  "_": "실험 고정 항목. 두 실행을 같은 자로 보기 위한 것 — 하나라도 다르면 비교가 깨진다.",
+  "created": "2026-09-14",
+  "reference_run": "runs/main_rule",
+  "unet": {
+    "checkpoint": "Unet_seg/checkpoints/phantom_dyn_r2/last.pt",
+    "config": "Unet_seg/configs/phantom_c10ur_finetune.yaml",
+    "checkpoint_id": "9e8ef542d833"
+  },
+  "view_quality": {
+    "AREA_FULL": 0.12,
+    "source_sha1": "d9d05e1f49f2"
+  },
+  "thresholds": {
+    "q_view_min": 0.977,
+    "area_min": 0.04,
+    "component_min": 0.8,
+    "centroid_max": 0.3,
+    "hold_s": 3.0
+  },
+  "bmode": {
+    "radius_mm": 59.0,
+    "half_angle_deg": 28.0,
+    "depth_mm": 220.0,
+    "flip_lines": false,
+    "n_lines": 160,
+    "n_samples": 512,
+    "out_size": 256,
+    "supersample": 2
+  },
+  "operator_attest": [
+    "팬텀 물풍선 충전량을 기준 실행과 같게 두었다",
+    "초음파 장비 깊이 설정이 220 mm 다",
+    "ROI 부채꼴 마스크를 바꾸지 않았다"
+  ],
+  "rule_inputs": {
+    "_": "규칙 제어기의 축·이득. 이 파일이 바뀌면 rule 조건이 다른 제어기가 된다.",
+    "frame_map": {
+      "path": "runs/frame_map.json",
+      "sha1": "76f8b10148f1"
+    },
+    "axis_gains": {
+      "path": "runs/probe_rot/attempt_001/axis_gains.json",
+      "sha1": "9b537b65becc"
+    }
+  },
+  "runner": {
+    "_": "기준 실행(runs/main_rule, 2026-09-14 15:45)의 인자. 그대로 재현해야 짝이 된다.",
+    "duration_s": 120.0,
+    "axes": "all",
+    "max_deg_s": 3.0,
+    "max_mm_s": 3.0,
+    "start_force": 1.0,
+    "start_gate": "off",
+    "gamma": 0.2,
+    "blind": true,
+    "execute": true,
+    "rule_args": [
+      "--rule-good-enough",
+      "0.70",
+      "--rule-find-axes",
+      "thx,thy,y",
+      "--rule-find-range-deg",
+      "12",
+      "--rule-find-range-mm",
+      "25",
+      "--rule-oop-scale",
+      "0.5",
+      "--rule-align-max-deg",
+      "6",
+      "--rule-refine-cooldown-s",
+      "5"
+    ]
+  },
+  "phantom_fill_position_A_archived": {
+    "_": "충전 상태의 지문. AREA_FULL 을 무효로 만드는 바로 그 변수라 숫자로 묶는다.\n**도달 가능한 최대 면적**으로 잰다 — 충전량이 직접 정하는 양이고, 에피소드마다 얼마나 잘 찾았는지에 덜 흔들린다. 그래서 참조 에피소드는 **방광을 가장 잘 잡은 자세**에서 찍어야 한다 (못 찾은 에피소드를 주면 낮게 나와 탈락한다 — 그것이 의도다).",
+    "episode_max_area": {
+      "n": 13,
+      "all": [
+        0.0707,
+        0.0923,
+        0.1139,
+        0.1149,
+        0.1153,
+        0.1154,
+        0.1214,
+        0.1228,
+        0.1248,
+        0.1253,
+        0.1304,
+        0.1319,
+        0.1415
+      ],
+      "top5_median": 0.1304
+    },
+    "accept_range": [
+      0.1104,
+      0.1504
+    ]
+  },
+  "phantom_fill": {
+    "_": "팬텀 지문. **2026-09-14 ep0020 기점으로 팬텀이 움직여** 기준이 바뀌었다 — 그 전 값은 phantom_fill_position_A_archived 에 남겼다. 위치가 바뀌면 기록된 자세 좌표가 팬텀의 다른 자리를 가리키므로 도달 가능 면적이 통째로 달라진다. 위치 A 의 자세와 위치 B 의 자세는 **짝이 되지 않는다.**",
+    "position": "B (2026-09-14 18:34~)",
+    "episode_max_area": {
+      "n": 7,
+      "all": [
+        0.0357,
+        0.0544,
+        0.0637,
+        0.0725,
+        0.0742,
+        0.0755,
+        0.0812
+      ],
+      "top5_median": 0.0742
+    },
+    "accept_range": [
+      0.0542,
+      0.0942
+    ]
+  },
+  "rule_position_A_archived": {
+    "q_good_enough": 0.85
+  },
+  "rule": {
+    "_": "q_good_enough — 훑기를 도중에 멈춰도 되는 q_view. **2026-09-14 위치 B 로 옮기며 0.85 → 0.70 으로 내렸다.** 위치 B 는 면적이 AREA_FULL(0.12)의 68 % 까지만 가서 q_view 천장이 0.839 다 — 0.85 를 한 번도 못 넘어 멈춤이 죽어 있었다 (훑기가 좋은 자리를 지나쳐도 안 멈춘다는 조작자 관찰로 드러났다).\n0.70 의 근거: 위치 A 에서 0.85 를 넘은 프레임이 18.1 % 였고, 위치 B 에서 그 비율에 해당하는 값은 0.646 이다. 0.70 은 그보다 보수적이며 위치 B 프레임의 12.7 % 가 넘는다.\n**결과를 보기 전에 정했다** — 사전 등록의 요건이다.",
+    "q_good_enough": 0.7,
+    "position": "B",
+    "derivation": {
+      "posA_frac_above_0.85": 0.1811,
+      "posB_matched_threshold": 0.646,
+      "chosen": 0.7,
+      "posB_frac_above_chosen": 0.1274
+    }
+  },
+  "known_limitations": [
+    "위치 B 에서 q_view_min(0.977) 을 넘는 프레임이 0 % 다 — hold_q_pass_fraction 계열 보조 지표는 전부 0 으로 나온다. 성공 판정(면적 0.04 · 연결성분 0.80 · 중심 0.30)은 영향 없다.",
+    "위치 A 의 자세와 위치 B 의 자세는 짝이 되지 않는다 (ep0020 기점으로 팬텀이 움직였다)."
+  ]
+}

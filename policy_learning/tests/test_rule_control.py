@@ -656,8 +656,10 @@ def test_runner_lets_the_controller_come_home():
     import re
     from pathlib import Path
     src = (Path(__file__).resolve().parents[1] / "scripts" / "run_policy.py").read_text(encoding="utf-8")
-    blk = re.search(r'if self\.condition == "rule" and too_far.*?\n\s*if self\.condition in',
-                    src, re.S).group(0)
+    # 2026-09-14: hybrid 조건이 생기며 `== "rule"` 이 `in ("rule", "hybrid")` 가 됐다.
+    # 지키려는 성질(복귀 지령을 끊지 않는다)은 같으므로 두 표기를 모두 받는다.
+    blk = re.search(r'if self\.condition (?:== "rule"|in \("rule", "hybrid"\)) and too_far'
+                    r'.*?\n\s*if self\.condition in \("hold"', src, re.S).group(0)
     assert "too_far = False" in blk, blk
 
 
@@ -791,3 +793,22 @@ def test_an_unfixable_deficit_is_still_named_when_the_axes_are_idle():
                          q_parts=_parts(contrast=0.0, confidence=0.5))
     assert not np.any(vel), note
     assert "force_search" in note or "U-Net" in note, note
+
+
+def test_hybrid_builds_the_rule_controller():
+    """hybrid 는 찾기를 규칙이 한다 — 제어기를 안 만들면 첫 틱에서 죽는다.
+
+    2026-09-14 ep0027 이 그렇게 죽었다. 가드가 `== "rule"` 하나만 보고 있었다.
+    """
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "scripts" / "run_policy.py").read_text(encoding="utf-8")
+    assert 'if self.condition in ("rule", "hybrid"):' in src
+    assert 'if self.condition == "rule":\n            g = AxisGains.load' not in src
+
+
+def test_hybrid_hands_alignment_to_the_policy():
+    """유지 국면에서만 정책으로 넘어간다 — 찾기는 규칙이 계속 쥔다."""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "scripts" / "run_policy.py").read_text(encoding="utf-8")
+    assert 'if self.condition == "hybrid" and self.rule.phase == "유지":' in src
+    assert "a = a_policy" in src

@@ -1,0 +1,2 @@
+index,pose,condition,started,success,gate_met,best_run_s,q_seg,q_seg_final_10s,q_mean,q_final_10s,area_max,good_fraction,hold_q_mean,hold_q_pass_fraction,hold_good_fraction,dir
+1,1,rule,1,0,0,0.0,0.0,0.0,0.7213060869254209,0.7213061094284058,0.0,0.0,nan,nan,nan,ep0001_pose01_rule

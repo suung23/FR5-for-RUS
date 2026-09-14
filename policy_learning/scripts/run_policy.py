@@ -68,7 +68,7 @@ from rus_policy.axis_probe import AxisProbe
 from rus_policy.frame_map import FrameMap
 from rus_policy.pose_return import parse_optional as parse_pose_target
 from rus_policy.rule_control import RuleController
-from rus_policy.view_quality import view_quality
+from rus_policy.view_quality import AREA_FULL, view_quality
 from rus_policy.perception import STATE_DIM, apply_frame_transform, build_backend
 from rus_policy.config import load_config
 from rus_policy.train import load_policy
@@ -239,9 +239,11 @@ class PolicyRunner(Node):
             axes=AXES_XYZ if args.search_axes == "xyz" else AXES_XY,
             rate=float(args.max_deg_s), step=float(args.search_step_deg),
             settle_s=float(args.search_settle_s), min_gain=float(args.search_min_gain))
-        # 규칙 제어 (condition=rule). 이득 파일이 있어야 축과 부호를 안다.
+        # 규칙 제어 (condition=rule·hybrid). 이득 파일이 있어야 축과 부호를 안다.
+        # **hybrid 도 반드시 만들어야 한다** — 찾기를 규칙이 하기 때문이다. 2026-09-14 에
+        # 여기를 빼먹어 ep0027 이 첫 틱에서 self.rule=None 으로 죽었다.
         self.rule, self._rule_note = None, ""
-        if self.condition == "rule":
+        if self.condition in ("rule", "hybrid"):
             g = AxisGains.load(args.gains) if args.gains else None
             if g is None:
                 raise SystemExit(
@@ -828,8 +830,10 @@ class PolicyRunner(Node):
             far = self._excursion_deg() > self.args.search_max_excursion_deg
             w = self.search.update(t, self.q_view, blocked=far)
             a = np.array([0.0, 0.0, 0.0, w[0], w[1], w[2]], dtype=float)
-        if self.condition == "rule":
-            # 학습된 정책도 Q̂ 도 쓰지 않는다 — U-Net 마스크와 실측 이득만으로 돈다.
+        if self.condition in ("rule", "hybrid"):
+            # rule   — 학습된 정책도 Q̂ 도 쓰지 않는다. U-Net 마스크와 실측 이득만으로 돈다.
+            # hybrid — **찾기만** 규칙이 하고, 방광이 보이면 정렬은 정책(위에서 계산한 a)에
+            #          넘긴다. 두 조건의 차이가 정렬 제어기 하나로 좁혀져 짝 비교가 된다.
             st = self.states[-1]
             from rus_policy.episode import AREA, CENTROID_DX, HAS_MASK
             # Q_seg 를 넘긴다 — 찾기와 유지의 목적량이 이것이다. 면적만 보면 "크지만
@@ -840,6 +844,11 @@ class PolicyRunner(Node):
                 force_settled=self._force_settled(fn),
                 shear_xy=self._shear_xy())
             self._rule_note = note
+            if self.condition == "hybrid" and self.rule.phase == "유지":
+                # 유지(정렬) 국면에서는 규칙의 지령을 버리고 정책의 것을 쓴다. 찾기·복귀는
+                # 규칙이 그대로 맡는다 — 그 축은 학습이 풀 수 없는 축이다.
+                a = a_policy
+                self._rule_note = note + " · 정렬=정책"
         if self.condition == "axis_probe":
             # 실험이 아니라 측정이다 — 정해진 순서로 한 축씩 흔들어 기하 이득을 잰다.
             # 정책도 Q̂ 도 쓰지 않는다.
@@ -853,7 +862,7 @@ class PolicyRunner(Node):
         # 여기서 지령을 끊으면 되돌아올 수단까지 끊긴다 — 2026-09-14 rule_v3 attempt_003 이
         # 112 s 에 30° 에 닿아 남은 68 s 동안 아무것도 못 했다. 그래도 러너의 상한을 넘으면
         # 제어기의 복귀가 안 듣는다는 뜻이니 그때는 멈춘다 (안전선은 남긴다).
-        if self.condition == "rule" and too_far and self.rule is not None:
+        if self.condition in ("rule", "hybrid") and too_far and self.rule is not None:
             if self.rule.phase == "복귀":
                 too_far = False
         if self.condition in ("hold", "expert") or too_far:
@@ -909,6 +918,7 @@ class PolicyRunner(Node):
             else:
                 tag = {"hold": "hold — 지령 안 함", "expert": "expert — 사람이 지령",
                        "placebo": "placebo — 방향 무작위", "policy": "policy",
+                       "hybrid": "hybrid — 찾기=규칙 · 정렬=정책",
                        "search": "search — 재 보고 고른다"}.get(self.condition, self.condition)
                 if self.condition == "search":
                     tag += f" · {self.search.describe()} · 시작에서 {self._excursion_deg():.0f}°"
@@ -1268,6 +1278,13 @@ class PolicyRunner(Node):
             "verdict": verdict,
             "n_ticks": len(self.rows), "n_frames": self.n_img, "n_slow_perception": self.n_drop,
             "bmode": self.conv.describe() if self.conv else None,
+            # 2026-09-14: 두 실행을 같은 자로 보려면 **눈금 자체**가 기록에 있어야 한다.
+            # 지각 모델이 바뀌면 면적·중심이 바뀌고, AREA_FULL 이 바뀌면 q_view 가 통째로
+            # 다른 값이 된다. 사후에 "그때 무엇으로 쟀는가" 를 물을 수 있어야 한다.
+            "scale": {"unet_checkpoint": str(self.cfg.paths.unet_checkpoint),
+                      "unet_checkpoint_id": (self.backend.checkpoint_id if self.backend else None),
+                      "area_full": AREA_FULL,
+                      "rule_good_enough": float(self.args.rule_good_enough)},
         }, ensure_ascii=False, indent=2), encoding="utf-8")
         if not quiet:
             print(f"\n기록: {out}  (tick {len(self.rows)}, 프레임 {self.n_img})")

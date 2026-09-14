@@ -1,0 +1,4 @@
+index,pose,condition,started,success,gate_met,best_run_s,q_seg,q_seg_final_10s,q_mean,q_final_10s,area_max,good_fraction,dir,hold_q_mean,hold_q_pass_fraction,hold_good_fraction
+1,1,rule,1,1,0,40.19185757637024,0.5320273872037047,0.46974725881592694,0.8733658242455633,0.8640037190796125,0.0731736421585083,0.6093247588424437,ep0001_pose01_rule,0.5288211775907532,0.0,0.601639344262295
+2,1,search,0,0,,,,,,,,,ep0002_pose01_search,,,
+3,1,hold,0,0,,,,,,,,,ep0003_pose01_hold,,,

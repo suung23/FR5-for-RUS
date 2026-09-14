@@ -229,3 +229,22 @@ def test_meta_records_which_code_produced_it():
     assert isinstance(got["git_dirty"], bool)
     src = (Path(__file__).resolve().parents[1] / "scripts" / "run_policy.py").read_text(encoding="utf-8")
     assert '"code": code_provenance(),' in src, "meta 에 안 넣고 있다"
+
+
+def test_default_paths_do_not_depend_on_the_working_directory():
+    """cwd 가 어디든 같아야 한다.
+
+    2026-09-14 본 시험 ep0002: 기본값이 "policy_learning/configs/…" 라 저장소 뿌리에서
+    띄울 때만 맞았다. 런처는 policy_learning 안에서 러너를 띄우므로 그 자리에서 터졌고,
+    드라이버는 그것을 "시작 조건 미충족 — 폐기" 로 기록했다 (원인이 안 남는다).
+    """
+    import re
+    import sys as _sys
+    from pathlib import Path
+    _sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from run_policy import DEFAULT_PERCEPTION_CONFIG
+    assert DEFAULT_PERCEPTION_CONFIG.is_absolute(), DEFAULT_PERCEPTION_CONFIG
+    assert DEFAULT_PERCEPTION_CONFIG.is_file(), DEFAULT_PERCEPTION_CONFIG
+    src = (Path(__file__).resolve().parents[1] / "scripts" / "run_policy.py").read_text(encoding="utf-8")
+    arg = re.search(r'add_argument\("--perception-config".*?\)', src, re.S).group(0)
+    assert "DEFAULT_PERCEPTION_CONFIG" in arg, arg

@@ -63,6 +63,13 @@
   min-width: 240px;
 }
 
+/* EXPAND: 팔 뷰가 물러나고 초음파가 행 전체를 쓴다. 정사각 비율을 놓아 주어야
+   가로가 넓은 창에서 사진이 실제로 커진다 — 비율을 유지하면 높이에 묶여 그대로다. */
+.usPanelWide {
+  flex: 1 1 auto;
+  aspect-ratio: auto;
+}
+
 /* The segmentation view is two renderings of one frame, side by side, and the
    whole point of it is looking from one to the other. So they split the row
    evenly and the 3D view stands down here — see the note in App.tsx. Three

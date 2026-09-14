@@ -230,6 +230,17 @@ def judge_two_phase(t: Sequence[float], state: np.ndarray, thr: Thresholds,
     return out
 
 
+def _head_mean(t: Sequence[float], v: np.ndarray, window_s: float) -> float:
+    """처음 ``window_s`` 동안의 평균. 출발 조건을 재는 데 쓴다."""
+    t = np.asarray(t, float)
+    v = np.asarray(v, float)
+    if not t.size:
+        return float("nan")
+    m = t <= t[0] + window_s
+    good = m & np.isfinite(v)
+    return float(v[good].mean()) if good.any() else float("nan")
+
+
 def judge(t: Sequence[float], state: np.ndarray, thr: Thresholds) -> dict:
     """에피소드 하나의 결과.
 
@@ -259,6 +270,11 @@ def judge(t: Sequence[float], state: np.ndarray, thr: Thresholds) -> dict:
         "q_view_mean": float(np.mean(qv)) if qv.size else float("nan"),
         "q_view_final_10s": _tail_mean(t, qv, 10.0) if qv.size else float("nan"),
         "area_max": float(state[:, AREA].max()) if state.size else 0.0,
+        # **출발 시점의 뷰.** 한 자세의 세 조건이 같은 난이도에서 출발했는지는 조작자의
+        # 손이 아니라 이 숫자로 확인한다 — 자세가 10 mm 벗어나면 마스크 보임이 94 → 90 %
+        # 지만 30 mm 면 35 % 가 된다 (2026-09-14 실측). 짝이 안 맞은 자세는 분석에서 뺀다.
+        "start_area": _head_mean(t, state[:, AREA], 2.0),
+        "start_has_mask": _head_mean(t, (state[:, HAS_MASK] > 0.5).astype(float), 2.0),
         "n_samples": int(state.shape[0]),
     }
 

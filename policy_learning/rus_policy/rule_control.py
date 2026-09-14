@@ -44,6 +44,7 @@ from typing import Optional, Sequence
 import numpy as np
 
 from .axis_gains import EXCLUDED_AXES, AxisGains
+from .normal_align import NormalAlign
 from .view_quality import WEIGHTS as Q_WEIGHTS
 
 #: vel6 안에서의 자리 (axis_probe 와 같은 규약).
@@ -223,6 +224,8 @@ class RuleController:
     #: 복귀를 끝냈다고 보는 여유 [° 또는 mm].
     home_tol: float = 1.0
     q_target: float = 0.90            # 유지에서 목표로 하는 Q_seg — 조작자가 정한 합격선
+    #: 합격한 여유에서 결합(Q_raw)을 개선할 것인가. 끄면 예전처럼 가만히 있는다.
+    normal_align: bool = True
     # Q_seg 로 돌 때의 찾음/놓침 문턱. presence(가중치 41 %)는 면적 0.5 % 에서 이미 1 이
     # 되므로, 방광이 보이기만 하면 Q_seg 는 0.45 를 넘는다. 0.50 은 "봤다", 0.30 은
     # "놓쳤다" 다 — 면적 문턱(0.015 / 0.005)과 같은 자리를 Q_seg 눈금으로 옮긴 값이다.
@@ -258,6 +261,8 @@ class RuleController:
     #: 시작 자세 기준 축별 누적 변위. 지령을 적분해 따라간다 — 훑기의 pos 는 바퀴마다
     #: 0 으로 돌아가므로 "지금까지 얼마나 갔나" 를 모른다.
     axis_pos: dict = field(default_factory=dict, init=False)
+    #: 합격선 위에서만 도는 법선 정렬 (Q_raw 는 힘만으로는 더 안 오른다).
+    na: NormalAlign = field(default_factory=NormalAlign, init=False)
     #: 지금 훑고 있는 반경. 못 찾을 때마다 넓어지고, 찾으면 처음 값으로 돌아간다.
     find_range_now: float = field(default=0.0, init=False)
     find_range_now_deg: float = field(default=0.0, init=False)
@@ -470,7 +475,8 @@ class RuleController:
     def update(self, t: float, has_mask: bool, centroid_dx: float,
                area: float, q_view: Optional[float] = None,
                q_parts: Optional[dict] = None,
-               force_settled: bool = True) -> tuple[np.ndarray, str]:
+               force_settled: bool = True,
+               shear_xy: Optional[Sequence[float]] = None) -> tuple[np.ndarray, str]:
         """한 tick. 시각을 갱신하고 지령을 낸 뒤 누적 변위에 더한다.
 
         **시각 갱신을 여기 한 군데서만 하는 이유.** 예전에는 유지 분기에서만 갱신해서,
@@ -479,14 +485,15 @@ class RuleController:
         self._dt = max(0.0, t - (self._prev_t if self._prev_t is not None else t))
         self._prev_t = t
         vel, note = self._update(t, has_mask, centroid_dx, area, q_view, q_parts,
-                                 force_settled)
+                                 force_settled, shear_xy)
         self._accumulate(vel, self._dt)
         return vel, note
 
     def _update(self, t: float, has_mask: bool, centroid_dx: float,
                 area: float, q_view: Optional[float] = None,
                 q_parts: Optional[dict] = None,
-                force_settled: bool = True) -> tuple[np.ndarray, str]:
+                force_settled: bool = True,
+                shear_xy: Optional[Sequence[float]] = None) -> tuple[np.ndarray, str]:
         """지금 내보낼 vel6 과 한 줄 설명.
 
         ``q_view`` 를 주면 **훑기와 유지의 목적량이 Q_seg 가 된다.** 면적만 보면
@@ -602,6 +609,17 @@ class RuleController:
         # 가 말한다 — 중심이 깎았으면 정렬 축을 돌려야 하고, 면적이 깎았으면 면외로 다시
         # 훑어야 한다. 둘은 정반대 동작이다.
         if self._on_q(q_view) and q_view >= self.q_target:
+            # **합격했다 = 이 축들이 한가하다.** 그 여유로 결합(Q_raw)을 고친다. Q_raw 는
+            # 힘만으로는 더 안 오른다 — 실측에서 결합은 힘보다 자세에 훨씬 강하게 반응했고
+            # (r +0.49·+0.68 vs −0.09·−0.27) 힘 탐색은 이미 수렴해 있었다.
+            # 합격선 아래로 떨어지면 다음 tick 에 이 분기를 안 타므로 즉시 원래 일로 돌아간다.
+            if self.normal_align and shear_xy is not None:
+                nv, nnote = self.na.step(t, shear_xy)
+                if np.any(nv):
+                    self.last_note = f"유지 — {self._mark(q_view)}합격 · {nnote}"
+                    return nv, self.last_note
+                self.last_note = f"유지 — {self._mark(q_view)}합격 · {nnote}"
+                return vel, self.last_note
             self.last_note = (f"유지 — {self._mark(q_view)}합격 · 중심 {centroid_dx:+.3f} "
                               f"· 면적 {area:.4f} (가만히 둔다)")
             return vel, self.last_note

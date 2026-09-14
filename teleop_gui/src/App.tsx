@@ -61,6 +61,10 @@ export function App() {
     });
   }, []);
 
+  // 초음파를 행 전체로 키운다. 조작자가 영상을 크게 봐야 할 때가 있고, 그때 팔의
+  // 자세는 오른쪽 기둥의 수치로 충분하다. 화면 배치는 패널이 아니라 여기서 정한다.
+  const [usExpanded, setUsExpanded] = useState(false);
+
   const [view, setView] = useState<ConsoleView>(
     () => viewFromHash(window.location.hash) ?? 'monitoring',
   );
@@ -158,7 +162,16 @@ export function App() {
                   while probing; the arm beside it is context. On the frame views
                   it stands down — the triads need that width. */}
               {view === 'monitoring' || view === 'segmentation' ? (
-                <Ultrasound frame={ultrasound} className={styles.usPanel} />
+                <Ultrasound
+                  frame={ultrasound}
+                  className={`${styles.usPanel} ${
+                    usExpanded && view === 'monitoring' ? styles.usPanelWide : ''
+                  }`}
+                  expanded={usExpanded}
+                  onToggleExpand={
+                    view === 'monitoring' ? () => setUsExpanded((on) => !on) : undefined
+                  }
+                />
               ) : null}
               {/* Beside the sector, never instead of it. The two are different
                   scan conversions of the same probe, and the operator has to be
@@ -174,7 +187,7 @@ export function App() {
               {view === 'segmentation' ? (
                 <BladderSegmentation frame={segmentation} className={styles.segPanel} />
               ) : null}
-              {view === 'segmentation' ? null : (
+              {view === 'segmentation' || (usExpanded && view === 'monitoring') ? null : (
               <Workspace
                 jointPositions={telemetry.jointPositions}
                 available={available}

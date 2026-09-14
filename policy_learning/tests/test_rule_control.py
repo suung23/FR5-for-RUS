@@ -684,17 +684,19 @@ def test_the_rule_controller_can_never_command_the_beam_axis():
     assert 2 not in AXIS_INDEX.values(), AXIS_INDEX
 
 
-def test_the_lateral_gate_is_skipped_without_a_rule_controller():
-    """hold·placebo·policy·search 에는 규칙 제어기가 없다 — 거기서 부르면 죽는다.
+def test_the_lateral_gate_survives_without_a_rule_controller():
+    """hold·placebo·policy·search 에는 규칙 제어기가 없다 — 거기서 부르면 죽었다.
 
     2026-09-14 본 시험 3 번째 에피소드(hold)가 여기서 AttributeError 로 멈췄다. 24 개
-    중 3 개째였다.
+    중 3 개째였다. 그런데 **복귀는 조건과 무관하게 병진을 쓴다** — hold 도 기준 자세로
+    돌아가야 하므로, 규칙 제어기가 없다고 통째로 건너뛰어도 안 된다.
     """
     import re
     from pathlib import Path
     src = (Path(__file__).resolve().parents[1] / "scripts" / "run_policy.py").read_text(encoding="utf-8")
     fn = re.search(r"def _enable_lateral_if_needed.*?\n    def ", src, re.S).group(0)
-    body = fn[fn.index('"""', fn.index('"""') + 3) + 3:]
-    guard = body.index("if self.rule is None:")
-    use = body.index("self.rule.align_axis")
-    assert guard < use, "규칙 제어기가 없는지 먼저 보지 않는다"
+    assert "if self.rule is not None:" in fn, "규칙 제어기가 없는 경우를 안 가린다"
+    assert "self.return_to is not None" in fn, "복귀에 병진이 필요한 것을 안 본다"
+    guard = fn.index("if self.rule is not None:")
+    use = fn.index("self.rule.align_axis")
+    assert guard < use, "먼저 확인하지 않는다"

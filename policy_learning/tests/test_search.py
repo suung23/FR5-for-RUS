@@ -252,3 +252,105 @@ def test_peak_is_resolved_more_finely_than_the_coarse_step():
     tail = lambda tr: np.mean([np.linalg.norm(a) for _, a, _, _ in tr[int(len(tr) * 0.8):]])
     assert fine.current_step < 5.0, fine.current_step
     assert tail(tf) < tail(tc), (tail(tf), tail(tc))
+
+
+# --- 한 자세의 조건들은 같은 자리에서 출발해야 한다 (2026-09-14) ----------------
+
+def test_pose_guidance_tells_you_not_to_move_within_a_pose():
+    """매 에피소드 자세를 새로 잡으면 조건 차이와 자세 차이가 섞인다.
+
+    rule_v2 에서 프로브가 8 회에 59 mm 밀렸고 유지 성적이 81 % 에서 0 % 로 떨어졌다.
+    드라이버가 매번 "텔레옵으로 시작 자세를 잡고" 라고만 말해서, 조작자가 자세를 새로
+    잡는 것이 옳다고 읽을 수밖에 없었다.
+    """
+    import sys as _sys
+    from pathlib import Path
+    _sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from run_experiment import pose_guidance
+    first = pose_guidance({}, {"pose": 1, "order_in_pose": 1}, Path("."))
+    assert "새 자세" in first and "보이지 않는 곳" in first, first
+
+    # 기록은 m 단위 (decisions.csv 와 같다). 화면에는 mm 로 보여 준다.
+    sess = {"pose_start": {"1": [-0.5018, -0.3423, 0.4143, 1, 0, 0, 0]},
+            "pose_last_end": {"1": [-0.5195, -0.3696, 0.4188, 1, 0, 0, 0]}}
+    later = pose_guidance(sess, {"pose": 1, "order_in_pose": 2}, Path("."))
+    assert "같은 자세" in later and "손대지 말고" in later, later
+    assert "스스로 기준 자리로 되돌아간" in later, "자동 복귀를 안 알려 준다"
+    assert "-501.8" in later, f"기준 자리를 안 알려 준다: {later}"
+    assert "33 mm" in later, f"기준에서 얼마나 벗어났는지 안 알려 준다: {later}"
+
+
+def test_the_return_target_is_only_given_from_the_second_condition():
+    """자세의 첫 조건은 **기준을 만드는** 에피소드다 — 돌아갈 곳이 없다."""
+    import sys as _sys
+    from pathlib import Path
+    _sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from run_experiment import pose_arg
+    sess = {"pose_start": {"1": [-0.5018, -0.3423, 0.4143, 1.0, 0.0, 0.0, 0.0]}}
+    assert pose_arg(sess, {"pose": 1, "order_in_pose": 1}) == []
+    got = pose_arg(sess, {"pose": 1, "order_in_pose": 2})
+    assert len(got) == 1 and got[0].startswith("--return-to-pose="), got
+    from rus_policy.pose_return import PoseTarget
+    t = PoseTarget.parse(got[0].split("=", 1)[1])
+    assert abs(t.p[0] - (-0.5018)) < 1e-6, t.p
+    # 기준이 없으면 인자를 주지 않는다 — 러너가 빈 값으로 죽으면 안 된다
+    assert pose_arg({}, {"pose": 2, "order_in_pose": 3}) == []
+
+
+def test_pose_guidance_survives_a_missing_reference():
+    """첫 에피소드가 기록을 못 남겼어도 드라이버가 죽으면 안 된다."""
+    import sys as _sys
+    from pathlib import Path
+    _sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from run_experiment import pose_guidance
+    got = pose_guidance({}, {"pose": 3, "order_in_pose": 2}, Path("."))
+    assert "같은 자세" in got
+
+
+def test_plan_groups_conditions_by_pose():
+    """자세별로 묶여야 한 자리에서 세 조건을 연속으로 받을 수 있다."""
+    import sys as _sys
+    from pathlib import Path
+    _sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from run_experiment import build_plan
+    plan = build_plan(3, ["rule", "hold", "search"], 1, seed=0)
+    assert [e["pose"] for e in plan] == [1, 1, 1, 2, 2, 2, 3, 3, 3]
+    for pose in (1, 2, 3):
+        block = [e["condition"] for e in plan if e["pose"] == pose]
+        assert sorted(block) == ["hold", "rule", "search"], block
+
+
+def test_the_return_target_survives_a_leading_minus():
+    """값이 "-0.5044,…" 처럼 `-` 로 시작하면 argparse 가 옵션 이름으로 읽는다.
+
+    쉼표가 있어 음수로도 안 보이므로 공백으로 띄우면 반드시 깨진다. 2026-09-14 본 시험
+    ep0005 가 여기서 죽었다 — `=` 로 붙여야 한다.
+    """
+    import argparse
+    import sys as _sys
+    from pathlib import Path
+    _sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from run_experiment import pose_arg
+    sess = {"pose_start": {"1": [-0.5044, -0.3167, 0.4214, 0.1136, 0.3502, -0.9296, 0.0191]}}
+    got = pose_arg(sess, {"pose": 1, "order_in_pose": 2})
+    assert len(got) == 1 and got[0].startswith("--return-to-pose="), got
+    # 실제 파서로 통과하는지 본다 — 이것이 깨졌던 자리다
+    p = argparse.ArgumentParser()
+    p.add_argument("--return-to-pose", default="")
+    p.add_argument("-v", "--verbose", action="store_true")
+    ns = p.parse_args(got)
+    from rus_policy.pose_return import PoseTarget
+    assert abs(PoseTarget.parse(ns.return_to_pose).p[0] - (-0.5044)) < 1e-6
+
+
+def test_a_crashed_runner_is_not_reported_as_a_gate_failure():
+    """인자 오타로 죽어도 "시작 조건 미충족" 으로 찍히면 조작자는 자세 탓을 하게 된다."""
+    import re
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "scripts" / "run_experiment.py").read_text()
+    assert '"crashed": rc != 0' in src, "러너의 종료 코드를 안 본다"
+    blk = re.search(r'if meta\.get\("crashed"\):.*?break', src, re.S).group(0)
+    assert '"pending"' in blk, "죽은 에피소드를 '했다' 로 남긴다"
+    # 죽었으면 요약에 줄을 남기지 않는다 (다시 받을 것이므로 헛줄이 된다)
+    body = src[src.index("meta = run_episode("):src.index("append_summary(out, {")]
+    assert 'if meta.get("crashed"):' in body, "요약을 쓰기 전에 안 걸러낸다"

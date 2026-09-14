@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import logging
 import math
 import time
 from collections import deque
@@ -64,9 +65,11 @@ from rus_policy.model import ACTION_DIM
 from rus_policy.search import AXES_XY, AXES_XYZ, HillClimbSearch
 from rus_policy.axis_gains import AxisGains
 from rus_policy.axis_probe import AxisProbe
+from rus_policy.pose_return import parse_optional as parse_pose_target
 from rus_policy.rule_control import RuleController
 from rus_policy.view_quality import view_quality
 from rus_policy.perception import STATE_DIM, apply_frame_transform, build_backend
+from rus_policy.config import load_config
 from rus_policy.train import load_policy
 
 AX_LIN, AX_ANG = slice(0, 3), slice(3, 6)
@@ -119,6 +122,10 @@ def build_observation(cfg, items, t_now, quat, prev_net, prev_t, device):
             "frame_dt": t(frame_dt, torch.float32), "frame_valid": t(valid, torch.bool),
             "state": t(state, torch.float32), "vec": t(vec, torch.float32),
             "quality_now": items[-1][3]}
+
+
+#: 지각 설정의 기본 위치. **이 파일 위치에서 푼다** — cwd 가 어디든 같아야 한다.
+DEFAULT_PERCEPTION_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "policy_default.yaml"
 
 
 def code_provenance() -> dict:
@@ -250,6 +257,7 @@ class PolicyRunner(Node):
                                        find_rate=float(args.rule_find_rate_mm_s),
                                        find_axes=axes,
                                        q_target=float(args.rule_q_target),
+                                       normal_align=(args.rule_normal_align == "on"),
                                        find_oop_scale=float(args.rule_oop_scale),
                                        refine_cooldown_s=float(args.rule_refine_cooldown_s),
                                        find_widen=float(args.rule_find_widen),
@@ -258,6 +266,8 @@ class PolicyRunner(Node):
                                        align_max_mm=float(args.rule_align_max_mm),
                                        align_max_deg=float(args.rule_align_max_deg),
                                        keep_fraction=float(args.rule_keep_fraction))
+            self.rule.na.shear_ok_n = float(args.rule_shear_ok_n)
+            self.rule.na.max_excursion_deg = float(args.rule_normal_max_deg)
             self.get_logger().warn(self.rule.describe())
             # 병진 통로를 여는 것은 **생성이 끝난 뒤**다 (main). 여기서 부르면 응답을
             # 기다리는 spin 이 구독 콜백을 반쯤 지어진 객체로 들여보낸다 — 2026-09-14 에
@@ -268,6 +278,14 @@ class PolicyRunner(Node):
                                     rest_s=float(args.probe_rest_s),
                                     repeats=int(args.probe_repeats),
                                     start_area=float(args.probe_start_area))
+        # 짝지어진 비교의 전제: 한 자세의 조건들이 **같은 자리에서 출발**해야 한다.
+        # 에피소드가 끝나면 로봇은 이미 옮겨져 있으므로(ep0001 은 50 mm) 손이 아니라
+        # 여기서 되돌린다. 자세의 첫 조건에는 목표가 없다 — 그것이 기준이 된다.
+        self.return_to = parse_pose_target(args.return_to_pose,
+                                           tol_mm=float(args.return_tol_mm),
+                                           tol_deg=float(args.return_tol_deg))
+        self.return_state = {"asked": bool(self.return_to)}
+        self._return_t0 = None
         self.start_quat = None          # 에피소드 시작 자세 — 너무 멀리 가지 않게
         self.gate = StartGate(area_max=args.gate_area_max, quality_min=args.gate_quality_min,
                               confirm_s=args.gate_confirm_s)
@@ -675,6 +693,13 @@ class PolicyRunner(Node):
             return self._idle("유효한 관측 프레임이 없다 (전부 오래됐거나 무효)")
         qn = obs.pop("quality_now")
 
+        # 기준 자세로 되돌아가기. **에피소드가 시작되기 전**에 끝나야 한다 — 이것은
+        # 측정이 아니라 준비다.
+        if self.t_start is None and self.return_to is not None:
+            done = self._return_step(t)
+            if not done:
+                return
+
         # 시작 조건. 열리기 전에는 아무것도 지령하지 않는다 — 잘 보이는 자세에서 출발하면
         # 아무것도 안 해도 성공이라 찾는 능력을 못 잰다.
         if self.t_start is None:
@@ -784,7 +809,8 @@ class PolicyRunner(Node):
             a, note = self.rule.update(
                 t, st[HAS_MASK] > 0.5, float(st[CENTROID_DX]), float(st[AREA]),
                 q_view=self.q_view, q_parts=self.q_parts,
-                force_settled=self._force_settled(fn))
+                force_settled=self._force_settled(fn),
+                shear_xy=self._shear_xy())
             self._rule_note = note
         if self.condition == "axis_probe":
             # 실험이 아니라 측정이다 — 정해진 순서로 한 축씩 흔들어 기하 이득을 잰다.
@@ -826,6 +852,10 @@ class PolicyRunner(Node):
             "Q_view": self.q_view,       # 새 Q_seg. Q_now 는 옛 정의 그대로 (정책 입력)
             "probe_label": self.axis_probe.label if self.condition == "axis_probe" else "",
             "rule_phase": self.rule.phase if self.rule is not None else "",
+            "shear_n": (float(np.hypot(*self._shear_xy()))
+                        if self._shear_xy() is not None else float("nan")),
+            "na_deg": self.rule.na.excursion_deg if self.rule is not None else float("nan"),
+            "na_sign": self.rule.na.sign if self.rule is not None else float("nan"),
             "search_phase": self.search.phase if self.condition == "search" else "",
             "search_best_q": self.search.best_q if self.condition == "search" else float("nan"),
             "excursion_deg": self._excursion_deg(),
@@ -876,6 +906,16 @@ class PolicyRunner(Node):
         return judge([self.state_t[i] for i in m],
                      np.stack([self.states[i] for i in m]), thr)
 
+    def _shear_xy(self):
+        """프로브 프레임의 전단력 (fx, fy) [N]. 없으면 None.
+
+        법선에서 벗어난 만큼 여기 나타난다 — 화면의 SHEAR·OFF-AXIS 와 같은 재료다.
+        중력 보상된 렌치만 쓴다 (보상 전에는 자중 10 N 이 실려 있다).
+        """
+        if self.wrench is None:
+            return None
+        return (float(self.wrench[0]), float(self.wrench[1]))
+
     def _force_settled(self, fn: float) -> bool:
         """힘이 설정값 근처에 자리 잡았는가.
 
@@ -892,6 +932,8 @@ class PolicyRunner(Node):
 
     #: 규칙 제어기가 병진을 쓰려면 제어 스택에서 이 파라미터가 켜져 있어야 한다.
     LATERAL_PARAM = "contact_control.policy_lateral"
+    #: 병진을 어느 프레임으로 읽는가. 러너는 프로브 프레임으로 낸다 (_publish 참조).
+    LINEAR_FRAME_PARAM = "teleop.linear_frame"
     #: 그것을 이 실행이 켰는가. **클래스 속성이다** — __init__ 안에서 초기화하면 규칙
     #: 제어기 생성(그 안에서 켠다)보다 뒤라 방금 켠 것을 도로 지운다.
     _lateral_enabled = False
@@ -910,14 +952,17 @@ class PolicyRunner(Node):
 
         켜지 못하면 **시작하지 않는다.** 켜졌다고 믿고 도는 것보다 안 도는 편이 낫다.
         """
-        # 규칙 제어기가 없는 조건(hold·placebo·policy·search)은 병진을 쓸 일이 없다.
+        from rus_policy.rule_control import AXIS_INDEX
+        used = []
+        # 기준 자세로 되돌아가려면 옆으로 가야 한다 — 조건과 무관하다. hold 도 마찬가지다.
+        if self.return_to is not None:
+            used.append("복귀")
+        # 규칙 제어기가 없는 조건(hold·placebo·policy·search)은 그 밖에 병진을 쓸 일이 없다.
         # main() 에서 조건과 무관하게 부르므로 여기서 걸러야 한다 — 2026-09-14 본 시험
         # 3 번째 에피소드(hold)가 여기서 죽었다.
-        if self.rule is None:
-            return
-        from rus_policy.rule_control import AXIS_INDEX
-        used = [a for a in ([self.rule.align_axis] + list(self.rule.find_axis_list))
-                if a and AXIS_INDEX.get(a, 9) < 3]
+        if self.rule is not None:
+            used += [a for a in ([self.rule.align_axis] + list(self.rule.find_axis_list))
+                     if a and AXIS_INDEX.get(a, 9) < 3]
         if not used:
             return
         from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
@@ -930,21 +975,100 @@ class PolicyRunner(Node):
                 f"  병진 축 {used} 를 쓰려면 {self.LATERAL_PARAM} 을 켜야 하고, "
                 "켜지 않으면 병진 지령은 gate_axes 에서 조용히 버려진다.")
         req = SetParameters.Request()
-        req.parameters = [Parameter(
-            name=self.LATERAL_PARAM,
-            value=ParameterValue(type=ParameterType.PARAMETER_BOOL, bool_value=True))]
+        req.parameters = [
+            Parameter(name=self.LATERAL_PARAM,
+                      value=ParameterValue(type=ParameterType.PARAMETER_BOOL,
+                                           bool_value=True)),
+            # **병진을 프로브 프레임 그대로 받게 한다.**
+            #
+            # _remap_twist 는 gate_axes 보다 **앞**에 있다. teleop.linear_frame 이
+            # "latched" 면 러너가 프로브 프레임으로 낸 x·y 가 조작자 기준 프레임으로
+            # 재사상된 뒤에야 게이트를 지난다 — 러너는 자기가 낸 방향으로 가고 있다고
+            # 믿지만 로봇은 다른 쪽으로 간다. 2026-09-14 본 시험 ep0002 의 복귀가
+            # 그래서 발산했다 (45.9 → 7.0 → 35.3 mm 를 오가며 45 s 를 썼다).
+            # latched 는 조작자 편의다. 정책 régime 의 지령은 프로브 프레임에서 정의된다.
+            Parameter(name=self.LINEAR_FRAME_PARAM,
+                      value=ParameterValue(type=ParameterType.PARAMETER_STRING,
+                                           string_value="body")),
+        ]
         fut = cli.call_async(req)
         rclpy.spin_until_future_complete(self, fut, timeout_sec=5.0)
         res = fut.result()
         if res is None or not all(r.successful for r in res.results):
             why = "응답 없음" if res is None else "; ".join(
                 r.reason for r in res.results if not r.successful)
-            raise SystemExit(f"{self.LATERAL_PARAM} 을 켜지 못했다 ({why}) — "
-                             f"병진 축 {used} 의 지령이 사라진 채 돌게 된다")
+            raise SystemExit(f"병진 통로를 열지 못했다 ({why}) — "
+                             f"축 {used} 의 지령이 사라지거나 엉뚱한 방향으로 나간다")
         self.get_logger().warn(
-            f"{self.LATERAL_PARAM} = true 로 켰다 (병진 축 {used}). "
-            "옆으로 흐르는 동안의 힘은 따로 읽어야 한다")
+            f"{self.LATERAL_PARAM} = true · {self.LINEAR_FRAME_PARAM} = body 로 맞췄다 "
+            f"(병진 축 {used}). 옆으로 흐르는 동안의 힘은 따로 읽어야 한다")
         self._lateral_enabled = True
+
+    def _return_step(self, t: float) -> bool:
+        """기준 자세 쪽으로 한 걸음. 도착했거나 포기했으면 True.
+
+        **손으로 되돌리면 그 오차가 조건 차이에 섞인다.** 자세가 10 mm 어긋나면 마스크
+        보임이 94 → 90 % 지만 30 mm 면 44 % 가 된다 (2026-09-14 실측) — 그 차이를 제어기의
+        성적으로 읽게 된다. 빔축(z)은 밀지 않는다. 그 축은 힘 조절기의 것이고, 접촉 깊이는
+        설정된 힘이 정하지 기록된 좌표가 정하지 않는다.
+        """
+        if self.pose is None:
+            self._idle("기준 자세로 복귀 — 자세가 아직 안 온다")
+            return False
+        if self._return_t0 is None:
+            self._return_t0 = t
+        pos, o = self.pose[0], self.pose[1]
+        p_now = (pos.x, pos.y, pos.z)
+        q_now = (o.w, o.x, o.y, o.z)
+        vel, (mm, deg) = self.return_to.step(
+            p_now, q_now, max_mm_s=float(self.args.max_mm_s),
+            max_deg_s=float(self.args.max_deg_s))
+        if self.return_to.reached(p_now, q_now):
+            self._stop()
+            self.return_state.update(ok=True, err_mm=mm, err_deg=deg,
+                                     took_s=t - self._return_t0)
+            self.get_logger().warn(
+                f"기준 자세로 복귀 완료 — {mm:.1f} mm · {deg:.1f}° "
+                f"({t - self._return_t0:.0f} s). 에피소드를 시작한다")
+            self.return_to = None
+            self._idle_reason = ""
+            return True
+        if (t - self._return_t0) > float(self.args.return_timeout_s):
+            self._stop()
+            self.return_state.update(ok=False, err_mm=mm, err_deg=deg,
+                                     took_s=t - self._return_t0)
+            self.get_logger().error(
+                f"기준 자세로 복귀 실패 — {mm:.1f} mm · {deg:.1f}° 남았다 "
+                f"({self.args.return_timeout_s:.0f} s 초과). **그대로 시작한다** — "
+                "이 에피소드는 짝이 안 맞을 수 있다 (meta.return 에 남는다)")
+            self.return_to = None
+            self._idle_reason = ""
+            return True
+        self._publish_raw(vel)
+        self._idle_reason = ""
+        if not hasattr(self, "_return_logged") or (t - self._return_logged) > 2.0:
+            self._return_logged = t
+            self.get_logger().warn(f"기준 자세로 복귀 중 — {mm:.1f} mm · {deg:.1f}° 남았다")
+        return False
+
+    def _publish_raw(self, vel6: np.ndarray):
+        """병진을 살려 보내는 경로. --axes rot 이어도 복귀는 옆으로 가야 한다.
+
+        _publish 는 ``--axes rot`` 에서 병진을 0 으로 만든다. 그것은 **에피소드 중** 정책이
+        회전만 쓰게 하려는 제약이고, 준비 단계인 복귀에는 해당하지 않는다.
+        """
+        from geometry_msgs.msg import Twist as _Twist
+        tw = _Twist()
+        lin = np.clip(np.asarray(vel6[:3], float), -self.args.max_mm_s, self.args.max_mm_s)
+        ang = np.clip(np.asarray(vel6[3:], float), -self.args.max_deg_s, self.args.max_deg_s)
+        lin[2] = 0.0                                     # 빔축은 힘 조절기의 것
+        tw.linear.x, tw.linear.y, tw.linear.z = (lin / 1000.0).tolist()
+        tw.angular.x, tw.angular.y, tw.angular.z = np.radians(ang).tolist()
+        self._held, self._held_t = tw, time.time()
+        self._last_sent = (tw.linear.x, tw.linear.y, tw.linear.z,
+                           tw.angular.x, tw.angular.y, tw.angular.z)
+        if self.args.execute:
+            self.twist_pub.publish(tw)
 
     def _close_attempt(self) -> None:
         """한 시도를 닫고 기록한 뒤 다음을 위해 비운다 (--loop).
@@ -1071,6 +1195,8 @@ class PolicyRunner(Node):
                                    else list(map(float, self.online_bias.bias()))),
             "max_mm_s": self.args.max_mm_s, "max_deg_s": self.args.max_deg_s,
             "code": code_provenance(),
+            # 이 에피소드가 기준 자세에서 출발했는가. ok=False 면 짝이 안 맞는다.
+            "return": self.return_state,
             "condition": self.condition, "duration_s": self.args.duration,
             "episode_started": self.t_start is not None,
             "stopped_by_operator_s": self.stopped_by_operator_s,
@@ -1078,6 +1204,7 @@ class PolicyRunner(Node):
             # 병진 지령이 실제로 나갔는지는 이 값이 말한다. 꺼진 채 돈 기록은 병진 축을
             # 분석에서 빼야 한다 (probe2 처럼 허수 이득이 나온다).
             "policy_lateral": bool(self._lateral_enabled),
+            "linear_frame": "body" if self._lateral_enabled else None,
             "rule_align_axis": getattr(self.rule, "align_axis", None) if self.rule else None,
             "rule_find_axes": list(getattr(self.rule, "find_axis_list", [])) if self.rule else [],
             "motion": motion,
@@ -1178,6 +1305,13 @@ def main() -> int:
                    help="면외 축(정렬 축이 아닌 찾기 축)은 반경을 이 비율로 줄여 훑는다")
     p.add_argument("--rule-refine-cooldown-s", type=float, default=5.0,
                    help="유지에서 다시 훑기로 넘어간 뒤 또 넘어가기까지의 최소 간격 [s]")
+    p.add_argument("--rule-normal-align", default="on", choices=["on", "off"],
+                   help="Q_seg 가 합격한 여유에서 전단력을 줄여 결합(Q_raw)을 개선한다. "
+                        "합격선 아래로 떨어지면 즉시 멈춘다")
+    p.add_argument("--rule-shear-ok-n", type=float, default=0.30,
+                   help="전단이 이 아래면 충분히 법선으로 본다 [N]")
+    p.add_argument("--rule-normal-max-deg", type=float, default=4.0,
+                   help="법선 정렬의 누적 회전 상한 [°]")
     p.add_argument("--rule-q-target", type=float, default=0.90,
                    help="유지에서 목표로 하는 Q_seg (합격선). 기록·표시에 쓴다")
     p.add_argument("--rule-find-widen", type=float, default=1.6,
@@ -1251,6 +1385,14 @@ def main() -> int:
     p.add_argument("--axes", default="rot", choices=["rot", "all"], help="rot=회전만 (기본), all=병진까지")
     p.add_argument("--execute", action="store_true", help="실제로 지령한다 (기본은 계산만)")
     p.add_argument("--z-samples", type=int, default=64, help="후보 수 M — Q̂ 순위가 약하므로 넉넉히")
+    p.add_argument("--return-to-pose", default="",
+                   help="에피소드를 시작하기 전에 이 자세로 되돌아간다 — "
+                        "x,y,z,qw,qx,qy,qz (기저 프레임, m). 한 자세의 두 번째 조건부터 준다. "
+                        "빔축(z)은 힘 조절기의 것이라 되돌리지 않는다")
+    p.add_argument("--return-timeout-s", type=float, default=45.0,
+                   help="이 안에 못 돌아가면 포기하고 그 사실을 기록한 채 시작한다")
+    p.add_argument("--return-tol-mm", type=float, default=3.0)
+    p.add_argument("--return-tol-deg", type=float, default=1.5)
     p.add_argument("--control-node", default="/us_diff_ik_node",
                    help="파라미터를 미는 제어 노드 — 규칙 제어기가 병진을 쓸 때 "
                         "contact_control.policy_lateral 을 여기서 켠다")
@@ -1259,6 +1401,12 @@ def main() -> int:
     p.add_argument("--max-deg-s", type=float, default=5.0)
     p.add_argument("--min-perception-fps", type=float, default=8.0, help="이보다 느린 지각은 '느림' 으로 센다")
     p.add_argument("--device", default="auto")
+    # **cwd 에 매달리면 안 된다.** 예전 기본값은 "policy_learning/configs/…" 라 저장소
+    # 뿌리에서 띄울 때만 맞았다. 런처는 policy_learning 안에서 러너를 띄우므로 그 자리에서
+    # 터졌다 (2026-09-14 본 시험 ep0002). 이 파일 위치에서 푼다 — 어디서 띄우든 같다.
+    p.add_argument("--perception-config", default=str(DEFAULT_PERCEPTION_CONFIG),
+                   help="지각(U-Net) 경로를 여기서 읽는다. 체크포인트에 박힌 경로보다 우선한다 — "
+                        "지각은 정책 학습 뒤에도 갈아 끼우는 부품이다. 빈 문자열이면 체크포인트 값을 쓴다")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args()
     setup_logging(args.verbose)
@@ -1266,8 +1414,30 @@ def main() -> int:
         raise SystemExit("ROS 2 (rclpy) 를 찾을 수 없습니다. `source ~/FR5-for-RUS/install/setup.bash` 후 실행하십시오.")
 
     model, cfg = load_policy(args.checkpoint, device=args.device)
+
+    # **지각 경로는 체크포인트가 아니라 지금의 설정 파일에서 온다.**
+    #
+    # 2026-09-14: U-Net 을 phantom_dyn_r2 로 바꾸고 policy_default.yaml 을 고쳤는데
+    # 실기는 계속 옛 모델로 돌았다. 러너가 정책 체크포인트 **안에 저장된** 설정을 쓰기
+    # 때문이다 (학습 당시의 경로가 그대로 박혀 있다). 그래서 그 에피소드의 Q_seg 가
+    # 0.07 에 멈춰 있었고, 같은 프레임을 새 모델로 재생하면 60 개 중 59 개가 검출된다.
+    #
+    # 정책 가중치는 체크포인트의 것이 맞다 — 그것을 바꾸면 다른 모델이 된다. 반면 지각은
+    # 정책이 학습된 뒤에도 갈아 끼우는 부품이므로, 두 출처가 다를 때는 **파일이 이긴다.**
+    # 갈아 끼운 사실이 로그에 남아야 나중에 기록을 되짚을 수 있다.
+    if args.perception_config:
+        live = load_config(args.perception_config)
+        for key in ("unet_checkpoint", "unet_config"):
+            was, now = getattr(cfg.paths, key), getattr(live.paths, key)
+            if str(was) != str(now):
+                logging.warning("지각 %s: 체크포인트의 %s → 설정 파일의 %s", key, was, now)
+            setattr(cfg.paths, key, now)
+        cfg.perception.propagate = dict(getattr(live.perception, "propagate", None) or {})
+
     backend = build_backend(cfg)
-    print(f"모델 {args.checkpoint}  헤드={cfg.model.head}  행동 {ACTION_DIM} 축  지각={cfg.perception.backend}")
+    print(f"모델 {args.checkpoint}  헤드={cfg.model.head}  행동 {ACTION_DIM} 축  지각={cfg.perception.backend}"
+          f"  U-Net={cfg.paths.unet_checkpoint}"
+          + (f" (id {backend.checkpoint_id})" if backend is not None else ""))
     out = Path(args.out) if args.out else Path("runs") / time.strftime("live_%Y%m%d_%H%M%S")
 
     rclpy.init()

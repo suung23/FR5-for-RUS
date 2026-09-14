@@ -77,3 +77,33 @@ def test_gravity_channel_is_filled_from_pose():
     obs = build_observation(cfg, _items(cfg, cfg.timing.obs_frames, t_now), t_now,
                             (1.0, 0.0, 0.0, 0.0), np.zeros(3, np.float32), None, torch.device("cpu"))
     assert np.allclose(obs["vec"][0, 5:8].numpy(), [0.0, 0.0, 1.0], atol=1e-6)
+
+
+def test_perception_path_comes_from_the_config_file_not_the_checkpoint():
+    """지각 경로는 **지금의 설정 파일**이 이긴다.
+
+    2026-09-14: U-Net 을 갈아 끼우고 policy_default.yaml 을 고쳤는데 실기는 옛 모델로
+    돌았다. 러너가 정책 체크포인트 안에 저장된 설정(학습 당시 경로)을 썼기 때문이다.
+    같은 프레임을 새 모델로 재생하면 60 개 중 59 개가 검출되는데, 기록에는 전부 미검출로
+    남았다 — 화면에는 Q_seg 0.07 이 이어졌고 아무 오류도 없었다.
+
+    정책 가중치는 체크포인트의 것이 맞다. 지각은 정책 학습 뒤에도 갈아 끼우는 부품이라
+    출처가 다르면 파일이 이겨야 하고, 갈아 끼운 사실이 로그에 남아야 한다.
+    """
+    src = (Path(__file__).resolve().parents[1] / "scripts" / "run_policy.py").read_text()
+    assert '"--perception-config"' in src, "지각 설정을 고를 인자가 없다"
+    # 기본값은 그 설정 파일이어야 한다 — 다만 **cwd 에 매달리면 안 된다.** 예전 기본값은
+    # 문자열 "policy_learning/configs/…" 라 저장소 뿌리에서만 맞았고, 런처가 띄우는 자리
+    # (policy_learning 안)에서는 FileNotFoundError 로 죽었다 (2026-09-14 본 시험 ep0002).
+    from run_policy import DEFAULT_PERCEPTION_CONFIG
+    assert DEFAULT_PERCEPTION_CONFIG.is_absolute() and DEFAULT_PERCEPTION_CONFIG.is_file(), \
+        f"기본 지각 설정이 없다: {DEFAULT_PERCEPTION_CONFIG}"
+    assert DEFAULT_PERCEPTION_CONFIG.name == "policy_default.yaml", DEFAULT_PERCEPTION_CONFIG
+    assert "default=str(DEFAULT_PERCEPTION_CONFIG)" in src, \
+        "기본값이 설정 파일이 아니면 예전 함정으로 되돌아간다"
+    head = src[src.index("model, cfg = load_policy(args.checkpoint"):]
+    head = head[:head.index("backend = build_backend(cfg)")]
+    assert "unet_checkpoint" in head and "setattr(cfg.paths" in head, \
+        "체크포인트의 지각 경로를 덮어쓰지 않는다"
+    assert "logging.warning" in head, "갈아 끼운 사실을 로그에 남기지 않는다"
+    assert "U-Net=" in src, "실제로 실린 U-Net 을 기동 로그에 찍지 않는다"

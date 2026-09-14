@@ -43,6 +43,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 import _common  # noqa: F401  — sys.path 부트스트랩 (설치 없이 실행)
 
@@ -99,7 +100,7 @@ def append_summary(out: Path, row: dict) -> None:
         w.writerow(row)
 
 
-def run_episode(args, ep: dict, ep_dir: Path) -> dict:
+def run_episode(args, ep: dict, ep_dir: Path, session: dict) -> dict:
     cmd = [sys.executable, str(Path(__file__).with_name("run_policy.py")), args.checkpoint,
            "--condition", ep["condition"], "--duration", str(args.duration),
            "--out", str(ep_dir), "--axes", args.axes,
@@ -134,11 +135,101 @@ def run_episode(args, ep: dict, ep_dir: Path) -> dict:
     COMMANDING = ("policy", "placebo", "search", "rule", "axis_probe")
     if args.execute and ep["condition"] in COMMANDING:
         cmd.append("--execute")          # hold·expert 는 애초에 지령하지 않는다
+    cmd += pose_arg(session, ep)
     cmd += args.extra
     print("  $ " + " ".join(cmd))
-    subprocess.run(cmd, check=False)
+    rc = subprocess.run(cmd, check=False).returncode
     meta = ep_dir / "meta.json"
-    return json.loads(meta.read_text(encoding="utf-8")) if meta.is_file() else {}
+    if meta.is_file():
+        return json.loads(meta.read_text(encoding="utf-8"))
+    # **러너가 죽은 것과 시작 조건이 안 맞은 것은 다르다.** 예전에는 둘 다 "시작 조건
+    # 미충족 — 폐기" 로 찍혀서, 인자 오타로 죽어도 조작자는 자세 탓을 하게 됐다
+    # (2026-09-14 ep0002·ep0005). rc 가 0 이 아니면 그것부터 말한다.
+    return {"crashed": rc != 0, "returncode": rc}
+
+
+def start_pose(ep_dir: Path) -> Optional[list]:
+    """그 에피소드가 **어디서 출발했는지**. 없으면 None.
+
+    decisions.csv 의 첫 유효 행. 프로브 자세가 유효해지기 전 몇 줄은 NaN 이다.
+    """
+    f = ep_dir / "decisions.csv"
+    if not f.is_file():
+        return None
+    with open(f, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            v = _pose_row(row)
+            if v:
+                return v
+    return None
+
+
+def _pose_row(row) -> Optional[list]:
+    """decisions.csv 한 줄 → [x, y, z (m), qw, qx, qy, qz] 또는 None."""
+    try:
+        v = [float(row[f"ee_{c}"]) for c in "xyz"] + [float(row[f"ee_q{c}"]) for c in "wxyz"]
+    except (KeyError, ValueError, TypeError):
+        return None
+    if not all(x == x for x in v):
+        return None
+    if abs(sum(x * x for x in v[3:]) - 1.0) > 0.2:       # 사원수가 아직 안 왔다
+        return None
+    return v
+
+
+def pose_guidance(session: dict, ep: dict, out: Path) -> str:
+    """한 자세 안의 두 번째 에피소드부터는 **같은 자리에서 출발해야 한다.**
+
+    조건 비교가 짝지어지려면 그 자세의 세 에피소드가 같은 곳에서 시작해야 한다. 매번
+    새로 잡으면 조건 차이와 자세 차이가 섞여 어느 쪽인지 못 가린다 — 2026-09-14 rule_v2
+    에서 프로브가 8 회에 59 mm 밀렸고 유지 성적이 81 % 에서 0 % 로 떨어졌다.
+    """
+    if ep.get("order_in_pose", 1) == 1:
+        return ("  ▸ **새 자세**입니다. 텔레옵으로 잡으십시오 — 방광이 보이지 않는 곳에서\n"
+                "    출발해야 '찾는 능력' 을 잽니다. 접촉이 생기면 손을 놓으십시오.")
+    ref = session.get("pose_start", {}).get(str(ep["pose"]))
+    if not ref:
+        return ("  ▸ **같은 자세**입니다 — 자세를 새로 잡지 마십시오.\n"
+                "    (기준 자리가 기록되지 않았습니다 — 자세를 건드리지 말고 Enter)")
+    where = f"\n    기준 자리: {_mm(ref)}"
+    last = session.get("pose_last_end", {}).get(str(ep["pose"]))
+    moved = ""
+    if last:
+        d = sum((a - b) ** 2 for a, b in zip(last[:3], ref[:3])) ** 0.5 * 1000.0
+        moved = f"\n    지금 있는 곳: {_mm(last)}   (기준에서 {d:.0f} mm)"
+    return ("  ▸ **같은 자세**입니다 — 손대지 말고 Enter 를 누르십시오.\n"
+            "    로봇이 **스스로 기준 자리로 되돌아간 뒤** 에피소드를 시작합니다."
+            + where + moved)
+
+
+def _mm(pose) -> str:
+    return " · ".join(f"{n} {v * 1000.0:+.1f}" for n, v in zip("xyz", pose[:3])) + " mm"
+
+
+def pose_arg(session: dict, ep: dict) -> list[str]:
+    """자세의 두 번째 조건부터 러너에게 돌아갈 곳을 준다."""
+    if ep.get("order_in_pose", 1) == 1:
+        return []
+    ref = session.get("pose_start", {}).get(str(ep["pose"]))
+    if not ref:
+        return []
+    # **`=` 로 붙인다.** 값이 "-0.5044,…" 처럼 `-` 로 시작하면 argparse 가 옵션 이름으로
+    # 읽는다 (쉼표가 있어 음수로도 안 보인다). 2026-09-14 본 시험 ep0005 가 여기서 죽었다.
+    return [f"--return-to-pose={','.join(f'{v:.6f}' for v in ref)}"]
+
+
+def end_pose(ep_dir: Path) -> Optional[list]:
+    """그 에피소드가 끝난 자리 [mm]."""
+    f = ep_dir / "decisions.csv"
+    if not f.is_file():
+        return None
+    last = None
+    with open(f, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            v = _pose_row(row)
+            if v:
+                last = v
+    return last
 
 
 def main() -> int:
@@ -197,7 +288,7 @@ def main() -> int:
         label = ep["condition"] if (not args.blind or ep["condition"] == "expert") else "····"
         print(f"\n{'=' * 68}\n에피소드 {ep['index']}/{len(plan)}   "
               f"자세 {ep['pose']}   조건 {label}\n{'=' * 68}")
-        print("  텔레옵으로 시작 자세를 잡고, 접촉이 생기면 손을 놓으십시오.")
+        print(pose_guidance(session, ep, out))
         if ep["condition"] == "expert":
             print("  ⚠️ 이 에피소드는 **조작자가 계속 지령**합니다 (상한선 조건).")
         try:
@@ -213,8 +304,38 @@ def main() -> int:
             continue
 
         ep_dir = out / f"ep{ep['index']:04d}_pose{ep['pose']:02d}_{ep['condition']}"
-        meta = run_episode(args, ep, ep_dir)
+        meta = run_episode(args, ep, ep_dir, session)
+        if meta.get("crashed"):
+            # **러너가 죽은 것과 시작 조건이 안 맞은 것은 다르다.** 예전에는 둘 다
+            # "시작 조건 미충족 — 폐기" 로 찍혀서, 인자 오타로 죽어도 조작자는 자세
+            # 탓을 하게 됐다 (2026-09-14 ep0002·ep0005). 요약에도 남기지 않는다 —
+            # 다시 받을 것이므로 헛줄이 되고, 계획에는 pending 으로 되돌린다.
+            print(f"\n  ⛔ 러너가 종료 코드 {meta['returncode']} 로 **죽었습니다** — "
+                  "자세 문제가 아닙니다.\n"
+                  "     위 오류를 고친 뒤 같은 명령으로 다시 띄우면 이 에피소드부터 이어집니다.")
+            ep["status"] = "pending"
+            save(out, session)
+            break
         verdict = meta.get("verdict") or {}
+        # 이 자세의 기준 자리와, 방금 끝난 자리. 다음 에피소드에서 되돌릴 목표가 된다.
+        key = str(ep["pose"])
+        if ep.get("order_in_pose", 1) == 1:
+            got = start_pose(ep_dir)
+            if got:
+                session.setdefault("pose_start", {})[key] = got
+        fin = end_pose(ep_dir)
+        if fin:
+            session.setdefault("pose_last_end", {})[key] = fin
+            ref = session.get("pose_start", {}).get(key)
+            if ref:
+                d = sum((a - b) ** 2 for a, b in zip(fin[:3], ref[:3])) ** 0.5 * 1000.0
+                print(f"  ▸ 이 자세의 기준에서 {d:.0f} mm 지점에서 끝났습니다"
+                      + ("  — 다음 에피소드에서 로봇이 되돌아갑니다" if d > 5.0 else ""))
+        r = (meta.get("return") or {})
+        if r.get("asked") and not r.get("ok", True):
+            print(f"  ⚠️ 기준 자세로 **못 돌아갔습니다** — {r.get('err_mm', float('nan')):.1f} mm · "
+                  f"{r.get('err_deg', float('nan')):.1f}° 남은 채 시작했습니다. "
+                  "이 자세는 분석에서 짝이 안 맞을 수 있습니다.")
         started = bool(meta.get("episode_started"))
         gate_met = meta.get("gate_met_at_start")
         ep["status"] = "done" if started else "gate_reject"

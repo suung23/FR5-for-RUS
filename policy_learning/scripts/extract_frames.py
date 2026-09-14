@@ -101,7 +101,8 @@ def main() -> int:
         chosen = picks(ft, area)
         if every:
             t0 = ft[0]
-            chosen += [(f"t{int(round(s))}", int(np.argmin(np.abs(ft - (t0 + s)))))
+            # 이름을 0 으로 채운다 — 안 그러면 목록에서 t100 이 t20 앞에 온다.
+            chosen += [(f"at{int(round(s)):04d}", int(np.argmin(np.abs(ft - (t0 + s)))))
                        for s in np.arange(every, ft[-1] - t0, every)]
         sub = out / d.name
         sub.mkdir(exist_ok=True)
@@ -109,7 +110,9 @@ def main() -> int:
             img = Image.fromarray(frames[i])
             if args.scale != 1:
                 img = img.resize((img.width * args.scale, img.height * args.scale), Image.NEAREST)
-            img.save(sub / f"{name}_t{ft[i] - ft[0]:05.1f}s_a{area[i]:.3f}.png")
+            # 간격 프레임(at####)은 이름에 이미 시각이 있으므로 중복을 뺀다.
+            stamp = "" if name.startswith("at") else f"_t{ft[i] - ft[0]:05.1f}s"
+            img.save(sub / f"{name}{stamp}_a{area[i]:.3f}.png")
             n_written += 1
         print(f"  {d.name}: {len(chosen)} 장")
     print(f"\n{n_written} 장 → {out}")

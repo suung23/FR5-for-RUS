@@ -109,6 +109,11 @@ class PerceptionConfig:
     device: str = "auto"
     cache: bool = True
     hold_deadband_px: float = 8.0916    # lateral_instruction.json thresholds["5%"]["px"]
+    # 놓친 프레임을 직전 마스크로 메운다 (rus_policy.mask_propagation).
+    # 2026-09-14 실측: 모델이 통째로 놓친 프레임이 전파로 Dice 0.000 → 0.814.
+    # 같은 라벨을 학습에 넣는 것은 효과가 없었다 (2,308 장 속에 묻힌다) — 실행 시점에 쓴다.
+    # 끄려면 --set perception.propagate.enabled=false
+    propagate: dict = field(default_factory=lambda: {"enabled": True})
 
 
 @dataclass

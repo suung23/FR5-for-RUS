@@ -639,3 +639,62 @@ def test_runner_lets_the_controller_come_home():
     blk = re.search(r'if self\.condition == "rule" and too_far.*?\n\s*if self\.condition in',
                     src, re.S).group(0)
     assert "too_far = False" in blk, blk
+
+
+# --- 힘이 움직이는 동안은 면적을 쫓지 않는다 (2026-09-14 조작자 지시) -----------
+
+def test_area_deficit_is_left_to_z_while_the_force_is_moving():
+    """용적이 바뀌면 z 가 파고들거나 물러나고, 그 동안 면적이 변한다.
+
+    그것은 z 가 이미 고치고 있는 것이다 — 여기서 훑기를 시작하면 같은 오차를 두 축이
+    서로 모르게 쫓는다. 조작자가 주사기로 물을 넣고 빼는 시험에서 그대로 일어난다.
+    """
+    c = RuleController(_q_gains(), find_axes=("thx",), q_target=0.90)
+    c.phase = HOLD
+    vel, note = c.update(0.0, True, 0.0, 0.02, q_view=0.70,
+                         q_parts=_parts(area=0.1, presence=0.6), force_settled=False)
+    assert c.phase == HOLD, "힘이 움직이는데 훑기로 갔다"
+    assert not np.any(vel), vel
+    assert "힘이 아직" in note, note
+
+
+def test_centring_still_runs_while_the_force_is_moving():
+    """중심은 z 와 무관하다 — 좌우 이동은 힘 조절에 쓰지 않으므로 서로 간섭이 없다."""
+    from rus_policy.rule_control import AXIS_INDEX
+    c = RuleController(_q_gains(), find_axes=("thx",), q_target=0.90)
+    c.phase = HOLD
+    vel, note = c.update(0.0, True, -0.25, 0.06, q_view=0.80,
+                         q_parts=_parts(centering=0.2), force_settled=False)
+    assert vel[AXIS_INDEX["thy"]] != 0.0, note
+
+
+def test_the_settled_check_is_the_runners_job():
+    """러너가 F_n 과 f_bar 로 판단해 넘긴다. 설정값을 모르면 멈춰 세우지 않는다."""
+    import re
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "scripts" / "run_policy.py").read_text(encoding="utf-8")
+    fn = re.search(r"def _force_settled.*?\n    #", src, re.S).group(0)
+    assert "self.f_bar is None" in fn and "return True" in fn, fn
+    assert "force_settled=self._force_settled(fn)" in src
+
+
+def test_the_rule_controller_can_never_command_the_beam_axis():
+    """힘은 z 만으로 조절한다 — 제어기에 z 자리가 아예 없다 (조작자 지시 2026-09-14)."""
+    from rus_policy.rule_control import AXIS_INDEX
+    assert 2 not in AXIS_INDEX.values(), AXIS_INDEX
+
+
+def test_the_lateral_gate_is_skipped_without_a_rule_controller():
+    """hold·placebo·policy·search 에는 규칙 제어기가 없다 — 거기서 부르면 죽는다.
+
+    2026-09-14 본 시험 3 번째 에피소드(hold)가 여기서 AttributeError 로 멈췄다. 24 개
+    중 3 개째였다.
+    """
+    import re
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "scripts" / "run_policy.py").read_text(encoding="utf-8")
+    fn = re.search(r"def _enable_lateral_if_needed.*?\n    def ", src, re.S).group(0)
+    body = fn[fn.index('"""', fn.index('"""') + 3) + 3:]
+    guard = body.index("if self.rule is None:")
+    use = body.index("self.rule.align_axis")
+    assert guard < use, "규칙 제어기가 없는지 먼저 보지 않는다"

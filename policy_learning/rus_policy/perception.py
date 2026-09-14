@@ -119,7 +119,7 @@ class UnetPerception:
     """Unet_seg 의 Predictor + extract_control_state 를 세션 프레임에 돌린다."""
 
     def __init__(self, checkpoint: Path, unet_config: Path, device: str = "auto",
-                 hold_deadband_px: float = 8.0916):
+                 hold_deadband_px: float = 8.0916, propagate: dict | None = None):
         _bootstrap_unet_path()
         import torch
         from rus_perception.control.features import FeatureExtractionConfig, extract_control_state
@@ -157,7 +157,26 @@ class UnetPerception:
         self.checkpoint_id = str(getattr(self.predictor, "checkpoint_identifier", "unknown"))
         self.hold_deadband_px = hold_deadband_px
 
+        # 놓친 프레임을 직전 마스크로 메운다 (mask_propagation 에 근거와 조건이 있다).
+        # 접촉 판정에 쓰는 깊은 영역: 위쪽 35 % 는 트랜스듀서 링다운이라 공기 중에도 밝다.
+        from .mask_propagation import MaskPropagator, PropagationConfig, farneback_flow
+        cfg_prop = dict(propagate or {})
+        self.propagate_enabled = bool(cfg_prop.pop("enabled", True))
+        self.min_coupling = float(cfg_prop.pop("min_coupling", 78.0))
+        self._propagator = MaskPropagator(
+            PropagationConfig(enabled=self.propagate_enabled, **cfg_prop), farneback_flow)
+        self._deep = None
+        if self.roi is not None:
+            self._deep = self.roi.copy()
+            self._deep[: int(0.35 * self.image_size[0])] = False
+        #: 마지막 프레임이 전파로 채워졌는가. 러너가 기록에 남긴다.
+        self.last_propagated = False
+        self.last_propagate_reason = ""
+
     def reset(self) -> None:
+        if getattr(self, "_propagator", None) is not None:
+            self._propagator.reset()
+        self.last_propagated = False
         """스트리밍 상태를 버린다. 새 세션이나 영상이 끊겼다 돌아왔을 때 부른다."""
         self._prev = None
 
@@ -207,12 +226,44 @@ class UnetPerception:
         image = np.asarray(frame, np.float32) / 255.0
         image = resize_image(image, self.image_size)
         prob, _ = self.predictor.predict_probability(image)
+        prob = self._apply_propagation(np.asarray(frame), prob)
         cs = self._extract(prob, image=image, previous_state=getattr(self, "_prev", None),
                            config=self.feature_config, roi_mask=self.roi)
         self._prev = cs
         vec, q, tok, e_px = control_state_to_vector(
             cs, self.beam_axis_px, self.image_size, self.hold_deadband_px)
         return vec, q, tok, e_px, cs
+
+    def _apply_propagation(self, frame_u8: np.ndarray, prob: np.ndarray) -> np.ndarray:
+        """모델이 못 본 프레임을 직전 마스크로 메운다. 본 프레임은 건드리지 않는다.
+
+        확률 지도를 갈아 끼우는 방식이라 아래 특징 추출은 하나도 바뀌지 않는다. 채우는
+        값이 1.0 이 아닌 것은 의도다 — 전파된 화소는 **직접 본 것보다 확신이 낮다**,
+        그리고 그 차이가 segmentation_confidence 를 통해 Q 에 그대로 실린다.
+        """
+        self.last_propagated = False
+        self.last_propagate_reason = ""
+        if not getattr(self, "propagate_enabled", False):
+            return prob
+        import time
+        now = time.time()
+        mask = prob > 0.5
+        coupled = True
+        if self._deep is not None:
+            coupled = float(np.asarray(frame_u8, np.float32)[self._deep].mean()) >= self.min_coupling
+
+        if mask.mean() >= self._propagator.cfg.min_area:
+            self._propagator.observe(frame_u8, mask, float(prob.max()), now)
+            return prob
+
+        decision = self._propagator.propagate(frame_u8, now, coupled)
+        self.last_propagate_reason = decision.reason
+        if not decision.used:
+            return prob
+        self.last_propagated = True
+        filled = np.zeros_like(prob)
+        filled[decision.mask] = self._propagator.cfg.fill_prob
+        return filled
 
     def run(self, frames: np.ndarray, progress: bool = True) -> PerceptionResult:
         """세션 프레임 전체를 순차로. ``step`` 을 처음부터 다시 돌리는 것과 같다."""
@@ -310,7 +361,8 @@ def build_backend(cfg: PolicyConfig) -> Optional[UnetPerception]:
     if not ucfg.is_file():
         raise FileNotFoundError(f"U-Net 설정이 없습니다: {ucfg}")
     return UnetPerception(ckpt, ucfg, device=cfg.perception.device,
-                          hold_deadband_px=cfg.perception.hold_deadband_px)
+                          hold_deadband_px=cfg.perception.hold_deadband_px,
+                          propagate=dict(getattr(cfg.perception, "propagate", None) or {}))
 
 
 def perceive_session(cfg: PolicyConfig, session, backend: Optional[UnetPerception]) -> PerceptionResult:

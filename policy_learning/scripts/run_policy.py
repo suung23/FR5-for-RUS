@@ -783,7 +783,8 @@ class PolicyRunner(Node):
             # 화면 끝에 걸린 방광" 을 위에 놓는데, 유지의 목적은 가운데 두는 것이다.
             a, note = self.rule.update(
                 t, st[HAS_MASK] > 0.5, float(st[CENTROID_DX]), float(st[AREA]),
-                q_view=self.q_view, q_parts=self.q_parts)
+                q_view=self.q_view, q_parts=self.q_parts,
+                force_settled=self._force_settled(fn))
             self._rule_note = note
         if self.condition == "axis_probe":
             # 실험이 아니라 측정이다 — 정해진 순서로 한 축씩 흔들어 기하 이득을 잰다.
@@ -875,6 +876,20 @@ class PolicyRunner(Node):
         return judge([self.state_t[i] for i in m],
                      np.stack([self.states[i] for i in m]), thr)
 
+    def _force_settled(self, fn: float) -> bool:
+        """힘이 설정값 근처에 자리 잡았는가.
+
+        방광 용적이 바뀌면(주사기로 물을 넣고 빼면) 접촉 강성이 바뀌어 힘 조절기가 z 로
+        파고들거나 물러난다. 그 동안 깊이가 변하므로 **면적도 변한다** — 그것은 z 가 이미
+        고치고 있는 것이라, 규칙 제어기가 같은 오차를 훑기로 또 쫓으면 안 된다.
+
+        설정값을 모르면(힘 탐색이 안 떠 있으면) 자리 잡은 것으로 본다 — 모르는 것을 근거로
+        제어기를 멈춰 세우지 않는다.
+        """
+        if self.f_bar is None or not np.isfinite(fn):
+            return True
+        return abs(float(fn) - float(self.f_bar)) <= self.args.force_settled_n
+
     #: 규칙 제어기가 병진을 쓰려면 제어 스택에서 이 파라미터가 켜져 있어야 한다.
     LATERAL_PARAM = "contact_control.policy_lateral"
     #: 그것을 이 실행이 켰는가. **클래스 속성이다** — __init__ 안에서 초기화하면 규칙
@@ -895,6 +910,11 @@ class PolicyRunner(Node):
 
         켜지 못하면 **시작하지 않는다.** 켜졌다고 믿고 도는 것보다 안 도는 편이 낫다.
         """
+        # 규칙 제어기가 없는 조건(hold·placebo·policy·search)은 병진을 쓸 일이 없다.
+        # main() 에서 조건과 무관하게 부르므로 여기서 걸러야 한다 — 2026-09-14 본 시험
+        # 3 번째 에피소드(hold)가 여기서 죽었다.
+        if self.rule is None:
+            return
         from rus_policy.rule_control import AXIS_INDEX
         used = [a for a in ([self.rule.align_axis] + list(self.rule.find_axis_list))
                 if a and AXIS_INDEX.get(a, 9) < 3]
@@ -1151,6 +1171,9 @@ def main() -> int:
                    help="훑는 속도 [mm/s]. ±25 mm 한 바퀴에 약 30 s")
     p.add_argument("--rule-find-range-deg", type=float, default=12.0,
                    help="회전 축으로 훑을 때의 반경 [°]")
+    p.add_argument("--force-settled-n", type=float, default=0.5,
+                   help="측정 힘이 설정값에서 이 안에 있으면 '자리 잡았다' 로 본다 [N]. "
+                        "벗어나 있는 동안 규칙 제어기는 면적 부족을 z 에 맡긴다")
     p.add_argument("--rule-oop-scale", type=float, default=0.5,
                    help="면외 축(정렬 축이 아닌 찾기 축)은 반경을 이 비율로 줄여 훑는다")
     p.add_argument("--rule-refine-cooldown-s", type=float, default=5.0,

@@ -469,7 +469,8 @@ class RuleController:
 
     def update(self, t: float, has_mask: bool, centroid_dx: float,
                area: float, q_view: Optional[float] = None,
-               q_parts: Optional[dict] = None) -> tuple[np.ndarray, str]:
+               q_parts: Optional[dict] = None,
+               force_settled: bool = True) -> tuple[np.ndarray, str]:
         """한 tick. 시각을 갱신하고 지령을 낸 뒤 누적 변위에 더한다.
 
         **시각 갱신을 여기 한 군데서만 하는 이유.** 예전에는 유지 분기에서만 갱신해서,
@@ -477,13 +478,15 @@ class RuleController:
         """
         self._dt = max(0.0, t - (self._prev_t if self._prev_t is not None else t))
         self._prev_t = t
-        vel, note = self._update(t, has_mask, centroid_dx, area, q_view, q_parts)
+        vel, note = self._update(t, has_mask, centroid_dx, area, q_view, q_parts,
+                                 force_settled)
         self._accumulate(vel, self._dt)
         return vel, note
 
     def _update(self, t: float, has_mask: bool, centroid_dx: float,
                 area: float, q_view: Optional[float] = None,
-                q_parts: Optional[dict] = None) -> tuple[np.ndarray, str]:
+                q_parts: Optional[dict] = None,
+                force_settled: bool = True) -> tuple[np.ndarray, str]:
         """지금 내보낼 vel6 과 한 줄 설명.
 
         ``q_view`` 를 주면 **훑기와 유지의 목적량이 Q_seg 가 된다.** 면적만 보면
@@ -604,6 +607,19 @@ class RuleController:
             return vel, self.last_note
 
         want = self._demand(q_parts)
+        # **힘이 아직 자리를 못 잡았으면 면적 부족은 우리 일이 아니다.**
+        #
+        # 방광 용적이 바뀌면 접촉 강성이 바뀌고, 힘 조절기가 z 로 파고들거나 물러난다.
+        # 그 동안 깊이가 변하므로 면적도 변한다 — 그것은 **z 가 이미 고치고 있는 것**이다.
+        # 여기서 훑기를 시작하면 같은 오차를 두 축이 서로 모르게 쫓는다. 중심은 z 와
+        # 무관하므로 그대로 고친다 (조작자 지시: 좌우 이동은 힘 조절에 쓰지 않는다).
+        if not force_settled and want[SWEEP] > self.LOSS_FLOOR:
+            self.last_note = (f"유지 — 부족분이 면적/유무 ({want[SWEEP]:.3f}) 이지만 "
+                              f"**힘이 아직 움직이는 중**이다 · z 에 맡긴다 · "
+                              f"{self._mark(q_view)}면적 {area:.4f}")
+            want = dict(want, **{SWEEP: 0.0})
+            if want[ALIGN] <= self.LOSS_FLOOR:
+                return vel, self.last_note
         if want[SWEEP] > want[ALIGN] and want[SWEEP] > self.LOSS_FLOOR:
             # 면적·유무가 모자라다 — 정렬로는 못 고친다. 좁게 다시 훑는다.
             if t - self._last_refine_t >= self.refine_cooldown_s:

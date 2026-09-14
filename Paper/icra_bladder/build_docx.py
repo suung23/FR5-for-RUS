@@ -26,6 +26,7 @@ from pathlib import Path
 from docx import Document
 from docx.enum.section import WD_SECTION
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Pt, RGBColor, Inches
 
@@ -301,7 +302,10 @@ def emit_figure(doc, block: str, cites: list[str], reserve_mm: float = 0.0) -> N
 def emit_table(doc, block: str, cites: list[str]) -> None:
     cap = re.search(r"\\caption\{(.*?)\}\s*\\label", block, re.S)
     if cap:
-        emit_paragraph(doc, inline(cap.group(1), cites), size=9.0, space_after=3.0)
+        par = emit_paragraph(doc, inline(cap.group(1), cites), size=CAPTION_PT,
+                             space_after=2.0)
+        # 캡션만 앞 단에 남고 표가 다음 단으로 넘어가면 둘이 겹쳐 보인다.
+        par.paragraph_format.keep_with_next = True
     body = re.search(r"\\begin\{tabular\}\{[^}]*\}(.*?)\\end\{tabular\}", block, re.S)
     if not body:
         return
@@ -335,6 +339,14 @@ def emit_table(doc, block: str, cites: list[str]) -> None:
     for row in table.rows:              # 셀 폭은 행마다 다시 써 줘야 먹는다
         for j, cell in enumerate(row.cells):
             cell.width = width
+        # 행이 단·페이지 경계에서 쪼개지면 빈 테두리만 남아 다음 문단과 겹쳐 보인다.
+        trPr = row._tr.get_or_add_trPr()
+        if not trPr.xpath("./w:cantSplit"):
+            trPr.append(OxmlElement("w:cantSplit"))
+    # 폭을 고정으로 못 박는다. 자동 배치에 맡기면 워드가 단 폭을 무시하고 넘긴다.
+    layout = OxmlElement("w:tblLayout")
+    layout.set(qn("w:type"), "fixed")
+    table._tbl.tblPr.append(layout)
     doc.add_paragraph().paragraph_format.space_after = Pt(6)
 
 
@@ -398,8 +410,28 @@ def build() -> Path:
     if title:
         emit_paragraph(doc, inline(title.group(1), cites),
                        align=WD_ALIGN_PARAGRAPH.CENTER, size=15.0, space_after=4.0)
-    emit_paragraph(doc, "Anonymous Authors", align=WD_ALIGN_PARAGRAPH.CENTER,
-                   size=11.0, space_after=12.0)
+    # 저자·소속은 tex 의 \author 블록에서 읽는다 (다른 투고와 같은 명단).
+    author = match_braced(tex[tex.index("\\author{"):], "author") if "\\author{" in tex else None
+    if author:
+        block = author[0]
+        thanks = iter_braced(block, "thanks")
+        names = block[:block.index("\\thanks{")] if "\\thanks{" in block else block
+        par = doc.add_paragraph()
+        par.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        par.paragraph_format.space_after = Pt(3)
+        add_superscripts(par, names.strip(), 10.0)
+        for line in thanks:
+            par = doc.add_paragraph()
+            par.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            par.paragraph_format.space_after = Pt(0.5)
+            add_superscripts(par, line.strip(), 7.5)
+            if line.strip().startswith("*"):
+                for run in par.runs:
+                    run.italic = True
+        doc.paragraphs[-1].paragraph_format.space_after = Pt(10)
+    else:
+        emit_paragraph(doc, "Anonymous Authors", align=WD_ALIGN_PARAGRAPH.CENTER,
+                       size=10.0, space_after=10.0)
 
     abstract = re.search(r"\\begin\{abstract\}(.*?)\\end\{abstract\}", body, re.S)
     if abstract:
@@ -466,6 +498,44 @@ def match_braced(text: str, command: str):
     if depth:
         return None
     return text[len(head):i - 1], i
+
+
+def iter_braced(text: str, command: str) -> list[str]:
+    """``\\command{...}`` 를 **전부**, 중괄호 짝을 세어 뽑는다.
+
+    비탐욕 정규식은 소속 문자열 안의 ``\\textsuperscript{1}`` 첫 ``}`` 에서 끊겨
+    ``\\textsuperscript{1`` 만 남겼다.
+    """
+    out, head, i = [], "\\" + command + "{", 0
+    while True:
+        j = text.find(head, i)
+        if j < 0:
+            return out
+        k, depth = j + len(head), 1
+        while k < len(text) and depth:
+            if text[k] == "{":
+                depth += 1
+            elif text[k] == "}":
+                depth -= 1
+            k += 1
+        out.append(text[j + len(head):k - 1])
+        i = k
+
+
+def add_superscripts(par, text: str, size: float) -> None:
+    """``\\textsuperscript{...}`` 를 진짜 위첨자로 넣는다."""
+    for chunk in re.split(r"(\\textsuperscript\{[^}]*\})", text):
+        if not chunk:
+            continue
+        sup = chunk.startswith("\\textsuperscript{")
+        body = chunk[len("\\textsuperscript{"):-1] if sup else chunk
+        body = re.sub(r"\s+", " ", body)
+        if not body:
+            continue
+        run = par.add_run(body)
+        run.font.name = FONT
+        run.font.size = Pt(size)
+        run.font.superscript = sup
 
 
 def emit_text(doc, chunk: str, cites: list[str]) -> None:

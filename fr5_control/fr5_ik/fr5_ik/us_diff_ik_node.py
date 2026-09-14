@@ -31,6 +31,7 @@ from std_msgs.msg import Bool, Float32MultiArray, Float64, String
 from fr5_ik.dls_solver import DlsSolver
 from fr5_ik.force_regulator import ForceRegulator, RegulatorOutput
 from fr5_ik.release_retreat import ReleaseRetreat
+from fr5_ik.force_limit_override import HOLD, RETREAT, ForceLimitOverride
 from fr5_ik.probing_mode import APPROACH, CONTACT_PROBING, ProbingModeSwitch, gate_axes
 from fr5_ik.teleop_frame import TeleopFrameMapper
 
@@ -119,6 +120,8 @@ class UsDiffIkNode(Node):
         self.max_linear = self.approach_linear
         self.max_angular = self.approach_angular
 
+        self.policy_lateral = bool(
+            self.get_parameter("contact_control.policy_lateral").value)
         self.allow_teleop_lateral = bool(
             self.get_parameter("contact_control.allow_teleop_lateral").value
         )
@@ -195,6 +198,21 @@ class UsDiffIkNode(Node):
         self.rot_stylus = None
         self.last_stylus_time = None
         self._warned_no_stylus = False
+
+        # 텔레옵 힘 한계 감시. 조절기가 **안 도는 구간**(접근/텔레옵)을 맡는다 —
+        # 둘이 같은 주기에 z 를 정하는 일은 없다 (force_limit_override 참조).
+        try:
+            self.override = self._build_override()
+        except ValueError as exc:
+            # 값이 서로 모순되면 기동을 거부한다. 감시가 꺼진 채 도는 것보다 낫다 —
+            # 조작자는 있다고 믿는 층이 없는 상태로 팬텀을 만지게 된다.
+            raise RuntimeError(f"텔레옵 힘 한계 감시 설정 거절: {exc}") from exc
+        #: 감시의 **상태**가 바뀔 때만 로그를 낸다. 사유 문자열에는 힘 값이 들어
+        #: 있어 매 주기 달라지므로 그것으로 가르면 100 Hz 로 같은 소식이 쏟아진다 —
+        #: 그 잡음이 진짜 소식을 밀어낸다 (_retreat_twist 의 주석과 같은 이유).
+        self._last_override_key = None
+        #: 감시에 dt 를 대 주기 위한 직전 루프 시각. 벽시계는 여기서만 읽는다.
+        self._last_loop_time = None
 
         # -- 인터페이스 --------------------------------------------------
         ns = f"/{self.robot_name}"
@@ -362,6 +380,19 @@ class UsDiffIkNode(Node):
                 "검증 절차 전용이며, "
                 "팬텀 작업에는 켜고 써라."
             )
+        if self.override.enabled:
+            self.get_logger().info(
+                f"텔레옵 힘 한계 감시 — {self.override.limit_n:.1f} N 초과 시 조작자 지령을 "
+                f"덮고 −z {self.override.retreat_speed_m_s * 1000:.0f} mm/s 후퇴, "
+                f"{self.override.resume_n:.1f} N 에서 복귀"
+                + (f" (경고 {self.override.warn_n:.1f} N 이상 전진 금지)"
+                   if self.override.barrier_enabled
+                   else " (배리어 꺼짐 — 한계와 해제선 사이를 오갈 수 있다)"))
+        else:
+            self.get_logger().warn(
+                "⚠️ 텔레옵 힘 한계 감시가 꺼져 있다 (safety.teleop_force_override=false). "
+                "접촉 프로빙 밖에서는 힘을 보는 층이 없다 — 데드맨을 쥔 조작자가 미는 "
+                "만큼 그대로 들어간다.")
         # 늦게 붙는 구독자(콘솔 브리지)가 현재 모드를 즉시 받도록 한 번 낸다.
         self._publish_mode()
         # 병진 기준이 무엇인지 안 찍으면, 축이 어긋났을 때 원인을 조작감으로만
@@ -389,6 +420,28 @@ class UsDiffIkNode(Node):
 
         self.declare_parameter("safety.warn_contact_force_n", 4.5)
         self.declare_parameter("safety.max_contact_force_n", 5.0)
+
+        # ---- 텔레옵 힘 한계 감시 (2026-09-14 신설) ----
+        #
+        # 위 두 값은 2026-09-14 까지 **조절기 안에서만** 살아 있었고, 조절기는 접촉
+        # 프로빙에서만 돈다. teleop.contact_probing_force_trigger 가 false 로 내려간
+        # 뒤로 그 모드의 유일한 문이 policy.enable 버튼이므로, 버튼 전 텔레옵 구간에는
+        # 힘을 보는 코드가 없었다 — 데드맨을 쥔 조작자는 5 N 이든 15 N 이든 밀 수
+        # 있었다. 이 세 값이 그 구간을 덮는다.
+        self.declare_parameter("safety.teleop_force_override", True)
+        # 경고 이상에서 전진 금지. 이것이 없으면 감시는 한계와 해제선 사이를 오간다 —
+        # 조작자는 계속 밀고 있으므로 돌려주는 즉시 다시 올라간다.
+        self.declare_parameter("safety.teleop_force_barrier", True)
+        # 돌려주는 선 [N]. 한계에서 **한참** 내려와 있어야 한다: 팬텀은 점탄성이라
+        # 힘이 압입을 1.5~2.4 s 뒤따르고(k_c 0.28~0.71 N/mm, 2026-09-04), 해제선을
+        # 한계 바로 밑에 두면 후퇴를 멈춘 뒤에도 힘이 올라와 곧바로 다시 걸린다.
+        self.declare_parameter("safety.teleop_resume_force_n", 3.0)
+        # 후퇴 속도 [m/s]. 워치독 후퇴와 같은 값을 기본으로 둔다 — 조작자가 손을
+        # 놓았을 때와 한계를 넘었을 때 로봇이 다른 속도로 물러날 이유가 없다.
+        self.declare_parameter("safety.teleop_override_retreat_speed_m_s", 0.005)
+        # 한 번의 후퇴 상한 [s]. 물러났는데 힘이 안 떨어지면 더 물러나는 것은 답이
+        # 아니다 (프로브가 걸렸거나 힘이 프로브가 아닌 곳에서 온다). 그때는 선다.
+        self.declare_parameter("safety.teleop_max_override_s", 3.0)
         self.declare_parameter("safety.max_linear_vel_m_s", 0.010)
         self.declare_parameter("safety.max_angular_vel_rad_s", 0.2)
 
@@ -452,6 +505,8 @@ class UsDiffIkNode(Node):
         # 로봇이 힘만 잡고 나머지는 정지한다. policy 가 영상축을 맡기 전까지
         # 조작자가 미끄러뜨리며 쓰고 싶으면 켠다.
         self.declare_parameter("contact_control.allow_teleop_lateral", False)
+        # 규칙 기반 제어기는 병진으로 돈다 (x 가 면내 축) — 회전만 열면 지령이 사라진다.
+        self.declare_parameter("contact_control.policy_lateral", False)
         # 면내 회전 모드 (2026-08-31).
         #
         # 접촉 프로빙에서 힘은 로봇이 잡되, 조작자에게 **ω_y 하나만** 돌려준다.
@@ -758,10 +813,15 @@ class UsDiffIkNode(Node):
         self.get_logger().warn(
             f"정책 추론 {'시작' if want else '정지'} 요청 — régime "
             + ("유지" if was == now else ("진입" if now else "이탈")))
+        # **지령의 주인이 바뀌는 자리다.** 이 토픽 하나로 desired_twist 를 내는 쪽이
+        # 통째로 갈리는데(touch_twist 는 정책 중 발행을 멈추고, run_policy 는 Stop 에
+        # 멈춘다), 마지막 값은 여기 그대로 남아 있다. 그것을 들고 넘어가면 새 주인의
+        # 첫 지령이 오기 전까지 **전 주인의 마지막 지령**이 계속 재사용된다.
+        self._forget_command()
         if now and not was:
             self._enter_contact_probing()
         elif was and not now:
-            self._leave_contact_probing()
+            self._leave_contact_probing(by_policy=True)
             # **놓는 쪽이 물러난다.** Stop 은 régime 만 풀 뿐 프로브는 눌린 채로 남는다
             # (2026-09-12 마지막 에피소드의 종료 접촉력 3.39 N). 그 상태로 z 를 넘기면
             # 조작자의 지령이 접촉에 맞서고, 서보의 지령 선행분이 0.5° 에서 3.6° 로
@@ -776,6 +836,40 @@ class UsDiffIkNode(Node):
         else:
             self._publish_mode()
 
+    def _forget_command(self) -> None:
+        """직전 지령을 지우고 시계를 지금으로 맞춘다. régime 경계에서만 부른다.
+
+        ``desired_twist`` 는 **주인이 바뀌는 토픽**이다. teleop 구간에는 touch_twist 가
+        내고, 정책 구간에는 run_policy 가 내며, 전환은 ``policy_enable`` 한 줄로 일어난다.
+        전 주인의 마지막 값은 여기 남아 있다가 새 주인의 첫 발행 전까지 계속 재사용된다.
+
+        그 값이 실제로 무엇을 바꾸는가 (2026-09-14):
+
+        * **Stop 직후의 이탈 후퇴가 시작도 못 하고 접힌다.** 후퇴는 "조작자가 지령을
+          내면 즉시 접는다" 인데(release_retreat), 그 판정이 보는 것이 이 배열이다.
+          정책의 마지막 회전 지령이 남아 있으면 첫 주기에 그것을 조작자로 읽고 접는다 —
+          프로브는 눌린 채(2026-09-12 마지막 에피소드 3.39 N) 남고, 그 상태의 teleop 은
+          지령 선행분이 7 배로 뛴다. **정책이 마지막에 무엇을 냈느냐에 따라** 사이클마다
+          이 후퇴가 되기도 하고 안 되기도 했다.
+        * **시계.** 정책 구간 내내 touch 는 발행하지 않으므로 마지막 발행 시각은 수십 초
+          묵어 있다. Stop 한 순간 그 나이가 워치독 문턱을 이미 넘었으므로, 조작자가
+          손도 대기 전에 −z 후퇴가 한 번 걸린다. 지금으로 맞춰 두면 새 주인에게
+          워치독 한 주기를 온전히 준다 — 그 사이 지령은 0 이라 로봇은 서 있다.
+
+        후퇴를 대신 끄는 것이 아니다. 새 주인이 침묵하면 워치독은 그대로 걸린다.
+        """
+        self.twist_cmd = np.zeros(6)
+        self.last_twist_time = self.get_clock().now()
+
+    def _cancel_retreats(self) -> None:
+        """진행 중인 후퇴를 전부 접는다. régime 을 새로 잡을 때만 부른다."""
+        self.release_retreat.cancel()
+        self._release_retreat_started = None
+        self._release_retreat_announced = False
+        self.retreat_started = None
+        self._retreat_announced = False
+        self._retreat_gave_up = False
+
     def _enter_contact_probing(self) -> None:
         """접촉 régime 으로 넘어간다. 상한을 갈아 끼우고 알린다.
 
@@ -785,6 +879,15 @@ class UsDiffIkNode(Node):
         by_policy = self.mode_switch.policy_requested
         self.max_linear = self.contact_linear
         self.max_angular = self.contact_angular
+        # 진행 중인 후퇴를 들고 들어가지 않는다. 이탈 후퇴는 제어 루프에서 힘 조절보다
+        # **앞**에 있으므로(_control_loop), 직전 Stop 의 후퇴가 살아 있는 채로 Start 를
+        # 누르면 정책 지령이 아니라 −z 후퇴가 나간다 — 정책은 지령하는데 로봇은 물러난다.
+        self._cancel_retreats()
+        # 텔레옵 감시는 여기서부터 조절기에게 자리를 내준다. 남은 후퇴 시간을 들고
+        # régime 을 넘어가면, 돌아왔을 때 상한이 이미 차 있어 첫 후퇴가 시작하자마자
+        # 정지로 떨어진다.
+        self.override.reset()
+        self._last_override_key = None
         self.get_logger().warn(
             (f"정책 추론 régime 진입 — F {self._control_force():.2f} N "
              f"(‖F‖ {self.contact_force_mag:.2f}). "
@@ -806,7 +909,7 @@ class UsDiffIkNode(Node):
         )
         self._publish_mode()
 
-    def _leave_contact_probing(self) -> None:
+    def _leave_contact_probing(self, by_policy: bool = False) -> None:
         """접근으로 되돌아간다. 접촉이 확실히 끝났을 때만 여기 온다.
 
         이탈 문턱과 확인 창이 이미 그것을 보장한다 (``probing_mode`` 참조). 여기서는
@@ -815,16 +918,46 @@ class UsDiffIkNode(Node):
 
         ``has_contacted`` 걸쇠는 지우지 않는다. "이번 세션에 무언가에 닿았다" 는 사실은
         모드가 되돌아간다고 사라지지 않으며, 콘솔의 접촉 걸쇠 표시가 그것을 본다.
+
+        **나머지는 전부 기동 직후와 같은 자리로 되돌린다** (2026-09-14). 추론 → 정지 →
+        teleop 을 한 세션에 여러 번 반복하는 것이 지금의 평가 루프인데, 여기서 남긴
+        부스러기는 다음 teleop 구간의 거동으로 나타난다 — 조작자에게는 "아까와 조작이
+        다르다" 로만 보이고, 무엇이 달라졌는지는 화면 어디에도 없다. 상한·감시·조절기
+        이력·한 번만 찍는 표시까지 같은 자리에서 지우는 이유다.
+
+        Args:
+            by_policy: 정책이 놓아서 여기 왔는가. 로그 문장만 가른다 — 힘 이탈로 온
+                경우에는 문턱과 지속 시간을 함께 적어야 "왜 지금 풀렸는가" 가 남는다.
         """
         self.max_linear = self.approach_linear
         self.max_angular = self.approach_angular
         self.regulator_reason = ""
+        self._last_reason = None
+        self._last_v_z = 0.0
+        # 접근으로 돌아왔다 = 텔레옵 감시가 다시 맡는다. 조절기가 한계 후퇴를 하던
+        # 중에 이탈했더라도 감시는 처음부터 센다.
+        self.override.reset()
+        self._last_override_key = None
+        # 조절기의 유지 이력(_moving)도 비운다. 다음 접촉의 첫 판정 문턱이 직전
+        # 사이클의 마지막 순간에 좌우되면 안 된다 (force_regulator.reset 참조).
+        self.regulator.reset()
+        # 워치독 후퇴도 접는다. 이탈 후퇴는 여기서 건드리지 않는다 — 부르는 쪽이
+        # 바로 다음 줄에서 무장한다 (_on_policy_enable).
+        self.retreat_started = None
+        self._retreat_announced = False
+        self._retreat_gave_up = False
+        # 한 번만 찍는 표시들. 들고 넘어가면 다음 사이클의 같은 사건이 조용해진다.
+        self._force_hold_announced = False
+        self._calibration_blocked_announced = False
+        self._mode_gate_warned = False
+        released_by_force = not by_policy and self.mode_switch.reversible
         self.get_logger().warn(
-            ("정책 추론 régime 이탈 — 정책이 놓았다. "
-             if not self.mode_switch.in_contact_probing and not self.mode_switch.force_trigger_enabled else
-             f"접근 전환 — F {self._control_force():.2f} N 이 "
+            (f"접근 전환 — F {self._control_force():.2f} N 이 "
              f"{self.mode_switch.release_force_n:.1f} N 아래로 "
-             f"{self.mode_switch.release_confirm_s:.1f} s 지속됐다. ")
+             f"{self.mode_switch.release_confirm_s:.1f} s 지속됐다. "
+             if released_by_force else
+             ("정책 추론 régime 이탈 — 정책이 놓았다. " if by_policy
+              else "접근 전환 — 접촉 régime 을 거둔다. "))
             + f"속도 상한 {self.contact_linear * 1000:.0f} → "
             f"{self.approach_linear * 1000:.0f} mm/s · "
             f"{self.contact_angular:.2f} → {self.approach_angular:.2f} rad/s. "
@@ -867,6 +1000,33 @@ class UsDiffIkNode(Node):
             retreat_speed_m_s=get("contact_control.retreat_speed_m_s"),
         )
 
+    #: 바뀌면 힘 한계 감시를 다시 만들어야 하는 파라미터.
+    OVERRIDE_PARAMS = (
+        "safety.warn_contact_force_n",
+        "safety.max_contact_force_n",
+        "safety.teleop_force_override",
+        "safety.teleop_force_barrier",
+        "safety.teleop_resume_force_n",
+        "safety.teleop_override_retreat_speed_m_s",
+        "safety.teleop_max_override_s",
+    )
+
+    def _build_override(self, overrides=None) -> ForceLimitOverride:
+        """현재 파라미터로 텔레옵 힘 한계 감시를 만든다."""
+        def get(name):
+            if overrides and name in overrides:
+                return overrides[name]
+            return self.get_parameter(name).value
+        return ForceLimitOverride(
+            limit_n=float(get("safety.max_contact_force_n")),
+            resume_n=float(get("safety.teleop_resume_force_n")),
+            warn_n=float(get("safety.warn_contact_force_n")),
+            retreat_speed_m_s=float(get("safety.teleop_override_retreat_speed_m_s")),
+            max_override_s=float(get("safety.teleop_max_override_s")),
+            enabled=bool(get("safety.teleop_force_override")),
+            barrier_enabled=bool(get("safety.teleop_force_barrier")),
+        )
+
     def _build_switch(self, overrides=None) -> ProbingModeSwitch:
         """현재 파라미터로 모드 스위치를 만든다."""
         def get(name):
@@ -902,6 +1062,34 @@ class UsDiffIkNode(Node):
 
         touched = {p.name: p.value for p in params if p.name in self.REGULATOR_PARAMS}
         switched = {p.name: p.value for p in params if p.name in self.SWITCH_PARAMS}
+        limited = {p.name: p.value for p in params if p.name in self.OVERRIDE_PARAMS}
+
+        # 힘 한계 감시. 조절기와 같은 규약이다 — 새 값으로 **먼저 만들어 보고**,
+        # 불변식(resume < warn <= limit)에 걸리면 사유와 함께 거절한다.
+        if limited:
+            try:
+                override = self._build_override(limited)
+            except ValueError as exc:
+                self.get_logger().error(f"힘 한계 감시 거절: {exc}")
+                return SetParametersResult(successful=False, reason=str(exc))
+            # 상태는 넘겨받는다. 후퇴 중에 파라미터를 만졌다고 후퇴가 풀리면,
+            # 한계를 넘은 채로 조작자 지령이 되살아난다.
+            override.state = self.override.state
+            override.elapsed_s = self.override.elapsed_s
+            self.override = override
+            self._last_override_key = None
+            if override.enabled:
+                self.get_logger().warn(
+                    f"텔레옵 힘 한계 감시 갱신 — 한계 {override.limit_n:.2f} N 초과 시 "
+                    f"−z {override.retreat_speed_m_s * 1000:.0f} mm/s 후퇴, "
+                    f"{override.resume_n:.2f} N 에서 복귀 (상한 "
+                    f"{override.max_override_s:.1f} s)"
+                    + (f" · 경고 {override.warn_n:.2f} N 이상 전진 금지"
+                       if override.barrier_enabled else " · 배리어 꺼짐"))
+            else:
+                self.get_logger().warn(
+                    "⚠️ 텔레옵 힘 한계 감시 꺼짐 — 접근/텔레옵 구간에서 힘을 보는 층이 "
+                    "없다. 조작자가 미는 만큼 그대로 들어간다.")
 
         # 힘 유지 on/off 는 조절기를 다시 만들 필요가 없다. 대신 **로봇이 하는 일이
         # 바뀌므로** 지나가는 줄로 두지 않는다 — 대조군을 켜 놓은 채 본 시험을
@@ -918,6 +1106,21 @@ class UsDiffIkNode(Node):
                     f"힘은 팬텀이 정하는 대로 흐른다. 한계 "
                     f"{self.regulator.max_force_n:.1f} N 후퇴는 그대로 살아 있다."
                 )
+
+        # 정책 모드에서 병진을 통과시킬지. **로봇이 하는 일이 바뀌므로** 조용히 두지 않는다.
+        # 규칙 기반 제어기는 x 병진으로 중심을 맞추는데(2026-09-12 실측 0.00708 /mm),
+        # 이 문이 닫혀 있으면 그 지령이 여기서 통째로 사라진다 — 지령은 나가는데 로봇이
+        # 안 움직이는 모습으로만 보인다. 실제로 그 일이 있었다.
+        for p in params:
+            if p.name != "contact_control.policy_lateral":
+                continue
+            self.policy_lateral = bool(p.value)
+            if self.policy_lateral:
+                self.get_logger().warn(
+                    "정책 병진 통과 켜짐 — 정책이 x·y 로도 움직인다. 옆으로 흐르는 동안의 "
+                    "접촉력은 따로 읽어야 한다 (z 는 그대로 조절기의 것)")
+            else:
+                self.get_logger().warn("정책 병진 통과 꺼짐 — 정책은 회전 세 축만 쓴다")
 
         # 접촉 프로빙 전환 on/off. 조작자가 GUI 에서 régime 을 직접 고르는 길이며,
         # **동작 명령이 아니다** — 켜면 접촉이 잡힐 때 로봇이 z 를 가져가도 된다는
@@ -1149,6 +1352,45 @@ class UsDiffIkNode(Node):
             self._release_retreat_announced = True
         return np.array([0.0, 0.0, decision.v_z, 0.0, 0.0, 0.0])
 
+    def _apply_force_limit(self, twist: np.ndarray, now, dt_s: float):
+        """텔레옵 구간의 힘 한계 감시 한 주기.
+
+        조절기가 돌지 않는 구간(접근/텔레옵)에서 조작자 지령 위에 얹힌다. 판정은
+        rclpy 없는 :mod:`fr5_ik.force_limit_override` 에 있고, 여기서는 힘·시간·
+        wrench 신선도만 대 준다.
+
+        Returns:
+            ``(twist, 덮어썼는가)``. 두 번째 값은 ``/diag/retreating`` 으로 나간다 —
+            조작자 화면에서 "내가 미는데 안 간다" 와 "로봇이 물러나는 중" 이
+            구별되어야 한다.
+        """
+        if self.mode_switch.in_contact_probing:
+            # z 의 주인은 조절기이고 한계 후퇴도 그 안에 있다. 두 층이 같은 축을
+            # 정하면 로봇을 움직인 것이 어느 쪽인지 기록으로 가를 수 없다.
+            return twist, False
+
+        wrench_fresh = (
+            self.wrench_stamp is not None
+            and (now - self.wrench_stamp).nanoseconds / 1e9 < 0.5
+        )
+        out = self.override.update(
+            twist, self._control_force(), dt_s, wrench_fresh=wrench_fresh)
+
+        key = (out.state, out.overriding)
+        if key != self._last_override_key:
+            self._last_override_key = key
+            if out.state in (RETREAT, HOLD):
+                self.get_logger().error(out.reason)
+            elif out.overriding:
+                self.get_logger().warn(out.reason)
+            else:
+                self.get_logger().info(out.reason)
+            # 조절기 사유와 같은 토픽으로 낸다. 조작자에게는 "힘 축이 왜 저러는가"
+            # 하나의 질문이고, 답이 두 곳에 나뉘어 있으면 둘 다 안 보게 된다.
+            self.force_reason_pub.publish(String(data=out.reason))
+
+        return np.asarray(out.twist, dtype=float), out.overriding
+
     def _apply_force_regulation(self, twist: np.ndarray) -> np.ndarray:
         """접촉 프로빙에서 침투축을 로봇이 잡는다.
 
@@ -1228,7 +1470,8 @@ class UsDiffIkNode(Node):
             twist, out.v_z,
             allow_lateral=self.allow_teleop_lateral,
             allow_inplane=self.allow_inplane_rotation,
-            policy=self.mode_switch.policy_requested), dtype=float)
+            policy=self.mode_switch.policy_requested,
+            policy_lateral=self.policy_lateral), dtype=float)
 
     def _remap_twist(self, twist: np.ndarray) -> np.ndarray:
         """지령을 표류하지 않는 고정 프레임으로 옮긴다 (fr5_ik.teleop_frame 참조).
@@ -1275,6 +1518,11 @@ class UsDiffIkNode(Node):
 
     def _control_loop(self) -> None:
         now = self.get_clock().now()
+        # 힘 한계 감시의 시간 상한에 대 줄 dt. 감시 자체는 벽시계를 안 읽는다
+        # (force_limit_override 는 rclpy 없이 돈다) — 시간은 여기서만 들어간다.
+        dt_s = (0.0 if self._last_loop_time is None
+                else (now - self._last_loop_time).nanoseconds / 1e9)
+        self._last_loop_time = now
 
         if self.q is None or self.last_joint_time is None:
             self.get_logger().warn("관절 상태 대기 중", throttle_duration_sec=2.0)
@@ -1331,7 +1579,10 @@ class UsDiffIkNode(Node):
                 twist = self._clamp(self.twist_cmd) * self._hold_fade(now)
                 twist = self._remap_twist(twist)
                 twist = self._apply_force_regulation(twist)
-                self.retreat_pub.publish(Bool(data=False))
+                # _remap_twist 뒤에 온다. 감시는 z 를 **프로브 침투축**으로 읽는데,
+                # 걸쇠 프레임을 지나기 전의 z 는 스타일러스 기준이라 다른 축이다.
+                twist, overriding = self._apply_force_limit(twist, now, dt_s)
+                self.retreat_pub.publish(Bool(data=overriding))
 
         try:
             joint_velocity, error = self.solver.solve_with_diagnostics(

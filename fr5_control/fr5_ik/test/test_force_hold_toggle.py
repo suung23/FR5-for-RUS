@@ -77,6 +77,9 @@ class _Node:
         self.wrench_stamp = _Stamp(0.0)
         self.allow_teleop_lateral = False
         self.allow_inplane_rotation = False
+        # 정책 병진 통로 (2026-09-12 신설). 껍데기에 없으면 gate_axes 호출이
+        # AttributeError 로 죽는데, 그것은 이 파일이 재는 것이 아니다.
+        self.policy_lateral = False
         self.force_hold_enabled = hold
         self.force = force
         self.regulator_reason = ""

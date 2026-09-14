@@ -1,4 +1,4 @@
-"""측정한 Q 로 오르막을 오른다 — 방광을 찾는 탐색기.
+"""측정한 값의 오르막을 오른다 — 회전으로 Q 를, 병진으로 면적을 찾는 데 쓴다.
 
     s = HillClimbSearch()
     omega_deg_s = s.update(t, q_measured)      # (wx, wy, wz), 프로브 프레임
@@ -17,7 +17,7 @@
 
 어떻게 도는가
 -------------
-한 방향으로 ``step_deg`` 만큼 돌리고, 영상이 따라올 때까지 기다렸다 Q 를 재서
+한 방향으로 ``step`` 만큼 움직이고, 영상이 따라올 때까지 기다렸다 Q 를 재서
 
   올랐으면   그 방향을 계속 간다 (되돌아오는 이동이 없다)
   안 올랐으면 **한 걸음 되돌아가** (직전이 곧 최고점이다) 다음 방향으로 넘어간다
@@ -50,10 +50,10 @@
 큰 걸음은 잡음을 이기지만 봉우리를 거칠게 잡는다 (가상 지형에서 2° 는 Q 0.97 까지, 5° 는
 0.85 까지). 평가가 "방광을 찾고 → 용적이 변하는 동안 유지" 라 둘 다 필요하다. 그래서
 
-  모든 방향이 실패하면 (지역 최고점)  걸음을 ``step_decay`` 배로 줄인다 (``step_min_deg`` 까지)
+  모든 방향이 실패하면 (지역 최고점)  걸음을 ``step_decay`` 배로 줄인다 (``step_min`` 까지)
   Q 가 최고점보다 ``reset_drop`` 넘게 떨어지면  시야가 바뀐 것이므로 거친 걸음으로 되돌린다
 
-``step_min_deg`` 3° 는 기대 효과 0.015 로 정지 잡음(0.007) 의 두 배 — 더 줄이면 잡음에 묻힌다.
+``step_min`` 3° 는 기대 효과 0.015 로 정지 잡음(0.007) 의 두 배 — 더 줄이면 잡음에 묻힌다.
 """
 
 from __future__ import annotations
@@ -83,24 +83,26 @@ class HillClimbSearch:
 
     Args:
         axes: 시험할 (축, 부호) 목록.
-        step_deg: 한 걸음의 회전각 [°].
-        rate_deg_s: 회전 속도 [°/s]. 러너의 상한과 같게 둔다.
+        step: 한 걸음의 크기. **단위는 axes 가 정한다** — 회전축이면 °, 병진축이면 mm.
+        rate: 이동 속도 (같은 단위 /s). 러너의 상한과 같게 둔다.
         settle_s: 걸음 뒤 Q 를 모으는 시간 [s]. 초음파 지연(0.2 s)보다 넉넉해야 한다.
         min_gain: 이만큼은 올라야 "나아졌다" 로 본다.
         dwell_s: 모든 방향이 실패한 뒤 쉬는 시간 [s].
     """
 
     axes: Sequence[tuple[int, float]] = DEFAULT_AXES
-    step_deg: float = 5.0        # 2° 는 잡음에 묻혔다 — 위 표 참조
-    rate_deg_s: float = 3.0
+    step: float = 5.0            # 2° 는 잡음에 묻혔다 — 위 표 참조
+    rate: float = 3.0
     settle_s: float = 0.6        # 늘려도 창 간 변동이 안 줄어 그대로 둔다
     min_gain: float = 0.02       # 정지 잡음 75 %p(0.007) 위
-    step_min_deg: float = 3.0    # 이보다 줄이면 걸음 효과가 잡음에 묻힌다
+    step_min: float = 3.0        # 이보다 줄이면 걸음 효과가 잡음에 묻힌다
+    #: 진단 출력에 쓸 축 이름. 병진에 쓸 때는 ("x","y","z") 처럼 바꾼다.
+    axis_names: Sequence[str] = ("θx", "θy", "θz")
     step_decay: float = 0.6      # 지역 최고점에서 걸음을 좁히는 배율
     reset_drop: float = 0.15     # 최고점 대비 이만큼 떨어지면 거친 걸음으로 되돌린다
     dwell_s: float = 2.0
 
-    step: float = field(default=float("nan"), init=False)   # 지금 쓰는 걸음 [°]
+    _step: float = field(default=float("nan"), init=False)  # 지금 쓰는 걸음
     phase: str = field(default=MOVE, init=False)
     best_q: float = field(default=float("nan"), init=False)
     idx: int = field(default=0, init=False)          # 지금 시험 중인 방향
@@ -113,22 +115,22 @@ class HillClimbSearch:
 
     @property
     def move_s(self) -> float:
-        return self.current_step / max(self.rate_deg_s, 1e-6)
+        return self.current_step / max(self.rate, 1e-6)
 
     @property
     def current_step(self) -> float:
         """지금 쓰는 걸음. ``reset`` 전에는 설정값."""
-        return self.step_deg if self.step != self.step else self.step
+        return self.step if self._step != self._step else self._step
 
     def reset(self, t: float, q: float = float("nan")) -> None:
         self.phase, self._t0, self._samples = MOVE, t, []
         self.best_q, self.idx, self.n_fail, self.n_steps = q, 0, 0, 0
-        self.step, self.last_decision = float(self.step_deg), ""
+        self._step, self.last_decision = float(self.step), ""
 
     def _omega(self, sign: float) -> tuple[float, float, float]:
         out = [0.0, 0.0, 0.0]
         axis, direction = self.axes[self.idx]
-        out[axis] = sign * direction * self.rate_deg_s
+        out[axis] = sign * direction * self.rate
         return tuple(out)
 
     def _enter(self, phase: str, t: float) -> None:
@@ -163,7 +165,7 @@ class HillClimbSearch:
                     if (self.best_q == self.best_q
                             and measured < self.best_q - self.reset_drop):
                         # 방광이 시야에서 크게 벗어났다 — 좁은 걸음으로는 못 돌아온다
-                        self.step = float(self.step_deg)
+                        self._step = float(self.step)
                         self.n_fail = 0
                     self.best_q = measured
                 self._advance()
@@ -200,12 +202,12 @@ class HillClimbSearch:
         self.n_steps = 0
         self.idx = (self.idx + 1) % len(self.axes)
         if self.n_fail >= len(self.axes):
-            self.step = max(self.step_min_deg, self.current_step * self.step_decay)
+            self._step = max(self.step_min, self.current_step * self.step_decay)
 
     def describe(self) -> str:
         axis, direction = self.axes[self.idx]
-        name = ("θx", "θy", "θz")[axis]
+        name = self.axis_names[axis] if axis < len(self.axis_names) else str(axis)
         best = f"{self.best_q:.3f}" if self.best_q == self.best_q else "—"
         return (f"{self.phase} {'+' if direction > 0 else '−'}{name}  최고 Q {best}  "
-                f"걸음 {self.current_step:.1f}°  "
+                f"걸음 {self.current_step:.1f}  "
                 f"연속전진 {self.n_steps}  실패 {self.n_fail}/{len(self.axes)}")

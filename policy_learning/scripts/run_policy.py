@@ -62,7 +62,9 @@ from rus_policy.episode import (CONDITIONS, PlaceboBuffer, StartGate, Thresholds
 from rus_policy.debias import OnlineActionBias, default_bias_path, load_action_bias
 from rus_policy.model import ACTION_DIM
 from rus_policy.search import AXES_XY, AXES_XYZ, HillClimbSearch
+from rus_policy.axis_gains import AxisGains
 from rus_policy.axis_probe import AxisProbe
+from rus_policy.rule_control import RuleController
 from rus_policy.view_quality import view_quality
 from rus_policy.perception import STATE_DIM, apply_frame_transform, build_backend
 from rus_policy.train import load_policy
@@ -117,6 +119,48 @@ def build_observation(cfg, items, t_now, quat, prev_net, prev_t, device):
             "frame_dt": t(frame_dt, torch.float32), "frame_valid": t(valid, torch.bool),
             "state": t(state, torch.float32), "vec": t(vec, torch.float32),
             "quality_now": items[-1][3]}
+
+
+def code_provenance() -> dict:
+    """이 에피소드를 만든 **코드가 무엇이었나.**
+
+    없으면 나중에 에피소드를 묶을 수 없다. 2026-09-14 하루에 규칙 제어기가 일곱 번
+    바뀌었고 13 개 에피소드가 쌓였는데, 파일만 보고는 어느 것이 어느 코드였는지 알 수
+    없었다 — 평균을 내면 서로 다른 제어기를 섞게 된다.
+
+    ``dirty`` 가 참이면 커밋되지 않은 변경 위에서 돈 것이다. 그 에피소드는 SHA 만으로
+    재현되지 않으므로 **본 시험에 쓰면 안 된다.**
+    """
+    import subprocess
+    root = Path(__file__).resolve().parents[2]
+    def git(*a) -> str:
+        try:
+            return subprocess.run(("git", "-C", str(root)) + a, capture_output=True,
+                                  text=True, timeout=5).stdout.strip()
+        except Exception:
+            return ""
+    sha = git("rev-parse", "HEAD")
+    dirty = bool(git("status", "--porcelain"))
+    return {"git_sha": sha or None, "git_dirty": dirty,
+            "git_described": git("describe", "--always", "--dirty") or None}
+
+
+def _last_attempt(out: Path) -> int:
+    """폴더에 이미 있는 가장 큰 attempt 번호. 없으면 0.
+
+    같은 자세에서 여러 번 받는 것이 정상 운용이라 --out 은 재사용된다. 번호를 0 부터
+    다시 매기면 앞의 기록을 조용히 덮어쓴다 — 덮은 것은 되돌릴 수 없다.
+    """
+    import re
+    n = 0
+    try:
+        for d in Path(out).glob("attempt_*"):
+            m = re.fullmatch(r"attempt_(\d+)", d.name)
+            if m:
+                n = max(n, int(m.group(1)))
+    except OSError:
+        pass
+    return n
 
 
 class PolicyRunner(Node):
@@ -185,13 +229,45 @@ class PolicyRunner(Node):
         # 측정한 Q 로 방향을 고르는 탐색기 (condition=search). 회전 상한을 그대로 쓴다.
         self.search = HillClimbSearch(
             axes=AXES_XYZ if args.search_axes == "xyz" else AXES_XY,
-            rate_deg_s=float(args.max_deg_s), step_deg=float(args.search_step_deg),
+            rate=float(args.max_deg_s), step=float(args.search_step_deg),
             settle_s=float(args.search_settle_s), min_gain=float(args.search_min_gain))
+        # 규칙 제어 (condition=rule). 이득 파일이 있어야 축과 부호를 안다.
+        self.rule, self._rule_note = None, ""
+        if self.condition == "rule":
+            g = AxisGains.load(args.gains) if args.gains else None
+            if g is None:
+                raise SystemExit(
+                    f"이득 파일이 없다: {args.gains or '(--gains 미지정)'}\n"
+                    "  먼저 축을 재십시오:  --condition axis_probe --axes all\n"
+                    "  그 다음:            scripts/analyze_axis_probe.py <run> --save")
+            axes = tuple(a for a in str(args.rule_find_axes).split(",") if a)
+            self.rule = RuleController(g, max_mm_s=float(args.max_mm_s),
+                                       max_deg_s=float(args.max_deg_s),
+                                       deadband=float(args.rule_deadband),
+                                       k_p=float(args.rule_kp),
+                                       find_half_range=float(args.rule_find_range_mm),
+                                       find_half_range_deg=float(args.rule_find_range_deg),
+                                       find_rate=float(args.rule_find_rate_mm_s),
+                                       find_axes=axes,
+                                       q_target=float(args.rule_q_target),
+                                       find_oop_scale=float(args.rule_oop_scale),
+                                       refine_cooldown_s=float(args.rule_refine_cooldown_s),
+                                       find_widen=float(args.rule_find_widen),
+                                       find_max_range_deg=float(args.rule_find_max_range_deg),
+                                       find_max_range_mm=float(args.rule_find_max_range_mm),
+                                       align_max_mm=float(args.rule_align_max_mm),
+                                       align_max_deg=float(args.rule_align_max_deg),
+                                       keep_fraction=float(args.rule_keep_fraction))
+            self.get_logger().warn(self.rule.describe())
+            # 병진 통로를 여는 것은 **생성이 끝난 뒤**다 (main). 여기서 부르면 응답을
+            # 기다리는 spin 이 구독 콜백을 반쯤 지어진 객체로 들여보낸다 — 2026-09-14 에
+            # _on_twist_echo 가 아직 없는 _last_sent 를 읽고 죽었다.
         # 축별 기하 이득 측정 (condition=axis_probe). 회전 진폭은 지령 상한을 그대로 쓴다.
         self.axis_probe = AxisProbe(amp_deg=float(args.max_deg_s), amp_mm_s=float(args.max_mm_s),
                                     move_s=float(args.probe_move_s),
                                     rest_s=float(args.probe_rest_s),
-                                    repeats=int(args.probe_repeats))
+                                    repeats=int(args.probe_repeats),
+                                    start_area=float(args.probe_start_area))
         self.start_quat = None          # 에피소드 시작 자세 — 너무 멀리 가지 않게
         self.gate = StartGate(area_max=args.gate_area_max, quality_min=args.gate_quality_min,
                               confirm_s=args.gate_confirm_s)
@@ -206,17 +282,26 @@ class PolicyRunner(Node):
         self.state_t: list = []
         self.finished = False
         self.stopped_by_operator_s: Optional[float] = None   # 계획보다 먼저 Stop 으로 닫혔으면 그 시각
-        self.attempt = 0            # --loop: 시도 번호. enable 이 올라갈 때마다 는다
+        # --loop: 시도 번호. enable 이 올라갈 때마다 는다.
+        #
+        # **이미 있는 것 다음부터 센다.** 예전에는 프로세스마다 0 에서 시작해서, 같은 --out
+        # 으로 두 번째를 돌리면 attempt_001 을 통째로 덮었다 (2026-09-14: 123 s 를 유지한
+        # 기록이 다음 실행에 지워졌다). 한 자세에서 여러 번 받는 것이 정상 운용이고,
+        # 폴더 이름을 매번 바꾸라고 요구하는 쪽이 틀렸다.
+        self.attempt = _last_attempt(Path(args.out)) if args.out else 0
         self.attempts: list = []    # 시도별 판정 (한 줄씩 화면에 쌓는다)
         self.announced = False      # 이번 시도에서 성공을 이미 알렸는가
         # 시작 조건은 **실험 장치**다 (계획서 §3 의 'teleop 실패 자세' 판정). 운용에서는
         # 버튼이 조작자의 결정이므로 막지 않는다 — 다만 조건 충족 여부는 기록한다.
-        self.gate_required = args.start_gate == 'on'
+        # axis_probe 는 실험이 아니라 **측정**이다 — 시작 조건을 기다리면 안 된다.
+        # (2026-09-12: 게이트가 안 열려 60 s 를 흔들고도 "기록하지 않는다" 로 끝났다.)
+        self.gate_required = args.start_gate == 'on' and self.condition != "axis_probe"
         self.gate_met_at_start = None
         self._warned = False
         self._uncompensated = ""    # 보상 안 된 렌치가 오고 있으면 그 frame_id
         self.q_raw = float("nan")   # 최근 Q_raw (힘 축)
         self.q_view = float("nan")  # 최근 Q_seg — 방광 뷰 품질 (화면·기록)
+        self.q_parts = None         # 그 항별 값 — 규칙 제어기가 부족한 항을 고른다
         self.q_train = float("nan")  # 최근 옛 Q — 정책 입력에 들어가는 값 (학습 때 정의)
         self.f_bar = None           # 힘 탐색이 알리는 설정값
         self.f_bar_t = 0.0
@@ -405,7 +490,8 @@ class PolicyRunner(Node):
         # 화면·기록의 Q_seg 는 **방광 뷰 품질**이다 (rus_policy.view_quality) — 면적과 좌우
         # 중심이 가중치의 63 %. 정책의 입력(state 의 quality 특징)은 학습 때 값 그대로 둔다:
         # 그것을 바꾸면 정책이 처음 보는 입력을 받는다. q 는 기록용으로만 남긴다.
-        q_view = view_quality(state)[0] if self.backend is not None else float("nan")
+        q_view, self.q_parts = (view_quality(state) if self.backend is not None
+                                else (float("nan"), None))
         self.q_view, self.q_train = q_view, float(q)
         self.q_seg_pub.publish(Float32(data=float(q_view)))  # NaN 도 그대로 — "측정 안 됨"
         self.q_raw_pub.publish(Float32(data=float(q_raw)))
@@ -618,6 +704,11 @@ class PolicyRunner(Node):
 
         if self.args.duration > 0 and (t - self.t_start) >= self.args.duration:
             self._stop()
+            if self.args.loop:
+                # 루프 모드의 종료 경로는 summary() 뿐이라 기록이 남지 않았다. 시간으로 끝나면
+                # 그 자리가 한 시도의 끝이다 (2026-09-12: axis_probe 60 s 를 흔들고도 결과가
+                # 사라졌다 — 조작자가 Stop 을 누를 일이 없는 모드다).
+                self._close_attempt()
             self.finished = True
             self.get_logger().warn("에피소드 종료 — 지령을 멈춘다")
             return
@@ -684,14 +775,32 @@ class PolicyRunner(Node):
             far = self._excursion_deg() > self.args.search_max_excursion_deg
             w = self.search.update(t, self.q_view, blocked=far)
             a = np.array([0.0, 0.0, 0.0, w[0], w[1], w[2]], dtype=float)
+        if self.condition == "rule":
+            # 학습된 정책도 Q̂ 도 쓰지 않는다 — U-Net 마스크와 실측 이득만으로 돈다.
+            st = self.states[-1]
+            from rus_policy.episode import AREA, CENTROID_DX, HAS_MASK
+            # Q_seg 를 넘긴다 — 찾기와 유지의 목적량이 이것이다. 면적만 보면 "크지만
+            # 화면 끝에 걸린 방광" 을 위에 놓는데, 유지의 목적은 가운데 두는 것이다.
+            a, note = self.rule.update(
+                t, st[HAS_MASK] > 0.5, float(st[CENTROID_DX]), float(st[AREA]),
+                q_view=self.q_view, q_parts=self.q_parts)
+            self._rule_note = note
         if self.condition == "axis_probe":
             # 실험이 아니라 측정이다 — 정해진 순서로 한 축씩 흔들어 기하 이득을 잰다.
             # 정책도 Q̂ 도 쓰지 않는다.
-            a, _ = self.axis_probe.update(t)
+            from rus_policy.episode import AREA
+            a, _ = self.axis_probe.update(t, float(self.states[-1][AREA]))
         if self.condition == "placebo" and self.placebo is None:
             # 크기는 정책이 고른 그대로, 방향만 무의미하게. 크기를 다시 뽑으면 조건 사이에서
             # "움직임의 양" 이 어긋나고, 그것이 이 대조군이 통제하려던 변수다.
             a = randomize_direction(a, self.rng)
+        # 규칙 제어기는 **스스로 되돌아온다** (RuleController.HOME, 상한 24° < 러너의 30°).
+        # 여기서 지령을 끊으면 되돌아올 수단까지 끊긴다 — 2026-09-14 rule_v3 attempt_003 이
+        # 112 s 에 30° 에 닿아 남은 68 s 동안 아무것도 못 했다. 그래도 러너의 상한을 넘으면
+        # 제어기의 복귀가 안 듣는다는 뜻이니 그때는 멈춘다 (안전선은 남긴다).
+        if self.condition == "rule" and too_far and self.rule is not None:
+            if self.rule.phase == "복귀":
+                too_far = False
         if self.condition in ("hold", "expert") or too_far:
             # hold 는 바닥선, expert 는 사람이 지령한다. 둘 다 러너는 **기록만** 한다.
             # too_far 면 어느 조건이든 멈춘다 — 정책이 한 방향으로 계속 갈 수 있어서다
@@ -715,6 +824,7 @@ class PolicyRunner(Node):
             "Q_raw": self.q_raw,
             "Q_view": self.q_view,       # 새 Q_seg. Q_now 는 옛 정의 그대로 (정책 입력)
             "probe_label": self.axis_probe.label if self.condition == "axis_probe" else "",
+            "rule_phase": self.rule.phase if self.rule is not None else "",
             "search_phase": self.search.phase if self.condition == "search" else "",
             "search_best_q": self.search.best_q if self.condition == "search" else float("nan"),
             "excursion_deg": self._excursion_deg(),
@@ -757,12 +867,64 @@ class PolicyRunner(Node):
         m = [i for i, tt in enumerate(self.state_t) if tt >= self.t_start]
         if not m:
             return {}
-        thr = Thresholds(area_min=self.args.success_area_min,
+        thr = Thresholds(q_view_min=self.args.success_q_view_min,
+                         area_min=self.args.success_area_min,
                          component_min=self.args.success_component_min,
                          centroid_max=self.args.success_centroid_max,
                          hold_s=self.args.success_hold_s)
         return judge([self.state_t[i] for i in m],
                      np.stack([self.states[i] for i in m]), thr)
+
+    #: 규칙 제어기가 병진을 쓰려면 제어 스택에서 이 파라미터가 켜져 있어야 한다.
+    LATERAL_PARAM = "contact_control.policy_lateral"
+    #: 그것을 이 실행이 켰는가. **클래스 속성이다** — __init__ 안에서 초기화하면 규칙
+    #: 제어기 생성(그 안에서 켠다)보다 뒤라 방금 켠 것을 도로 지운다.
+    _lateral_enabled = False
+
+    def _enable_lateral_if_needed(self) -> None:
+        """찾기·정렬 축에 병진이 있으면 제어 스택의 병진 통로를 연다.
+
+        **__init__ 안에서 부르면 안 된다.** 응답을 기다리는 spin 이 이미 걸린 구독의
+        콜백을 불러들이는데, 그때 객체는 아직 반만 지어져 있다 (2026-09-14: _on_twist_echo
+        가 아직 없는 _last_sent 를 읽고 AttributeError 로 죽었다). main 에서 부른다.
+
+        **조용히 사라지는 것이 가장 나쁘다.** 정책 régime 의 기본은 회전 세 축만 통과이고,
+        병진 지령은 gate_axes 에서 버려진다 — 로그도 안 남는다. 2026-09-12 probe2 에서
+        x 병진이 0.00708/mm·r=1.00 이라는 근사한 이득을 냈는데, 그 구간에 로봇은 0.07 mm
+        움직였다 (지령 11.8). 60 s 측정이 통째로 허수였다.
+
+        켜지 못하면 **시작하지 않는다.** 켜졌다고 믿고 도는 것보다 안 도는 편이 낫다.
+        """
+        from rus_policy.rule_control import AXIS_INDEX
+        used = [a for a in ([self.rule.align_axis] + list(self.rule.find_axis_list))
+                if a and AXIS_INDEX.get(a, 9) < 3]
+        if not used:
+            return
+        from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
+        from rcl_interfaces.srv import SetParameters
+        node = self.args.control_node
+        cli = self.create_client(SetParameters, f"{node}/set_parameters")
+        if not cli.wait_for_service(timeout_sec=5.0):
+            raise SystemExit(
+                f"{node} 의 파라미터 서비스가 없다 — 제어 스택이 떠 있는가.\n"
+                f"  병진 축 {used} 를 쓰려면 {self.LATERAL_PARAM} 을 켜야 하고, "
+                "켜지 않으면 병진 지령은 gate_axes 에서 조용히 버려진다.")
+        req = SetParameters.Request()
+        req.parameters = [Parameter(
+            name=self.LATERAL_PARAM,
+            value=ParameterValue(type=ParameterType.PARAMETER_BOOL, bool_value=True))]
+        fut = cli.call_async(req)
+        rclpy.spin_until_future_complete(self, fut, timeout_sec=5.0)
+        res = fut.result()
+        if res is None or not all(r.successful for r in res.results):
+            why = "응답 없음" if res is None else "; ".join(
+                r.reason for r in res.results if not r.successful)
+            raise SystemExit(f"{self.LATERAL_PARAM} 을 켜지 못했다 ({why}) — "
+                             f"병진 축 {used} 의 지령이 사라진 채 돌게 된다")
+        self.get_logger().warn(
+            f"{self.LATERAL_PARAM} = true 로 켰다 (병진 축 {used}). "
+            "옆으로 흐르는 동안의 힘은 따로 읽어야 한다")
+        self._lateral_enabled = True
 
     def _close_attempt(self) -> None:
         """한 시도를 닫고 기록한 뒤 다음을 위해 비운다 (--loop).
@@ -773,15 +935,42 @@ class PolicyRunner(Node):
         """
         v = self._judge_now()
         if not v and self.t_start is None:
-            self.get_logger().warn("시도가 시작되지 않았다 (시작 조건 미충족) — 기록하지 않는다")
+            # 기록하지 않더라도 **왜 안 됐는지는 남긴다.** 2026-09-14 에 rule_v2 를 두 번
+            # 돌리고 두 번 다 폴더가 비었는데, 이유는 터미널에만 찍혀 있었고 터미널은
+            # 닫혔다. 빈 폴더는 "안 됐다" 만 말하고 "왜" 를 말하지 않는다.
+            self.get_logger().warn(
+                f"시도가 시작되지 않았다 — {self._idle_reason or '이유 미상'}. "
+                "기록하지 않는다 (not_started.json 에 사정만 남긴다)")
+            try:
+                d = Path(self.args.out or ".")
+                d.mkdir(parents=True, exist_ok=True)
+                (d / "not_started.json").write_text(json.dumps({
+                    "t": time.time(), "condition": self.condition,
+                    "idle_reason": self._idle_reason,
+                    "enabled": bool(self.enabled),
+                    "n_frames": len(self.buf), "n_states": len(self.states),
+                    "q_raw": self.q_raw, "q_view": self.q_view,
+                    "wrench": None if self.wrench is None else [float(x) for x in self.wrench],
+                    "uncompensated": self._uncompensated,
+                    "start_force": float(self.args.start_force),
+                }, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception as e:      # 기록 실패가 종료를 막으면 안 된다
+                self.get_logger().error(f"not_started.json 을 못 남겼다: {e}")
         else:
             self.attempt += 1
             out = Path(self.args.out or ".") / f"attempt_{self.attempt:03d}"
+            while out.exists():     # 경주 상황에서도 덮지 않는다
+                self.attempt += 1
+                out = Path(self.args.out or ".") / f"attempt_{self.attempt:03d}"
             self.save(out, quiet=True)
             row = {"n": self.attempt, "success": bool(v.get("success")),
                    "best_run_s": v.get("best_run_s", float("nan")),
                    "t_total_s": (self.state_t[-1] - self.t_start) if self.t_start else float("nan"),
-                   "q_seg": v.get("q_mean", float("nan")), "dir": out.name}
+                   # **q_mean 이 아니라 q_view_mean 이다.** 옛 Q 는 마스크가 없어도
+                   # 0.7~0.9 를 내므로 "방광을 못 봤다" 가 점수에 안 드러난다 —
+                   # 2026-09-14 attempt_007 은 마스크 0 %, 면적 0 인데 q_mean 0.721 이었다.
+                   # 방광을 찾고 유지하는 일의 성적은 Q_seg(view_quality) 로만 잰다.
+                   "q_seg": v.get("q_view_mean", float("nan")), "dir": out.name}
             self.attempts.append(row)
             mark = "○ 성공" if row["success"] else "✗ 실패"
             self.get_logger().warn(
@@ -806,7 +995,8 @@ class PolicyRunner(Node):
         if self.t_start is not None and self.states:
             m = [i for i, tt in enumerate(self.state_t) if tt >= self.t_start]
             if m:
-                thr = Thresholds(area_min=self.args.success_area_min,
+                thr = Thresholds(q_view_min=self.args.success_q_view_min,
+                         area_min=self.args.success_area_min,
                                  component_min=self.args.success_component_min,
                                  centroid_max=self.args.success_centroid_max,
                                  hold_s=self.args.success_hold_s)
@@ -860,14 +1050,21 @@ class PolicyRunner(Node):
             "action_bias_online": (None if self.online_bias is None or self.online_bias.bias() is None
                                    else list(map(float, self.online_bias.bias()))),
             "max_mm_s": self.args.max_mm_s, "max_deg_s": self.args.max_deg_s,
+            "code": code_provenance(),
             "condition": self.condition, "duration_s": self.args.duration,
             "episode_started": self.t_start is not None,
             "stopped_by_operator_s": self.stopped_by_operator_s,
             "start_gate": self.args.start_gate, "gate_met_at_start": self.gate_met_at_start,
+            # 병진 지령이 실제로 나갔는지는 이 값이 말한다. 꺼진 채 돈 기록은 병진 축을
+            # 분석에서 빼야 한다 (probe2 처럼 허수 이득이 나온다).
+            "policy_lateral": bool(self._lateral_enabled),
+            "rule_align_axis": getattr(self.rule, "align_axis", None) if self.rule else None,
+            "rule_find_axes": list(getattr(self.rule, "find_axis_list", [])) if self.rule else [],
             "motion": motion,
             "gate": {"area_max": self.args.gate_area_max, "quality_min": self.args.gate_quality_min,
                      "confirm_s": self.args.gate_confirm_s, "held_s": self.gate.held_s},
-            "thresholds": {"area_min": self.args.success_area_min,
+            "thresholds": {"q_view_min": self.args.success_q_view_min,
+                           "area_min": self.args.success_area_min,
                            "component_min": self.args.success_component_min,
                            "centroid_max": self.args.success_centroid_max,
                            "hold_s": self.args.success_hold_s},
@@ -942,6 +1139,42 @@ def main() -> int:
     p.add_argument("--max-saved-frames", type=int, default=1200,
                    help="--save-frames 의 상한. --loop 은 끝이 없으므로 메모리를 묶어 둔다. "
                         "10 fps 이므로 1200 장 ≈ 120 s — 180 s 에피소드는 앞 2/3 이 남는다")
+    p.add_argument("--gains", default=None,
+                   help="--condition rule 이 읽을 axis_gains.json "
+                        "(scripts/analyze_axis_probe.py --save 가 만든다)")
+    p.add_argument("--rule-deadband", type=float, default=0.03,
+                   help="중심이 이 안이면 가만히 둔다. 1 s 잡음 표준편차 0.014 의 두 배")
+    p.add_argument("--rule-kp", type=float, default=0.4, help="규칙 제어 비례 이득 [1/s]")
+    p.add_argument("--rule-find-range-mm", type=float, default=25.0,
+                   help="찾기에서 중심 기준 ± 이만큼 훑는다 [mm]. 방광이 이 범위 밖이면 못 찾는다")
+    p.add_argument("--rule-find-rate-mm-s", type=float, default=3.0,
+                   help="훑는 속도 [mm/s]. ±25 mm 한 바퀴에 약 30 s")
+    p.add_argument("--rule-find-range-deg", type=float, default=12.0,
+                   help="회전 축으로 훑을 때의 반경 [°]")
+    p.add_argument("--rule-oop-scale", type=float, default=0.5,
+                   help="면외 축(정렬 축이 아닌 찾기 축)은 반경을 이 비율로 줄여 훑는다")
+    p.add_argument("--rule-refine-cooldown-s", type=float, default=5.0,
+                   help="유지에서 다시 훑기로 넘어간 뒤 또 넘어가기까지의 최소 간격 [s]")
+    p.add_argument("--rule-q-target", type=float, default=0.90,
+                   help="유지에서 목표로 하는 Q_seg (합격선). 기록·표시에 쓴다")
+    p.add_argument("--rule-find-widen", type=float, default=1.6,
+                   help="한 바퀴 다 훑고 못 찾으면 반경에 이것을 곱한다 (1 이면 안 넓힘)")
+    p.add_argument("--rule-find-max-range-deg", type=float, default=30.0,
+                   help="넓혀도 여기까지 [°]")
+    p.add_argument("--rule-find-max-range-mm", type=float, default=60.0,
+                   help="넓혀도 여기까지 [mm]")
+    p.add_argument("--rule-align-max-mm", type=float, default=20.0,
+                   help="유지 중 정렬 축 누적 변위 상한 [mm]")
+    p.add_argument("--rule-align-max-deg", type=float, default=8.0,
+                   help="같은 것, 회전 축일 때 [°]. 중심 보정이 시야를 벗어나면 안 된다")
+    p.add_argument("--rule-keep-fraction", type=float, default=0.5,
+                   help="유지 중 면적이 최고의 이 비율 아래로 떨어지면 되돌아간다")
+    p.add_argument("--rule-find-axes", default="",
+                   help="찾기에 쓸 축을 쉼표로 (예: y,thx). 비우면 이득이 고른 축 하나. "
+                        "여러 개면 차례로 훑고 면적이 가장 컸던 축·자리로 간다")
+    p.add_argument("--probe-start-area", type=float, default=0.010,
+                   help="axis_probe: 방광이 이 면적비 이상 보여야 시작한다. "
+                        "안 보이는 채로 흔들면 어떤 이득도 안 나온다")
     p.add_argument("--probe-move-s", type=float, default=1.5,
                    help="axis_probe: 한 축을 흔드는 시간")
     p.add_argument("--probe-rest-s", type=float, default=1.5,
@@ -983,7 +1216,11 @@ def main() -> int:
     p.add_argument("--gate-confirm-s", type=float, default=2.0,
                    help="시작 조건 판정 창 [s]. 계획서 §3 은 10 s 정지 후 마지막 2 s 를 쓴다 — "
                         "10 s 정지는 조작자의 절차이고 여기 값은 그 판정 창이다")
-    p.add_argument("--success-area-min", type=float, default=0.08, help="성공: 면적비 ≥ (파일럿이 확정)")
+    p.add_argument("--success-q-view-min", type=float, default=0.90,
+                   help="유지 구간의 Q_seg 합격선 (조작자 지정, 2026-09-14). "
+                        "판정 보고의 hold_q_pass_* 가 이 선을 쓴다")
+    p.add_argument("--success-area-min", type=float, default=0.04,
+                   help="성공: 면적비 ≥. 2026-09-14 라벨 78 장의 중앙값 (최대가 0.0685 라 옛 0.08 은 도달 불가)")
     p.add_argument("--success-component-min", type=float, default=0.80, help="성공: 연결성분 ≥")
     p.add_argument("--success-centroid-max", type=float, default=0.30,
                    help="성공: |중심 − 0.5| ≤ (0.30 = 중앙 60 % 폭). 가장자리 뷰를 배제한다")
@@ -991,6 +1228,9 @@ def main() -> int:
     p.add_argument("--axes", default="rot", choices=["rot", "all"], help="rot=회전만 (기본), all=병진까지")
     p.add_argument("--execute", action="store_true", help="실제로 지령한다 (기본은 계산만)")
     p.add_argument("--z-samples", type=int, default=64, help="후보 수 M — Q̂ 순위가 약하므로 넉넉히")
+    p.add_argument("--control-node", default="/us_diff_ik_node",
+                   help="파라미터를 미는 제어 노드 — 규칙 제어기가 병진을 쓸 때 "
+                        "contact_control.policy_lateral 을 여기서 켠다")
     p.add_argument("--start-force", type=float, default=1.0, help="이 접촉력[N] 미만이면 지령하지 않는다")
     p.add_argument("--max-mm-s", type=float, default=3.0)
     p.add_argument("--max-deg-s", type=float, default=5.0)
@@ -1010,6 +1250,7 @@ def main() -> int:
     rclpy.init()
     args.out = str(out)
     node = PolicyRunner(args, model, cfg, backend)
+    node._enable_lateral_if_needed()      # 생성이 끝난 뒤. 못 켜면 여기서 멈춘다
     try:
         while rclpy.ok() and not node.finished:
             rclpy.spin_once(node, timeout_sec=0.1)
@@ -1018,6 +1259,10 @@ def main() -> int:
     finally:
         node._stop()
         if args.loop:
+            # Ctrl-C 도 한 시도의 끝이다. 예전에는 summary() 만 불러서, 열려 있던 시도가
+            # 통째로 사라졌다 (2026-09-14 rule_v2: 3 분을 돌고 force_search.log 만 남았다).
+            # 조작자가 Stop 을 누르지 않고 터미널을 끊는 것이 오히려 흔한 경로다.
+            node._close_attempt()
             node.summary()
         else:
             node.save(out)

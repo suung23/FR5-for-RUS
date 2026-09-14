@@ -32,13 +32,21 @@ const BANDS: { min: number; label: string }[] = [
   { min: 0, label: 'poor' },
 ];
 
-function band(score: number | undefined): string {
-  if (score === undefined) return 'not measured';
-  return BANDS.find((b) => score >= b.min)?.label ?? 'poor';
+/** 0–1 로 오는 점수를 화면 눈금(0–100)으로. 띠도 **같은 눈금**으로 재야 한다. */
+export function outOf100(score: number): number {
+  return Math.round(score * 100);
+}
+
+// 띠가 원래 값(0–1)을 그대로 받으면 어떤 점수도 80 을 못 넘어 늘 'poor' 로 찍힌다.
+// 2026-09-14 에 Q_seg 90 · Q_raw 87 이 나란히 POOR 로 표시됐다 — 조작자가 화면을 믿고
+// 자세를 고치러 갈 만한 오표시다.
+export function band(shown: number | undefined): string {
+  if (shown === undefined) return 'not measured';
+  return BANDS.find((b) => shown >= b.min)?.label ?? 'poor';
 }
 
 function Score({ label, note, value }: { label: string; note: string; value?: number }) {
-  const shown = value === undefined ? null : Math.round(value * 100);
+  const shown = value === undefined ? null : outOf100(value);
   return (
     <div className={styles.score}>
       <span className={styles.scoreLabel}>{label}</span>
@@ -46,7 +54,7 @@ function Score({ label, note, value }: { label: string; note: string; value?: nu
         {shown === null ? '—' : shown}
       </span>
       <span className={styles.scoreNote}>{note}</span>
-      <span className={styles.scoreBand}>{band(value)}</span>
+      <span className={styles.scoreBand}>{band(shown ?? undefined)}</span>
     </div>
   );
 }

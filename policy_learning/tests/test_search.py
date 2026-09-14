@@ -4,6 +4,8 @@
 여기서는 로봇 없이, 가상의 Q 지형 위에서 탐색기가 실제로 봉우리를 찾는지 본다.
 """
 
+import re
+
 import numpy as np
 import pytest
 
@@ -42,7 +44,7 @@ def test_finds_the_peak_from_a_blind_start():
     assert q_end > 0.9, q_end
     end = traj[-1][1]
     # 봉우리 근처의 분해능은 걸음 크기가 정한다 — 허용치를 걸음에 맞춘다
-    assert np.linalg.norm(end - np.array([6.0, -4.0])) < max(4.0, 1.5 * s.step_deg), end
+    assert np.linalg.norm(end - np.array([6.0, -4.0])) < max(4.0, 1.5 * s.step), end
 
 
 def test_steps_back_when_quality_drops():
@@ -53,7 +55,7 @@ def test_steps_back_when_quality_drops():
     assert UNDO in phases, "봉우리에 있는데 되돌림이 한 번도 없었다"
     # 되돌림 뒤에는 출발 자세 근처로 돌아와 있어야 한다
     after = [a for _, a, _, p in traj if p == MOVE]
-    assert max(np.linalg.norm(a) for a in after) < 1.5 * s.step_deg
+    assert max(np.linalg.norm(a) for a in after) < 1.5 * s.step
 
 
 def test_tries_every_direction_then_dwells():
@@ -81,8 +83,8 @@ def test_defaults_keep_the_step_above_the_measured_noise():
     dQ/dθ ≈ 0.005 /° · 정지 잡음 75 %p = 0.007. 둘 중 하나를 되돌리면 여기서 걸린다.
     """
     s = HillClimbSearch()
-    expected_gain = 0.005 * s.step_deg
-    assert expected_gain > 3 * 0.007, f"걸음 {s.step_deg}° 는 잡음에 묻힌다"
+    expected_gain = 0.005 * s.step
+    assert expected_gain > 3 * 0.007, f"걸음 {s.step}° 는 잡음에 묻힌다"
     assert 0.007 < s.min_gain < expected_gain, s.min_gain
 
 
@@ -105,7 +107,7 @@ def test_blocked_direction_is_undone_and_abandoned():
 
 def test_rebases_the_best_after_stepping_back():
     """팬텀이 변하면 옛 최고값은 그 자리의 값이 아니다 — 되돌아온 자리에서 다시 잰다."""
-    s = HillClimbSearch(settle_s=0.4, step_deg=2.0, rate_deg_s=3.0)
+    s = HillClimbSearch(settle_s=0.4, step=2.0, rate=3.0)
     t, q = 0.0, 0.9
     while s.phase != UNDO:                             # 한 걸음 갔다가 실패하게 만든다
         s.update(t, q); t += 0.1
@@ -165,8 +167,12 @@ def test_runner_uses_measured_quality_not_the_learned_head():
     # 에피소드가 열릴 때 탐색기를 다시 시작한다 — 앞 에피소드의 최고값을 들고 가면 안 된다
     assert "self.search.reset(t, self.q_view)" in run
 
+    # 지령을 내는 조건 목록에 빠지면 그 조건은 조용히 hold 가 된다 — 로봇이 안 움직이는데
+    # 로그는 정상으로 보여서, 한 세션을 다 받고 나서야 안다 (2026-09-14: rule 이 빠져 있었다).
     exp = (Path(__file__).resolve().parents[1] / "scripts" / "run_experiment.py").read_text()
-    assert '("policy", "placebo", "search")' in exp, "드라이버가 search 에 --execute 를 안 준다"
+    cmd = re.search(r"COMMANDING = \(([^)]*)\)", exp).group(1)
+    for c in ("policy", "placebo", "search", "rule"):
+        assert f'"{c}"' in cmd, f"드라이버가 {c} 에 --execute 를 안 준다: {cmd}"
 
 
 def test_frames_can_be_saved_so_episodes_become_training_data():
@@ -214,8 +220,8 @@ def test_step_narrows_at_a_local_peak():
     s = HillClimbSearch()
     _run(lambda ang: 0.5, n_ticks=600)          # 평평한 지형: 모든 방향 실패
     s2, _ = _run(lambda ang: 0.5, n_ticks=600)
-    assert s2.current_step < s.step_deg, "지역 최고점인데 걸음이 그대로다"
-    assert s2.current_step >= s2.step_min_deg, "바닥 아래로 줄었다 — 잡음에 묻힌다"
+    assert s2.current_step < s.step, "지역 최고점인데 걸음이 그대로다"
+    assert s2.current_step >= s2.step_min, "바닥 아래로 줄었다 — 잡음에 묻힌다"
 
 
 def test_step_returns_to_coarse_when_the_view_is_lost():
@@ -228,11 +234,11 @@ def test_step_returns_to_coarse_when_the_view_is_lost():
     for _ in range(600):                         # 평평한 봉우리에서 걸음이 좁아진다
         s.update(t, q); t += 0.2
     narrowed = s.current_step
-    assert narrowed < s.step_deg, narrowed
+    assert narrowed < s.step, narrowed
     q = 0.2                                      # 방광이 시야에서 벗어난다
     for _ in range(40):
         s.update(t, q); t += 0.2
-        if s.current_step == pytest.approx(s.step_deg):
+        if s.current_step == pytest.approx(s.step):
             return
     raise AssertionError(f"시야를 잃었는데 걸음이 {s.current_step}° 로 좁은 채다")
 
@@ -241,7 +247,7 @@ def test_peak_is_resolved_more_finely_than_the_coarse_step():
     """좁히기가 봉우리를 더 곱게 잡는지 — 끝 자세와 봉우리의 거리로 본다."""
     peak = _gauss(center=(0.0, 0.0), width=8.0)
     fine, tf = _run(peak, start=(-10.0, 10.0), n_ticks=6000)
-    _, tc = _run(peak, start=(-10.0, 10.0), n_ticks=6000, step_min_deg=5.0)
+    _, tc = _run(peak, start=(-10.0, 10.0), n_ticks=6000, step_min=5.0)
     # 마지막 20 % 구간에서 봉우리까지의 평균 거리 — 끝점 하나는 걸음 위상에 좌우된다
     tail = lambda tr: np.mean([np.linalg.norm(a) for _, a, _, _ in tr[int(len(tr) * 0.8):]])
     assert fine.current_step < 5.0, fine.current_step

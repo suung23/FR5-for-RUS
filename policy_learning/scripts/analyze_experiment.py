@@ -171,10 +171,12 @@ def main() -> int:
             print(f"  폐기율을 감안하면 자세 약 {need_poses} 개를 잡아야 팔당 {need} 개가 남는다")
 
     if args.blind_thresholds:
+        # 🔁 2026-09-14: 격자를 0.04~0.12 → 0.02~0.06 으로 옮겼다. 사람이 그린 마스크의
+        # 면적비가 이 팬텀에서 최대 0.0685 라, 옛 격자는 절반 이상이 도달 불가능한 값이었다.
         print("\n① 임계 선택 — **조건을 가린다.** 전체를 한 덩어리로 보고 평탄한 자리를 고른다.")
         print("   기울기가 작을수록 그 임계에서 성공률이 임계 자체에 덜 휘둘린다는 뜻이다.")
         print(f"  {'면적비':>7} {'연결성분':>8} {'성공률':>8} {'면적비 기울기':>14}")
-        grid = [(a, c) for a in (0.04, 0.06, 0.08, 0.10, 0.12) for c in (0.70, 0.80, 0.90)]
+        grid = [(a, c) for a in (0.02, 0.03, 0.04, 0.05, 0.06) for c in (0.70, 0.80, 0.90)]
         pooled = {}
         for area, comp in grid:
             res = rejudge(root, Thresholds(area_min=area, component_min=comp, hold_s=args.hold_s))
@@ -185,7 +187,7 @@ def main() -> int:
             pooled[(area, comp)] = float(np.mean(allv)) if allv else float("nan")
         for area, comp in grid:
             here = pooled[(area, comp)]
-            nb = [pooled.get((a, comp)) for a in (round(area - 0.02, 2), round(area + 0.02, 2))]
+            nb = [pooled.get((a, comp)) for a in (round(area - 0.01, 2), round(area + 0.01, 2))]
             nb = [v for v in nb if v is not None and np.isfinite(v)]
             slope = (max(nb) - min(nb)) if len(nb) == 2 else float("nan")
             print(f"  {area:>7.2f} {comp:>8.2f} {here:>8.0%} {slope:>13.1%}")
@@ -195,7 +197,7 @@ def main() -> int:
     if args.sweep:
         print("\n① 임계 민감도 — 성공률이 **평탄한** 자리를 고른다 (민감한 자리를 고르면 그 선택이 결과다)")
         print(f"  {'면적비':>7} {'연결성분':>8} | " + " ".join(f"{c:>9}" for c in sorted(rate)))
-        for area in (0.04, 0.06, 0.08, 0.10, 0.12):
+        for area in (0.02, 0.03, 0.04, 0.05, 0.06):
             for comp in (0.70, 0.80, 0.90):
                 res = rejudge(root, Thresholds(area_min=area, component_min=comp,
                                                hold_s=args.hold_s))

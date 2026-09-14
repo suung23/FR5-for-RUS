@@ -5,11 +5,47 @@ paths:
   sessions_manifest: policy_learning/data/sessions.csv      # session_dir, subject, source, split, note
   dataset: policy_learning/data/policy_dataset.h5
   output_dir: policy_learning/runs/default
-  # 2026-09-10: 팬텀 파인튜닝 6 라운드. PFUS 사전학습 → 사람 라벨 234 장 (day-1 144 + 에피소드 90)
-  # + 완전 접촉 프레임 의사라벨 + 공기 프레임 음성 표본. 홀드아웃 49 장 Dice 0.815
-  # (day-1 0.842 / 에피소드 0.777; 방광이 있는 40 장만 보면 0.874, 놓침 0). last.pt 를 쓴다 —
-  # 검증셋이 22 장뿐이라 best.pt 는 너무 이른 epoch 을 고른다 (두 라운드 연속 확인).
-  unet_checkpoint: Unet_seg/checkpoints/phantom_c10ur_r6/last.pt
+  # 2026-09-10 r6: 팬텀 A 파인튜닝 6 라운드. PFUS 사전학습 → 사람 라벨 234 장
+  # (day-1 144 + 에피소드 90) + 완전 접촉 프레임 의사라벨 + 공기 프레임 음성 표본.
+  # 홀드아웃 49 장 Dice 0.815 (방광이 있는 40 장만 0.874, 놓침 0).
+  #
+  # 🔁 2026-09-14 dyn_r1: **다이나믹 팬텀에서 r6 는 눈이 멀었다.** 방광이 또렷한
+  # 프레임에도 확률 0.000 을 냈다 (문턱 문제가 아니다 — 0.2 로 내려도 아무것도 없다.
+  # 전처리도 학습과 같은 per_image 였다). 도메인 차이라 라벨이 필요했다.
+  #
+  # 새 라벨 40 장으로 r6 에서 이어 미세조정했다. 40 장은 **실패한 프레임에서만**,
+  # 32x32 k-means 로 모양이 겹치지 않게 골랐다 (Unet_seg/scripts/prepare_dynamic_phantom.py).
+  # 기존 681 장을 함께 넣어 예전 팬텀을 잊지 않게 했다.
+  #
+  #                        r6      dyn_r1
+  #   새 팬텀 val (10)     0.572 → 0.902   Dice
+  #   예전 팬텀 val (22)   0.915 → 0.919   퇴행 없음
+  #   예전 팬텀 test (27)  0.660 → 0.653   퇴행 없음
+  #   못 보던 구간 검출률   0~38 % → 82~100 %  (라벨 없이 200 장 표본)
+  #
+  # ⚠️ 위 dyn_r1 수치는 **실행 수준에서 분리되지 않았다.** 프레임은 학습에 안 썼지만
+  # 같은 실행(같은 자세·같은 젤)의 다른 프레임을 학습했다. 학습 파이프라인이 실행 단위
+  # 분리를 강제하면서 드러났다 (splits.assert_no_patient_leakage).
+  #
+  # 🔁 2026-09-14 dyn_r2: 경계 프레임 29 장을 더 라벨하고 (닿아 있는데 모델이 0.000 을
+  # 내는 프레임 — 그중 진짜 놓친 것은 4 장뿐이고 21 장은 옳은 기권이었다), **실행 단위로
+  # 가른 split** 으로 다시 학습했다 (manifest_dyn3.csv: test 10 실행 · val 4 · train 24).
+  #
+  #   양쪽 모두에게 실행까지 분리된 test 20 장 (양성 12 · 음성 8)
+  #                   전체 Dice   양성 Dice   놓침    오탐
+  #     dyn_r1          0.938      0.897    0/12    0/8
+  #     dyn_r2          0.941      0.902    0/12    0/8
+  #
+  # 성능은 사실상 같다. dyn_r2 를 쓰는 이유는 **split 이 깨끗해서** 앞으로의 측정을
+  # 믿을 수 있기 때문이다. 작은 방광(면적 2.5 % 미만)에서는 0.926 → 0.945 로 조금 낫다.
+  #
+  # ⚠️ 정책의 상태 벡터는 이 모델이 낸다. policy_dataset.h5 의 지각 특징은 r6 로
+  # 구웠으므로, 학습 때 본 입력과 실행 때 받는 입력이 이제 다른 모델에서 나온다.
+  # 규칙 제어기·성공 판정·화면은 새 모델이 낫지만, CVAE 정책의 입력 분포는 옮겨진다.
+  # 정책을 이 모델에 맞추려면 데이터셋을 다시 굽고 재학습해야 한다.
+  #
+  # last.pt 를 쓴다 — 검증셋이 작아 best.pt 는 너무 이른 epoch 을 고른다.
+  unet_checkpoint: Unet_seg/checkpoints/phantom_dyn_r2/last.pt
   unet_config: Unet_seg/configs/phantom_c10ur_finetune.yaml  # 실측 부채꼴 ROI 포함
   perception_cache_dir: policy_learning/data/perception_cache
 

@@ -61,14 +61,19 @@ __all__ = ["APPROACH", "CONTACT_PROBING", "ProbingModeSwitch", "gate_axes"]
 
 
 def gate_axes(twist, v_z: float, *, allow_lateral: bool, allow_inplane: bool,
-              policy: bool) -> list:
+              policy: bool, policy_lateral: bool = False) -> list:
     """접촉 régime 에서 어느 축을 통과시킬지 정한다. rclpy 없이 돈다.
 
     z(침투축)는 언제나 힘 조절기의 것이다. 나머지는 누가 régime 을 쥐고 있느냐로 갈린다.
 
-    * ``policy``  — **회전 세 축을 통과**시킨다. 정책이 영상축을 맡는다는 것이 이 모드의
-      정의이고, 그 지령은 회전이다 (병진은 학습되지 않았다 — 런북 §4). 병진은 0 으로
-      둔다: 힘을 잡는 동안 옆으로 흐르면 그 힘이 무엇에 대한 힘인지 알 수 없게 된다.
+    * ``policy``  — **회전 세 축을 통과**시킨다. 학습된 정책의 지령이 회전이기 때문이다
+      (병진은 학습되지 않았다 — 런북 §4). 병진은 기본적으로 0 이다: 힘을 잡는 동안 옆으로
+      흐르면 그 힘이 무엇에 대한 힘인지 알 수 없게 된다.
+    * ``policy_lateral`` — 정책 모드에서 **병진 x·y 도 통과**시킨다. 규칙 기반 제어기가
+      쓴다 (rus_policy.rule_control): 2026-09-12 실측에서 방광 중심을 옮기는 것은 회전이
+      아니라 **x 병진**이었다 (중심 0.00708 /mm, r=+1.00). 회전만 열어 두면 그 제어기의
+      지령이 여기서 통째로 사라진다. 기본이 꺼짐인 이유는 위의 힘 해석 문제가 그대로
+      남아서다 — 켤 때는 옆으로 흐르는 동안의 힘을 따로 읽어야 한다.
     * ``allow_lateral`` — 조작자에게 다섯 축을 돌려준다 (z 만 조절기).
     * ``allow_inplane`` — 조작자에게 ω_y 하나만. 영상면(프로브 x–z)을 자기 자신으로
       옮기는 유일한 회전이라, 다른 축을 함께 열면 그 성질이 사라진다.
@@ -80,6 +85,8 @@ def gate_axes(twist, v_z: float, *, allow_lateral: bool, allow_inplane: bool,
     out = [0.0] * 6
     if policy:
         out[3], out[4], out[5] = float(twist[3]), float(twist[4]), float(twist[5])
+        if policy_lateral:
+            out[0], out[1] = float(twist[0]), float(twist[1])
     elif allow_lateral:
         out = [float(v) for v in twist]
     elif allow_inplane:
@@ -217,10 +224,30 @@ class ProbingModeSwitch:
         힘 판정과 **독립**이다. 정책이 잡고 있는 동안 힘이 이탈 문턱 아래로 내려가도
         régime 은 유지된다 — 정책이 프로브를 들어 다시 찾는 동작이 régime 을 놓는
         것으로 읽히면, 그 순간 z 가 조작자에게 돌아가고 정책은 허공에 지령한다.
+
+        **놓을 때는 힘 판정을 처음 상태로 돌린다** (2026-09-14). 추론 → 정지 →
+        teleop 을 한 세션에 여러 번 반복하는 것이 지금의 평가 루프인데, 그때마다
+        이 객체가 직전 사이클의 부스러기를 들고 다음 사이클로 넘어가면 **같은 Stop
+        이 매번 다른 teleop 을 준다.** 두 가지를 지운다:
+
+        * **확인 창.** 정책 구간에서도 ``update`` 는 계속 불리고, 그동안 힘은 힘 유지
+          목표(수 N)에 있으니 진입 창이 가득 찬 채로 남는다. 그 창을 들고 나가면
+          다음 teleop 에서 스치는 순간이 아니라 **닿기도 전에** 접촉 상한으로 떨어진다.
+        * **힘 판정이 꺼져 있을 때의 모드.** ``force_trigger_enabled`` 가 거짓이면
+          ``update`` 는 모드를 바꾸지 않는다 — 즉 정책 전에 힘으로 걸린
+          ``CONTACT_PROBING`` 은 **스스로 풀릴 길이 없다.** 정책이 놓았는데도 régime
+          이 남아 조작자의 여섯 축이 0 으로 묶이고, 그 상태는 세션 끝까지 간다.
+          놓는 순간이 그것을 풀 수 있는 유일한 자리다.
+
+        ``has_contacted`` 걸쇠는 지우지 않는다 — 닿았다는 사실은 régime 이 아니다.
         """
         self.policy_requested = bool(enabled)
         if self.policy_requested:
             self.has_contacted = True
+            return
+        self._above_s = self._below_s = 0.0
+        if not self.force_trigger_enabled:
+            self.mode = APPROACH
 
     @property
     def in_contact_probing(self) -> bool:

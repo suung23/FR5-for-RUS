@@ -40,7 +40,8 @@ from .perception import STATE_FEATURE_NAMES
 #: (rus_policy.search — Q̂ 의 방향 판별이 52~54 % 로 우연 수준이라 2026-09-12 에 더했다).
 #: "axis_probe" 는 실험 조건이 아니라 **측정 모드**다 — 축별 기하 이득을 재려고 정해진
 #: 순서로 한 축씩 흔든다 (rus_policy.axis_probe). 성공/실패를 세지 않는다.
-CONDITIONS = ("hold", "placebo", "policy", "expert", "search", "axis_probe")
+#: "rule" 은 학습된 정책 없이 U-Net 마스크만 보고 도는 규칙 제어기 (rus_policy.rule_control).
+CONDITIONS = ("hold", "placebo", "policy", "expert", "search", "axis_probe", "rule")
 
 _IDX = {name: i for i, name in enumerate(STATE_FEATURE_NAMES)}
 AREA = _IDX["area_ratio"]
@@ -105,10 +106,27 @@ class Thresholds:
     """진단 가능 뷰 (EVAL_PLAN_POLICY_RESCUE §4). **수치는 예비 촬영으로 고정**한다 —
     결과를 보고 고치면 그 순간 사전 등록이 아니다."""
 
-    area_min: float = 0.08          # 마스크 면적비 ≥ 8 %
+    # 🔁 2026-09-14: 0.08 → 0.04. **0.08 은 이 팬텀에서 도달 불가능한 값이었다.**
+    # 다이나믹 팬텀의 사람 라벨 78 장(큐 40 + 층화 30 + 무작위 감사 30 중 방광이 있는 것)에서
+    # 면적비는 p50 0.0397 · p75 0.0521 · **최대 0.0685** 다. 사람이 완벽하게 그려도 0.08 을
+    # 넘는 프레임이 한 장도 없다. 그 문턱을 두면 성공률은 정책과 무관하게 0 이 된다.
+    #
+    # 0.04 는 사람 라벨의 중앙값이고, 통과율 곡선에서 가장 평탄한 자리다
+    # (0.02→91 % · 0.03→65 % · 0.04→50 % · 0.05→28 % · 0.06→9 %). 계획서가 요구한 것이
+    # "조건이 가장 잘 갈리는 자리가 아니라 성공률이 평탄한 자리" 다.
+    #
+    # ⚠️ 사전 등록 문서(EVAL_PLAN_POLICY_RESCUE §4)의 8 % 에서 벗어난다. 그 값은 팬텀 A
+    # 시절의 자리표시자였고 "예비 촬영이 정한다" 고 적혀 있었다. 이 변경은 **조건별 결과를
+    # 보기 전에**, 라벨 분포만 보고 정했다 — 그 점이 사전 등록의 요건이다.
+    area_min: float = 0.04          # 마스크 면적비 ≥ 4 % (사람 라벨 중앙값)
     component_min: float = 0.80     # 가장 큰 연결성분 ≥ 80 % (조각난 오검출 배제)
     centroid_max: float = 0.30      # |중심 − 0.5| ≤ 0.30 → 중앙 60 % 폭 (가장자리 뷰 배제)
     hold_s: float = 3.0             # 셋을 **동시에** 연속 3 s
+    # 조작자가 정한 합격선 (2026-09-14): **유지 구간의 Q_seg 가 0.90 이상**이어야 한다.
+    # 면적·연결성분·중심을 따로 재는 위의 셋과 달리 하나의 눈금이라, "이 뷰를 써도 되는가"
+    # 를 한 숫자로 말한다. view_quality 기준이며 옛 Q(quality 특징)가 아니다 — 옛 Q 는
+    # 마스크가 없어도 0.7~0.9 를 낸다.
+    q_view_min: float = 0.90
     # 힘 안전 (probe.yaml safety 와 같은 수). 유지 구간에서 이 선을 얼마나 넘었는지가
     # "그때의 힘은 위험하지 않은가" 의 답이다.
     warn_force_n: float = 4.5       # 상승 금지 선
@@ -181,9 +199,19 @@ def judge_two_phase(t: Sequence[float], state: np.ndarray, thr: Thresholds,
         out["hold_worst_loss_s"] = longest_run_s(t[h], ~good[h])
         out["hold_q_mean"] = float(np.mean(qv[h])) if qv.size else float("nan")
         out["hold_q_min"] = float(np.min(qv[h])) if qv.size else float("nan")
+        # 합격선을 실제로 얼마나 지켰는가. 평균만으로는 "대체로 좋았다" 와 "줄곧 좋았다"
+        # 가 안 갈린다 — 임상에서 쓰려면 뒤쪽이어야 한다.
+        if qv.size:
+            ok = qv[h] >= thr.q_view_min
+            out["hold_q_pass_fraction"] = float(ok.mean())
+            out["hold_q_pass_run_s"] = longest_run_s(t[h], ok)
+        else:
+            out["hold_q_pass_fraction"] = float("nan")
+            out["hold_q_pass_run_s"] = float("nan")
     else:
         out.update({"hold_good_fraction": float("nan"), "hold_worst_loss_s": float("nan"),
-                    "hold_q_mean": float("nan"), "hold_q_min": float("nan")})
+                    "hold_q_mean": float("nan"), "hold_q_min": float("nan"),
+                    "hold_q_pass_fraction": float("nan"), "hold_q_pass_run_s": float("nan")})
 
     if force_t is not None and force_n is not None and len(force_t) > 1:
         ft, fn = np.asarray(force_t, float), np.asarray(force_n, float)

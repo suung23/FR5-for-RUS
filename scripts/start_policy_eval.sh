@@ -145,12 +145,18 @@ sleep 1
 
 mkdir -p "$OUT"
 FS_LOG="$OUT/force_search.log"
+# 러너의 출력도 남긴다. 2026-09-14 에 rule_v2 를 두 번 돌렸는데 두 번 다 폴더에
+# force_search.log 만 있었다 — 러너가 "왜 시작을 안 했는지" 는 매 tick 찍고 있었지만
+# 그 글자는 터미널에만 있었고 터미널은 닫혔다. 조작자에게는 그대로 보이고(tee),
+# 사후에도 읽을 수 있어야 한다.
+RUN_LOG="$OUT/runner.log"
 
 cleanup() {
   [[ -n "${FS_PID:-}" ]] && kill "$FS_PID" 2>/dev/null
   wait "${FS_PID:-}" 2>/dev/null
   echo
   echo "힘 탐색 로그: $FS_LOG"
+  echo "러너 로그:    $RUN_LOG"
 }
 trap cleanup EXIT INT TERM
 
@@ -181,21 +187,23 @@ echo "① 힘 탐색 pid $FS_PID"
 echo "② 러너 (Ctrl-C 로 둘 다 종료)"
 echo
 cd "$WORKSPACE/policy_learning"
+# tee -a 라서 실행이 쌓인다 — 어디부터가 이번인지 표시한다.
+printf '\n===== %s · %s · %s =====\n' "$(date '+%F %T')" "$MODE" "${EXTRA[*]:-(기본)}" >>"$RUN_LOG"
 case "$MODE" in
   pilot)
-    python3 scripts/run_experiment.py "$CKPT" --out "$OUT" \
+    python3 -u scripts/run_experiment.py "$CKPT" --out "$OUT" \
             --poses 6 --conditions "${CONDITIONS:-hold,placebo,policy}" \
             --duration "$DURATION" --blind $EXECUTE \
-            --axes rot --max-deg-s 3 ${EXTRA[@]+"${EXTRA[@]}"}
+            --axes rot --max-deg-s 3 ${EXTRA[@]+"${EXTRA[@]}"} 2>&1 | tee -a "$RUN_LOG"
     ;;
   main)
-    python3 scripts/run_experiment.py "$CKPT" --out "$OUT" \
+    python3 -u scripts/run_experiment.py "$CKPT" --out "$OUT" \
             --poses "$POSES" --conditions "${CONDITIONS:-hold,placebo,policy,expert}" \
             --duration "$DURATION" --blind $EXECUTE \
-            --axes rot --max-deg-s 3 ${EXTRA[@]+"${EXTRA[@]}"}
+            --axes rot --max-deg-s 3 ${EXTRA[@]+"${EXTRA[@]}"} 2>&1 | tee -a "$RUN_LOG"
     ;;
   *)
-    python3 scripts/run_policy.py "$CKPT" --loop $EXECUTE \
-            --axes rot --max-deg-s 3 --out "$OUT" ${EXTRA[@]+"${EXTRA[@]}"}
+    python3 -u scripts/run_policy.py "$CKPT" --loop $EXECUTE \
+            --axes rot --max-deg-s 3 --out "$OUT" ${EXTRA[@]+"${EXTRA[@]}"} 2>&1 | tee -a "$RUN_LOG"
     ;;
 esac

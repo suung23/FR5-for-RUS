@@ -134,6 +134,17 @@ class ForceRegulator:
         self.max_force_n = float(max_force_n)
         self.retreat_speed_m_s = float(retreat_speed_m_s)
 
+    def reset(self) -> None:
+        """유지 이력을 비운다. régime 을 놓을 때 부른다 (2026-09-14).
+
+        상태는 ``_moving`` 하나뿐이지만, 그 하나가 다음 접촉의 **첫 판정 문턱**을
+        정한다. 움직이던 중에 régime 이 끝나면 다음 진입은 정지 허용오차(데드밴드의
+        0.2 배)로 시작해, 같은 힘에서도 직전 사이클이 어땠느냐에 따라 서기도 하고
+        움직이기도 한다. 추론 → 정지 → teleop 을 반복하는 평가 루프에서는 그 차이가
+        사이클마다 쌓인다.
+        """
+        self._moving = False
+
     def update(self, contact_force_n: float) -> RegulatorOutput:
         """접촉력 하나를 보고 이 주기의 z 속도를 정한다.
 

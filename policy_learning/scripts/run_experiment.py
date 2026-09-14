@@ -115,6 +115,7 @@ def run_episode(args, ep: dict, ep_dir: Path) -> dict:
            "--gate-area-max", str(args.gate_area_max),
            "--gate-quality-min", str(args.gate_quality_min),
            "--success-area-min", str(args.success_area_min),
+           "--success-q-view-min", str(args.success_q_view_min),
            "--success-component-min", str(args.success_component_min),
            "--success-centroid-max", str(args.success_centroid_max),
            "--placebo-mode", args.placebo_mode,
@@ -127,7 +128,11 @@ def run_episode(args, ep: dict, ep_dir: Path) -> dict:
         cmd += ["--gamma", str(args.gamma)]
     if args.blind:
         cmd.append("--blind")            # 러너도 조작자 화면에서 조건을 가려야 한다
-    if args.execute and ep["condition"] in ("policy", "placebo", "search"):
+    # **지령을 내는 조건을 여기 빠뜨리면 그 조건은 조용히 hold 가 된다.** 로봇이 가만히
+    # 있는데 로그는 정상으로 보이므로, 한 세션을 다 받고 나서야 알게 된다.
+    # 2026-09-14: rule 이 빠져 있었다 — 규칙 제어기 본시험을 그대로 돌렸으면 전량 무효였다.
+    COMMANDING = ("policy", "placebo", "search", "rule", "axis_probe")
+    if args.execute and ep["condition"] in COMMANDING:
         cmd.append("--execute")          # hold·expert 는 애초에 지령하지 않는다
     cmd += args.extra
     print("  $ " + " ".join(cmd))
@@ -157,7 +162,9 @@ def main() -> int:
                         "여부는 그대로 기록된다 — 분석에서 사후에 걸러낼 수 있다")
     p.add_argument("--gate-area-max", type=float, default=0.02)
     p.add_argument("--gate-quality-min", type=float, default=0.6)
-    p.add_argument("--success-area-min", type=float, default=0.08)
+    p.add_argument("--success-area-min", type=float, default=0.04)  # episode.Thresholds 주석 참조
+    p.add_argument("--success-q-view-min", type=float, default=0.90,
+                   help="유지 구간 Q_seg 합격선 (조작자 지정 2026-09-14)")
     p.add_argument("--success-component-min", type=float, default=0.80)
     p.add_argument("--success-centroid-max", type=float, default=0.30)
     p.add_argument("--placebo-mode", default="random-direction",
@@ -218,7 +225,12 @@ def main() -> int:
             "index": ep["index"], "pose": ep["pose"], "condition": ep["condition"],
             "started": int(started), "success": int(bool(verdict.get("success"))),
             "gate_met": "" if gate_met is None else int(bool(gate_met)),
-            "best_run_s": verdict.get("best_run_s", ""), "q_mean": verdict.get("q_mean", ""),
+            "best_run_s": verdict.get("best_run_s", ""),
+            # Q_seg(view_quality)를 앞에 둔다 — 방광을 못 봤으면 0 에 가깝다. q_mean 은
+            # 옛 정의라 마스크가 없어도 0.7~0.9 를 내므로 비교용으로만 남긴다.
+            "q_seg": verdict.get("q_view_mean", ""),
+            "q_seg_final_10s": verdict.get("q_view_final_10s", ""),
+            "q_mean": verdict.get("q_mean", ""),
             "q_final_10s": verdict.get("q_final_10s", ""), "area_max": verdict.get("area_max", ""),
             "good_fraction": verdict.get("good_fraction", ""), "dir": ep_dir.name,
         })

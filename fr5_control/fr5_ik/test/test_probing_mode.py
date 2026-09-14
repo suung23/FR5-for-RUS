@@ -369,3 +369,33 @@ def test_without_policy_the_old_gating_stands():
     assert inpl == [0.0, 0.0, 0.5, 0.0, -0.7, 0.0]          # ω_y 하나
     lat = gate_axes(tw, v_z=0.5, allow_lateral=True, allow_inplane=False, policy=False)
     assert lat == [1.0, 2.0, 0.5, 0.4, -0.7, 1.1]           # 다섯 축 + 조절기 z
+
+
+def test_policy_lateral_lets_the_rule_controller_through():
+    """규칙 기반 제어기는 **병진**으로 돈다 — 회전만 열면 지령이 조용히 사라진다.
+
+    2026-09-12 실측: 방광 중심을 옮기는 것은 x 병진이다 (중심 0.00708 /mm, r=+1.00).
+    그날 rule 조건으로 로봇이 안 움직인 원인이 정확히 이 문 이었다.
+    """
+    from fr5_ik.probing_mode import gate_axes
+    tw = [0.003, -0.001, 0.5, 0.1, 0.2, 0.3]          # x 3 mm/s 로 옆으로
+    off = gate_axes(tw, v_z=-0.002, allow_lateral=False, allow_inplane=False,
+                    policy=True)
+    assert off[0] == 0.0 and off[1] == 0.0, "기본은 꺼져 있어야 한다 (기존 평가 조건 보존)"
+
+    on = gate_axes(tw, v_z=-0.002, allow_lateral=False, allow_inplane=False,
+                   policy=True, policy_lateral=True)
+    assert on[0] == 0.003 and on[1] == -0.001
+    assert on[3:] == [0.1, 0.2, 0.3], "회전은 그대로 통과해야 한다"
+    assert on[2] == -0.002, "z 는 언제나 힘 조절기의 것이다"
+
+
+def test_policy_lateral_does_nothing_without_policy():
+    """정책이 쥐고 있지 않으면 이 깃발은 아무 일도 하지 않는다."""
+    from fr5_ik.probing_mode import gate_axes
+    tw = [0.003, -0.001, 0.5, 0.1, 0.2, 0.3]
+    a = gate_axes(tw, v_z=0.0, allow_lateral=False, allow_inplane=False,
+                  policy=False, policy_lateral=True)
+    b = gate_axes(tw, v_z=0.0, allow_lateral=False, allow_inplane=False,
+                  policy=False)
+    assert a == b

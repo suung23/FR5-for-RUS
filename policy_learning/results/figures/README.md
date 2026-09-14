@@ -1,0 +1,37 @@
+# 초음파 프레임 (논문 그림 후보)
+
+`scripts/extract_frames.py` 가 뽑은 것. 원자료(`policy_learning/runs/`, 4.1 GB)는 리포에
+없으므로, **여기 있는 그림이 git 으로 따라오는 전부**다. 더 필요하면 원자료가 있는 기계에서
+
+    python3 scripts/extract_frames.py runs/main_rule --out results/figures/main_rule --every 10s
+
+처럼 다시 뽑는다 (`--list` 로 무엇이 있는지 먼저 본다).
+
+## 이름 규칙
+
+    <시점>_t<초>_a<면적비>.png        예: found_t039.9s_a0.050.png
+
+| 시점 | 무엇 |
+|---|---|
+| `start` | 시작 (0 s). **방광이 안 보이는 자세에서 출발했다**는 증거 |
+| `found` | 면적비가 성공 문턱(0.04)을 처음 넘은 순간 |
+| `half` | (성공 못 한 에피소드) 면적이 최대의 절반에 처음 닿은 순간 |
+| `best` | 면적이 가장 컸던 순간 |
+| `end` | 마지막 프레임 |
+
+시각과 면적비가 파일 이름에 있으므로 **목록만 보고 그림을 고를 수 있다.** 프레임은
+256×256 uint8 원본을 2 배(512 px)로 확대한 것이고, 보간은 NEAREST 라 픽셀을 흐리지 않는다.
+
+## 논문 그림으로 쓸 만한 조합
+
+`rule` 조건에서 `start → found → best` 세 장을 나란히 놓으면 "안 보이는 자세에서 출발해
+진단 가능한 뷰에 도달한다" 가 한눈에 보인다. 성공률이 가장 깨끗한 자세는
+
+* `main_rule/ep0001_pose01_rule` — start 0.000 → found 0.050 (39.9 s) → best 0.141 (114.4 s)
+* `main_rule/ep0010_pose04_rule` · `ep0013_pose05_rule` — 같은 구조
+
+대조로 `ep0003_pose01_hold` (같은 자세, 아무것도 하지 않음) 의 `start`·`end` 를 붙이면
+바닥선이 된다.
+
+⚠️ **`main_posB*` 는 팬텀이 움직인 뒤의 세션**이라 면적이 절반이다 (`results/README.md` §1).
+논문 그림은 `main_rule` 의 ep0001–0018 에서 고르는 것이 맞다.

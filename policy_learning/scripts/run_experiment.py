@@ -91,13 +91,31 @@ def save(out: Path, session: dict) -> None:
 
 
 def append_summary(out: Path, row: dict) -> None:
+    """한 줄 덧붙인다. **열이 늘어났으면 기존 줄까지 옮겨 적는다.**
+
+    예전에는 파일이 새것일 때만 헤더를 썼고 그 뒤로는 ``row.keys()`` 순서대로 값만
+    이어 붙였다. 그 상태에서 열을 하나 추가하면 이어서 도는 세션의 줄이 **헤더와
+    어긋난 채** 기록된다 — 값이 옆 칸으로 밀리는데 파일은 멀쩡해 보인다.
+    이어 돌리기(--resume)가 정상 운용이므로 그 경우를 견뎌야 한다.
+    """
     path = out / "summary.csv"
-    new = not path.is_file()
-    with open(path, "a", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=list(row.keys()))
-        if new:
-            w.writeheader()
-        w.writerow(row)
+    rows: list[dict] = []
+    header: list[str] = []
+    if path.is_file():
+        with open(path, encoding="utf-8", newline="") as fh:
+            r = csv.DictReader(fh)
+            header = list(r.fieldnames or [])
+            rows = list(r)
+    fields = header + [k for k in row if k not in header]
+    if fields == header:
+        with open(path, "a", newline="", encoding="utf-8") as fh:
+            csv.DictWriter(fh, fieldnames=fields).writerow(row)
+        return
+    rows.append(row)
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=fields, restval="")
+        w.writeheader()
+        w.writerows(rows)
 
 
 def run_episode(args, ep: dict, ep_dir: Path, session: dict) -> dict:
@@ -129,12 +147,15 @@ def run_episode(args, ep: dict, ep_dir: Path, session: dict) -> dict:
         cmd += ["--gamma", str(args.gamma)]
     if args.blind:
         cmd.append("--blind")            # 러너도 조작자 화면에서 조건을 가려야 한다
-    # **지령을 내는 조건을 여기 빠뜨리면 그 조건은 조용히 hold 가 된다.** 로봇이 가만히
-    # 있는데 로그는 정상으로 보이므로, 한 세션을 다 받고 나서야 알게 된다.
-    # 2026-09-14: rule 이 빠져 있었다 — 규칙 제어기 본시험을 그대로 돌렸으면 전량 무효였다.
-    COMMANDING = ("policy", "placebo", "search", "rule", "axis_probe")
-    if args.execute and ep["condition"] in COMMANDING:
-        cmd.append("--execute")          # hold·expert 는 애초에 지령하지 않는다
+    # **--execute 는 조건이 아니라 세션의 성질이다.** "이 프로세스가 토픽을 낼 수 있는가"
+    # 이고, hold·expert 가 지령하지 않는다는 것은 러너 안에서 이미 강제된다 (_tick 의
+    # `if self.condition in ("hold", "expert")` → _stop). 여기서 조건별로 거르면 두 곳이
+    # 같은 규칙을 따로 들고 있게 되고, 실제로 두 번 틀렸다:
+    #   · 2026-09-14 낮  rule 이 목록에 없어 규칙 제어기가 한 번도 안 움직일 뻔했다.
+    #   · 2026-09-14 저녁 hold 에서 **기준 자세 복귀**가 안 돌았다 — 복귀는 측정이 아니라
+    #     준비인데, --execute 가 없으니 지령이 발행되지 않아 45 s 동안 24.0 mm 가 그대로였다.
+    if args.execute:
+        cmd.append("--execute")
     cmd += pose_arg(session, ep)
     cmd += args.extra
     print("  $ " + " ".join(cmd))
@@ -254,7 +275,7 @@ def main() -> int:
     p.add_argument("--gate-area-max", type=float, default=0.02)
     p.add_argument("--gate-quality-min", type=float, default=0.6)
     p.add_argument("--success-area-min", type=float, default=0.04)  # episode.Thresholds 주석 참조
-    p.add_argument("--success-q-view-min", type=float, default=0.90,
+    p.add_argument("--success-q-view-min", type=float, default=0.977,
                    help="유지 구간 Q_seg 합격선 (조작자 지정 2026-09-14)")
     p.add_argument("--success-component-min", type=float, default=0.80)
     p.add_argument("--success-centroid-max", type=float, default=0.30)
@@ -353,7 +374,22 @@ def main() -> int:
             "q_seg_final_10s": verdict.get("q_view_final_10s", ""),
             "q_mean": verdict.get("q_mean", ""),
             "q_final_10s": verdict.get("q_final_10s", ""), "area_max": verdict.get("area_max", ""),
-            "good_fraction": verdict.get("good_fraction", ""), "dir": ep_dir.name,
+            "good_fraction": verdict.get("good_fraction", ""),
+            # 유지 구간의 품질. **세 개를 함께 싣는다** (2026-09-14 밤 조작자 지시).
+            #
+            # hold_q_pass_fraction 은 합격선(q_view_min = 0.977) 을 지킨 시간 비율인데,
+            # 그 선의 뜻이 "면적 상위 10 % + 중심이 불감대 안" 이라 실측에서 대부분 0 이
+            # 나온다. 정확한 보고이지만 그 열만 있으면 결과표가 전부 0 이 되어 읽는
+            # 사람에게 아무 말도 안 한다. 그래서:
+            #
+            #   hold_q_mean          유지하는 동안 뷰가 실제로 얼마나 좋았는가 (연속값)
+            #   hold_q_pass_fraction 그중 합격선을 지킨 비율 (엄격한 선)
+            #   hold_good_fraction   면적·연결성분·중심 셋을 동시에 지킨 비율 —
+            #                        Q 눈금이 바뀌어도 안 흔들리는 유일한 지표다
+            "hold_q_mean": verdict.get("hold_q_mean", ""),
+            "hold_q_pass_fraction": verdict.get("hold_q_pass_fraction", ""),
+            "hold_good_fraction": verdict.get("hold_good_fraction", ""),
+            "dir": ep_dir.name,
         })
         if not started:
             print("  시작 조건 미충족 — 폐기로 기록합니다 (--start-gate on).")

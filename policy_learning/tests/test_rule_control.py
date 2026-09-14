@@ -579,11 +579,31 @@ def test_remaining_axes_are_skipped_once_good_enough():
 
 
 def test_the_stop_line_reaches_a_sweep_already_running():
-    """Q 가 처음 들어온 순간, 돌고 있는 훑기에도 정지선이 들어가야 한다."""
-    c = RuleController(_q_gains(), find_axes=("thx",), q_target=0.90)
+    """Q 가 처음 들어온 순간, 돌고 있는 훑기에도 정지선이 들어가야 한다.
+
+    🔁 2026-09-14 밤: 정지선이 ``q_target`` 이 아니라 ``q_good_enough`` 다. 예전에는
+    한 값이 둘을 겸했는데, 합격선을 의도 보존으로 0.977 까지 올리자 **훑기가 영영 안
+    멈추는** 상태가 됐다 (실측 최대 0.951~0.997). 훑기의 정지선은 "쓸 만한 뷰" 여야
+    하고 무엇보다 닿을 수 있어야 한다 — ``_good_enough`` 독스트링의 이유 그대로다.
+    """
+    c = RuleController(_q_gains(), find_axes=("thx",), q_target=0.90,
+                       q_good_enough=0.85)
     assert all(sc.good_enough == float("inf") for _, sc in c._scans)
     c.update(0.0, True, 0.0, 0.06, q_view=0.95, q_parts=_parts())
-    assert all(sc.good_enough == 0.90 for _, sc in c._scans)
+    assert all(sc.good_enough == 0.85 for _, sc in c._scans)
+
+
+def test_the_sweep_stop_line_is_below_the_pass_line():
+    """둘을 다시 한 값으로 묶으면 안 된다.
+
+    합격선은 "이 뷰를 써도 되는가", 훑기 정지선은 "여기서 멈춰도 손해가 아닌가" 다.
+    정지선이 합격선까지 올라가면 끝까지 훑게 되고, 그 사이에 최고점은 이미 지나간
+    자리가 된다.
+    """
+    from rus_policy.episode import Thresholds
+    c = RuleController(_q_gains(), find_axes=("thx",))
+    assert c.q_target == Thresholds().q_view_min
+    assert c.q_good_enough < c.q_target
 
 
 # --- 멀리 가면 스스로 돌아온다 (2026-09-14 rule_v3 교착) ------------------------
@@ -700,3 +720,74 @@ def test_the_lateral_gate_survives_without_a_rule_controller():
     guard = fn.index("if self.rule is not None:")
     use = fn.index("self.rule.align_axis")
     assert guard < use, "먼저 확인하지 않는다"
+
+
+def test_translation_find_axes_are_refused_under_axes_rot():
+    """--axes rot 은 _publish 에서 병진을 통째로 0 으로 만든다.
+
+    2026-09-14 본 시험: `--rule-find-axes thx,thy,y` 로 7 에피소드를 받았는데 기록의
+    병진 지령 표본이 **0 개**였다. `y` 훑기가 한 번도 안 돌았고 로그는 정상으로 보였다.
+    조용히 고치지 말고 멈춰야 한다 — 무엇을 바꿔야 하는지는 조작자가 알아야 한다.
+    """
+    import re
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "scripts" / "run_policy.py").read_text(encoding="utf-8")
+    blk = re.search(r'lin = \[a for a in axes.*?--axes all 을 함께 주십시오"\)', src, re.S)
+    assert blk, "병진 축과 --axes 의 충돌을 안 본다"
+    assert 'args.axes == "rot"' in blk.group(0)
+    assert "SystemExit" in blk.group(0), "경고만 하고 그냥 돈다"
+    # _publish 가 실제로 그렇게 하고 있는지도 확인한다 (이 검사의 전제다)
+    pub = re.search(r"def _publish\(self.*?return lin, ang", src, re.S).group(0)
+    assert 'if self.args.axes == "rot":' in pub and "lin[:] = 0.0" in pub, pub
+
+
+# --- 법선 정렬의 문 (2026-09-14 밤) --------------------------------------------
+#
+# 합격선을 의도 보존으로 0.977 까지 올리자, 그 하나에 매달려 있던 법선 정렬이 영영 안
+# 열리게 됐다 — Q_raw 를 자세로 고치는 고리가 통째로 죽는다. 문을 요구량 쪽으로 옮겼다.
+
+
+def test_normal_align_opens_below_the_pass_line_when_the_axes_are_idle():
+    """합격선 아래여도 기울임 축이 한가하면 열린다.
+
+    실측(채운 팬텀 17,202 프레임)에서 정렬 요구는 q_view 0.80 부근에서 이미 바닥인데
+    총점은 0.977 에 한참 못 미친다. 총점 하나로 문을 잠그면 그 구간을 통째로 버린다.
+    """
+    c = RuleController(_q_gains(), find_axes=("thx",), q_target=0.977)
+    c.phase = HOLD
+    vel, note = c.update(0.0, True, 0.0, 0.06, q_view=0.85, q_parts=_parts(),
+                         shear_xy=(2.0, 0.0))
+    assert "합격" not in note, note          # 합격은 아니다
+    assert np.any(vel), note                 # 그런데 법선 정렬은 돌았다
+
+
+def test_normal_align_stays_shut_while_the_centroid_is_outside_the_deadband():
+    """중심이 불감대 밖이면 한가한 것이 아니다 — 고칠 수 있는 오차가 남아 있다.
+
+    요구량은 ``q_parts`` 에서 오고 그 값이 중심과 어긋날 수 있다. 그때 제어기 자신의
+    불감대가 최종 판정이어야 한다.
+    """
+    c = RuleController(_q_gains(), find_axes=("thx",), q_target=0.977)
+    c.phase = HOLD
+    vel, note = c.update(0.0, True, 0.20, 0.06, q_view=0.85, q_parts=_parts(),
+                         shear_xy=(2.0, 0.0))
+    assert "여유" not in note and "합격" not in note, note
+
+
+def test_passing_still_opens_it_regardless_of_the_centroid():
+    """합격했으면 축은 확실히 한가하다 — 예전 동작 그대로다."""
+    c = RuleController(_q_gains(), find_axes=("thx",), q_target=0.90)
+    c.phase = HOLD
+    vel, note = c.update(0.0, True, 0.20, 0.06, q_view=0.93, q_parts=_parts(),
+                         shear_xy=(2.0, 0.0))
+    assert "합격" in note, note
+
+
+def test_an_unfixable_deficit_is_still_named_when_the_axes_are_idle():
+    """우리 축이 한가한데 총점이 낮으면, 남은 부족분이 무엇인지 말해야 한다."""
+    c = RuleController(_q_gains(), find_axes=("thx",), q_target=0.977)
+    c.phase = HOLD
+    vel, note = c.update(0.0, True, 0.0, 0.06, q_view=0.85,
+                         q_parts=_parts(contrast=0.0, confidence=0.5))
+    assert not np.any(vel), note
+    assert "force_search" in note or "U-Net" in note, note

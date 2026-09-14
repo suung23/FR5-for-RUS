@@ -165,7 +165,12 @@ echo "기록        $OUT"
 echo "모드        ${EXECUTE:-DRY-RUN (지령 없음)}"
 case "$MODE" in
   pilot) echo "실험        파일럿 — 6 자세 × ${CONDITIONS:-hold,placebo,policy} · ${DURATION} s · 눈가림" ;;
-  main)  echo "실험        본 시험 — $POSES 자세 × 4 조건 = $((POSES * 4)) 에피소드, 90 s, 눈가림" ;;
+  main)  # 🔁 2026-09-14: 조건 수와 길이가 **하드코딩**돼 있었다. --conditions rule,hold,search
+         # --duration 120 으로 돌려도 배너는 "4 조건 · 90 s" 라고 말했다. 배너는 조작자가
+         # "지금 무엇이 도는가" 를 확인하는 유일한 자리인데 그것이 거짓이면 없느니만 못하다.
+         MAIN_CONDS="${CONDITIONS:-hold,placebo,policy,expert}"
+         N_CONDS=$(awk -F, '{print NF}' <<<"$MAIN_CONDS")
+         echo "실험        본 시험 — $POSES 자세 × $N_CONDS 조건 ($MAIN_CONDS) = $((POSES * N_CONDS)) 에피소드, ${DURATION} s, 눈가림" ;;
   *)     echo "실험        아님 (자유 루프 평가)" ;;
 esac
 if [[ -d "$OUT" ]] && [[ "$MODE" != "loop" ]]; then

@@ -65,3 +65,36 @@ def test_blind_reaches_the_runner_and_hides_the_condition():
     blind_branch = blind_branch[:blind_branch.index("else:")]
     assert "정책  ω=" not in blind_branch, "눈가림에서 정책 줄을 찍으면 위약이 드러난다"
     assert "_shown_condition()" in blind_branch
+
+
+# --- 결과표의 열 (2026-09-14 밤) -----------------------------------------------
+
+
+def test_a_new_column_migrates_the_rows_already_written(tmp_path):
+    """열이 늘어나도 이미 쓴 줄이 헤더와 어긋나면 안 된다.
+
+    예전 ``append_summary`` 는 파일이 새것일 때만 헤더를 쓰고, 그 뒤로는
+    ``row.keys()`` 순서대로 값만 이어 붙였다. 그 상태에서 열을 하나 추가하면
+    이어 돌리는 세션의 줄이 **옆 칸으로 밀린 채** 기록되는데 파일은 멀쩡해 보인다.
+    유지 지표 세 열을 추가하면서 실제로 밟을 수 있었던 자리다 (--resume 은 정상 운용).
+    """
+    import csv
+    from scripts.run_experiment import append_summary
+
+    append_summary(tmp_path, {"index": 1, "success": 1})
+    append_summary(tmp_path, {"index": 2, "success": 0, "hold_q_mean": 0.61})
+
+    rows = list(csv.DictReader(open(tmp_path / "summary.csv", encoding="utf-8")))
+    assert [r["index"] for r in rows] == ["1", "2"]
+    assert rows[0]["success"] == "1" and rows[1]["success"] == "0"
+    # 옛 줄은 새 열이 빈 칸이어야지, 값이 밀려 들어오면 안 된다.
+    assert rows[0]["hold_q_mean"] == ""
+    assert rows[1]["hold_q_mean"] == "0.61"
+
+
+def test_the_hold_quality_columns_are_reported(tmp_path):
+    """합격선만으로는 결과표가 전부 0 이 된다 — 연속값과 조건 기반 지표를 함께 싣는다."""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "scripts" / "run_experiment.py").read_text("utf-8")
+    for col in ("hold_q_mean", "hold_q_pass_fraction", "hold_good_fraction"):
+        assert f'"{col}": verdict.get(' in src, col

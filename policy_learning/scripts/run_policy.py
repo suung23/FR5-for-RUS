@@ -65,6 +65,7 @@ from rus_policy.model import ACTION_DIM
 from rus_policy.search import AXES_XY, AXES_XYZ, HillClimbSearch
 from rus_policy.axis_gains import AxisGains
 from rus_policy.axis_probe import AxisProbe
+from rus_policy.frame_map import FrameMap
 from rus_policy.pose_return import parse_optional as parse_pose_target
 from rus_policy.rule_control import RuleController
 from rus_policy.view_quality import view_quality
@@ -257,6 +258,7 @@ class PolicyRunner(Node):
                                        find_rate=float(args.rule_find_rate_mm_s),
                                        find_axes=axes,
                                        q_target=float(args.rule_q_target),
+                                       q_good_enough=float(args.rule_good_enough),
                                        normal_align=(args.rule_normal_align == "on"),
                                        find_oop_scale=float(args.rule_oop_scale),
                                        refine_cooldown_s=float(args.rule_refine_cooldown_s),
@@ -266,6 +268,20 @@ class PolicyRunner(Node):
                                        align_max_mm=float(args.rule_align_max_mm),
                                        align_max_deg=float(args.rule_align_max_deg),
                                        keep_fraction=float(args.rule_keep_fraction))
+            # **--axes rot 은 _publish 에서 병진을 통째로 0 으로 만든다.** 찾기 축에
+            # 병진이 있는데 그대로 두면 그 축은 한 번도 실행되지 않고, 로그는 정상으로
+            # 보인다 — 2026-09-14 본 시험에서 `y` 훑기가 7 에피소드 동안 한 번도 안 돌았고
+            # 기록의 병진 지령 표본이 0 개였다. 조용히 고치지 않고 멈춘다: 무엇을 바꿔야
+            # 하는지는 조작자가 알아야 한다.
+            from rus_policy.rule_control import AXIS_INDEX as _AX
+            lin = [a for a in axes if _AX.get(a, 9) < 3]
+            if lin and args.axes == "rot":
+                raise SystemExit(
+                    f"찾기 축에 병진 {lin} 이 있는데 --axes rot 이다 — 그 축은 실행되지 "
+                    "않는다 (_publish 가 병진을 0 으로 만든다).\n"
+                    "  회전만 쓰려면:  --rule-find-axes " +
+                    ",".join(a for a in axes if _AX.get(a, 9) >= 3) + "\n"
+                    "  병진도 쓰려면:  --axes all 을 함께 주십시오")
             self.rule.na.shear_ok_n = float(args.rule_shear_ok_n)
             self.rule.na.max_excursion_deg = float(args.rule_normal_max_deg)
             self.get_logger().warn(self.rule.describe())
@@ -281,10 +297,22 @@ class PolicyRunner(Node):
         # 짝지어진 비교의 전제: 한 자세의 조건들이 **같은 자리에서 출발**해야 한다.
         # 에피소드가 끝나면 로봇은 이미 옮겨져 있으므로(ep0001 은 50 mm) 손이 아니라
         # 여기서 되돌린다. 자세의 첫 조건에는 목표가 없다 — 그것이 기준이 된다.
+        # 지령 프레임과 실제 프레임의 어긋남. 없으면 단위행렬로 돌되 **경고한다** —
+        # 2026-09-14 에 90.2° 어긋난 채 돌아 복귀가 단조 발산했다.
+        self.frame_map = FrameMap.load(args.frame_map) if args.frame_map else None
         self.return_to = parse_pose_target(args.return_to_pose,
                                            tol_mm=float(args.return_tol_mm),
-                                           tol_deg=float(args.return_tol_deg))
+                                           tol_deg=float(args.return_tol_deg),
+                                           frame=self.frame_map)
+        if self.return_to is not None:
+            if self.frame_map is None:
+                self.get_logger().error(
+                    "⚠️ 프레임 사상이 없다 (--frame-map) — 지령 프레임이 실제와 어긋나 있으면 "
+                    "복귀가 **멀어진다**. scripts/measure_frame_map.py 로 재십시오")
+            else:
+                self.get_logger().warn(self.frame_map.describe())
         self.return_state = {"asked": bool(self.return_to)}
+        self.return_rows: list = []     # 복귀 구간의 지령·자세 (사상 측정의 재료)
         self._return_t0 = None
         self.start_quat = None          # 에피소드 시작 자세 — 너무 멀리 가지 않게
         self.gate = StartGate(area_max=args.gate_area_max, quality_min=args.gate_quality_min,
@@ -1045,6 +1073,15 @@ class PolicyRunner(Node):
             self._idle_reason = ""
             return True
         self._publish_raw(vel)
+        # **복귀도 기록한다.** 이번 세션에서 복귀가 발산했는데 decisions.csv 에 그 구간이
+        # 통째로 없어서(에피소드 시작 전이라 rows 에 안 들어갔다) 지령과 실제를 맞춰 볼
+        # 수 없었다. 사상을 재려면 이 짝이 필요하다 (scripts/measure_frame_map.py).
+        self.return_rows.append({
+            "t": time.time(), "err_mm": mm, "err_deg": deg,
+            **{f"cmd_{n}": float(v) for n, v in zip("vx vy vz wx wy wz".split(), vel)},
+            **{f"ee_{n}": float(v) for n, v in zip("x y z", p_now)},
+            **{f"ee_q{n}": float(v) for n, v in zip("w x y z", q_now)},
+        })
         self._idle_reason = ""
         if not hasattr(self, "_return_logged") or (t - self._return_logged) > 2.0:
             self._return_logged = t
@@ -1131,6 +1168,10 @@ class PolicyRunner(Node):
 
     def save(self, out: Path, quiet: bool = False):
         out.mkdir(parents=True, exist_ok=True)
+        if self.return_rows:
+            with open(out / "return.csv", "w", newline="", encoding="utf-8") as fh:
+                w = csv.DictWriter(fh, fieldnames=list(self.return_rows[0].keys()))
+                w.writeheader(); w.writerows(self.return_rows)
         if self.rows:
             with open(out / "decisions.csv", "w", newline="", encoding="utf-8") as fh:
                 w = csv.DictWriter(fh, fieldnames=list(self.rows[0].keys()))
@@ -1205,6 +1246,10 @@ class PolicyRunner(Node):
             # 분석에서 빼야 한다 (probe2 처럼 허수 이득이 나온다).
             "policy_lateral": bool(self._lateral_enabled),
             "linear_frame": "body" if self._lateral_enabled else None,
+            "frame_map": (None if self.frame_map is None else
+                          {"angle_deg": self.frame_map.angle_deg,
+                           "residual": self.frame_map.residual,
+                           "source": self.frame_map.source}),
             "rule_align_axis": getattr(self.rule, "align_axis", None) if self.rule else None,
             "rule_find_axes": list(getattr(self.rule, "find_axis_list", [])) if self.rule else [],
             "motion": motion,
@@ -1312,8 +1357,11 @@ def main() -> int:
                    help="전단이 이 아래면 충분히 법선으로 본다 [N]")
     p.add_argument("--rule-normal-max-deg", type=float, default=4.0,
                    help="법선 정렬의 누적 회전 상한 [°]")
-    p.add_argument("--rule-q-target", type=float, default=0.90,
+    p.add_argument("--rule-q-target", type=float, default=0.977,
                    help="유지에서 목표로 하는 Q_seg (합격선). 기록·표시에 쓴다")
+    p.add_argument("--rule-good-enough", type=float, default=0.85,
+                   help="훑기를 도중에 멈춰도 되는 Q_seg — 합격선과 다르다. "
+                        "합격선(0.977)을 여기에 쓰면 훑기가 끝까지 돈다")
     p.add_argument("--rule-find-widen", type=float, default=1.6,
                    help="한 바퀴 다 훑고 못 찾으면 반경에 이것을 곱한다 (1 이면 안 넓힘)")
     p.add_argument("--rule-find-max-range-deg", type=float, default=30.0,
@@ -1373,7 +1421,7 @@ def main() -> int:
     p.add_argument("--gate-confirm-s", type=float, default=2.0,
                    help="시작 조건 판정 창 [s]. 계획서 §3 은 10 s 정지 후 마지막 2 s 를 쓴다 — "
                         "10 s 정지는 조작자의 절차이고 여기 값은 그 판정 창이다")
-    p.add_argument("--success-q-view-min", type=float, default=0.90,
+    p.add_argument("--success-q-view-min", type=float, default=0.977,
                    help="유지 구간의 Q_seg 합격선 (조작자 지정, 2026-09-14). "
                         "판정 보고의 hold_q_pass_* 가 이 선을 쓴다")
     p.add_argument("--success-area-min", type=float, default=0.04,
@@ -1389,6 +1437,9 @@ def main() -> int:
                    help="에피소드를 시작하기 전에 이 자세로 되돌아간다 — "
                         "x,y,z,qw,qx,qy,qz (기저 프레임, m). 한 자세의 두 번째 조건부터 준다. "
                         "빔축(z)은 힘 조절기의 것이라 되돌리지 않는다")
+    p.add_argument("--frame-map", default="",
+                   help="지령 프레임 ↔ 실제 프레임 사상 (scripts/measure_frame_map.py 가 만든다). "
+                        "기준 자세 복귀에만 쓴다 — 규칙 제어기의 이득은 이미 지령 축 기준이다")
     p.add_argument("--return-timeout-s", type=float, default=45.0,
                    help="이 안에 못 돌아가면 포기하고 그 사실을 기록한 채 시작한다")
     p.add_argument("--return-tol-mm", type=float, default=3.0)

@@ -223,14 +223,40 @@ class RuleController:
     max_excursion_deg: float = 24.0
     #: 복귀를 끝냈다고 보는 여유 [° 또는 mm].
     home_tol: float = 1.0
-    q_target: float = 0.90            # 유지에서 목표로 하는 Q_seg — 조작자가 정한 합격선
+    # 유지에서 목표로 하는 Q_seg — 조작자가 정한 합격선. Thresholds.q_view_min 과 같은 값.
+    #
+    # 🔁 2026-09-14 저녁: 0.97 → 0.936 (통과율 보존) → 밤: **0.977** (조작자가 의도
+    # 보존을 골랐다). 근거는 Thresholds.q_view_min 주석에 있다. 두 값은 늘 같아야 한다.
+    #
+    # ⚠️ **이 값은 합격 선언과 표시에만 쓴다.** 예전에는 이 하나가 세 가지 일을 했다 —
+    # 합격 선언 · 훑기 정지선 · 법선 정렬의 여유 판정. 뜻이 다른 셋을 한 숫자에 묶어
+    # 놓으면 눈금이 바뀔 때마다 셋이 함께 틀어진다. 실제로 0.977 로 올리는 순간 최근
+    # 실측 최대(0.951~0.997)에 걸려 **훑기가 영영 안 멈추고 법선 정렬이 영영 안 열리는**
+    # 상태가 됐다. 아래 q_good_enough 와 _axes_idle 로 갈랐다.
+    q_target: float = 0.977
+    #: 훑기를 도중에 멈춰도 되는 값 — "최댓값" 이 아니라 "쓸 만한 뷰".
+    #:
+    #: 합격선과 **일부러 다르다.** 끝까지 훑고 최고점으로 되돌아가는 사이에 그 최고점은
+    #: 이미 지난 자리가 된다 (``_good_enough`` 독스트링). 그래서 이 값은 합격선이 아니라
+    #: "여기서 멈춰도 손해가 아닌 자리" 여야 하고, 무엇보다 **닿을 수 있어야** 한다.
+    #:
+    #: 2026-09-14 밤 실측 (채운 팬텀 세션, 검출 17,202 프레임): q_view ≥ 0.75 부터 판정
+    #: 세 조건(면적·연결성분·중심)이 100 % 통과한다. 0.85 는 그 위의 p75 자리이고 전체의
+    #: 25 % 가 닿는다 — 쓸 만하다고 부르기에 충분하고 멈추기에 흔하다.
+    q_good_enough: float = 0.85
     #: 합격한 여유에서 결합(Q_raw)을 개선할 것인가. 끄면 예전처럼 가만히 있는다.
     normal_align: bool = True
-    # Q_seg 로 돌 때의 찾음/놓침 문턱. presence(가중치 41 %)는 면적 0.5 % 에서 이미 1 이
-    # 되므로, 방광이 보이기만 하면 Q_seg 는 0.45 를 넘는다. 0.50 은 "봤다", 0.30 은
-    # "놓쳤다" 다 — 면적 문턱(0.015 / 0.005)과 같은 자리를 Q_seg 눈금으로 옮긴 값이다.
-    q_found: float = 0.50
-    q_lost: float = 0.30
+    # Q_seg 로 돌 때의 찾음/놓침 문턱 — 면적 문턱(0.015 / 0.005)을 Q_seg 눈금으로 옮긴 값.
+    #
+    # 🔁 2026-09-14 저녁: 0.50/0.30 → 0.43/0.13. 옛 값은 **히스테리시스가 이름뿐이었다.**
+    # 옛 눈금에서 0.30 이상의 통과율이 65.90 % 로 검출률과 정확히 같았고 (검출된 프레임은
+    # 0.377 아래로 내려간 적이 없다), 0.50 도 65.24 % 로 사실상 같았다 — 두 선 사이에
+    # 프레임이 없으니 "놓쳤다" 판정이 has_mask 와 구별되지 않았다.
+    #
+    # 새 값은 분위수 대응이 아니라 **원래 의도한 면적 자리**에서 다시 읽었다. 기록에서
+    # 면적 [0.013, 0.017) 프레임의 Q_seg 중앙값이 0.428, [0.003, 0.007) 이 0.124 다.
+    q_found: float = 0.43
+    q_lost: float = 0.13
     #: 면적이 모자라 Q 가 낮을 때 다시 훑는 범위 — 설정 반경의 이 비율. 좁게 훑는 이유는
     #: 이미 방광을 보고 있기 때문이다. 넓게 훑으면 있는 것을 놓친다.
     refine_fraction: float = 0.35
@@ -352,6 +378,43 @@ class RuleController:
         k = max(L, key=L.get)
         return f"{k} {L[k]:.3f} — {Q_NOT_OURS[k]}"
 
+    def _axes_idle(self, want: dict, q_view: Optional[float],
+                   centroid_dx: float) -> bool:
+        """기울임 축(thx·thy)에 지금 할 일이 없는가 — 법선 정렬이 열리는 조건.
+
+        🔁 2026-09-14 밤: 예전에는 ``q_view >= q_target`` **하나뿐**이었다. 그것이
+        문제가 된 이유는 합격선이 세 가지 일을 겸하고 있었기 때문이다. 합격선을 의도
+        보존으로 0.977 까지 올리는 순간 최근 실측 최대에 걸려 **법선 정렬이 영영 안
+        열리는** 상태가 됐다. Q_raw 를 자세로 고치는 고리가 통째로 죽는다.
+
+        그래서 문을 둘로 나눴다:
+
+          합격했다            예전 그대로. 합격하면 축은 확실히 한가하다.
+          합격은 아니지만 한가 요구량(``_demand``)이 바닥이고 중심이 불감대 안이다.
+
+        두 번째 줄이 새로 생긴 것이다. 총점과 요구량은 다른 것을 말한다 — 총점은
+        "이 뷰가 좋은가", 요구량은 "내가 쓰려는 축을 지금 다른 목적이 쓰고 있는가" 다.
+        모듈 독스트링이 처음부터 뒤쪽을 요구했다: "기울임은 이미 Q_seg 의 것이다.
+        같은 축을 두 목적이 다투면 그 축은 둘 중 누구의 의도도 아니게 된다."
+
+        실측도 둘이 다르다고 말한다 (채운 팬텀 17,202 프레임): 정렬 요구는 q_view
+        0.80 부근에서 이미 바닥(중앙 0.0060 < LOSS_FLOOR)인데 훑기 요구는 0.90 에서도
+        0.0264 로 남아 있다. 총점 하나로는 이 둘을 못 가른다.
+
+        **불감대를 함께 보는 이유.** 요구량은 ``q_parts`` 에서 오고, 그 값이 중심과
+        어긋날 수 있다 (합성 입력·전파된 마스크·눈금 변경 직후). 중심이 불감대 밖인데
+        한가하다고 선언하면 제어기가 고칠 수 있는 오차를 두고 다른 일을 하러 간다.
+        불감대는 이 제어기가 "중심은 됐다" 를 말하는 자기 기준이므로 그것을 따른다.
+
+        **둘 다** 한가해야 연다 — 훑기도 회전축을 쓴다 (``--axes rot``).
+        """
+        if self._on_q(q_view) and q_view >= self.q_target:
+            return True
+        if not want:
+            return False
+        return (max(want.get(ALIGN, 0.0), want.get(SWEEP, 0.0)) <= self.LOSS_FLOOR
+                and abs(centroid_dx) <= self.deadband)
+
     def _to_refine(self, t: float) -> None:
         """좁게 다시 훑는다. 이미 방광을 보고 있으므로 넓게 가면 있는 것을 놓친다."""
         self.find_range_now = self.find_half_range * self.refine_fraction
@@ -424,7 +487,7 @@ class RuleController:
         **최댓값을 찾는 것이 목적이 아니다.** 쓸 만한 뷰에 닿으면 거기서 멈춰야 한다 —
         끝까지 훑고 최고점으로 되돌아가는 사이에 그 최고점은 이미 지난 자리가 된다.
         """
-        return self.q_target if self._use_q else float("inf")
+        return self.q_good_enough if self._use_q else float("inf")
 
     def is_oop(self, axis: str) -> bool:
         """면외 축인가 — 정렬 축(면내) 이 아닌 모든 찾기 축.
@@ -527,7 +590,7 @@ class RuleController:
             # 넣어 준다. 다음 바퀴를 기다리면 이번 바퀴가 통째로 길어진다.
             self._use_q = True
             for _, sc in self._scans:
-                sc.good_enough = self.q_target
+                sc.good_enough = self.q_good_enough
         val = float(q_view) if (q_view is not None and q_view == q_view) else area
         lost = self.q_lost if self._on_q(q_view) else self.area_lost
         found = self.q_found if self._on_q(q_view) else self.area_found
@@ -608,23 +671,25 @@ class RuleController:
         # 합쳐진 총점은 "좋다/나쁘다" 만 말한다. 무엇을 해야 하는지는 **어느 항이 깎았는가**
         # 가 말한다 — 중심이 깎았으면 정렬 축을 돌려야 하고, 면적이 깎았으면 면외로 다시
         # 훑어야 한다. 둘은 정반대 동작이다.
-        if self._on_q(q_view) and q_view >= self.q_target:
-            # **합격했다 = 이 축들이 한가하다.** 그 여유로 결합(Q_raw)을 고친다. Q_raw 는
-            # 힘만으로는 더 안 오른다 — 실측에서 결합은 힘보다 자세에 훨씬 강하게 반응했고
+        want = self._demand(q_parts)
+        if self._axes_idle(want, q_view, centroid_dx):
+            # **이 축들이 한가하다.** 그 여유로 결합(Q_raw)을 고친다. Q_raw 는 힘만으로는
+            # 더 안 오른다 — 실측에서 결합은 힘보다 자세에 훨씬 강하게 반응했고
             # (r +0.49·+0.68 vs −0.09·−0.27) 힘 탐색은 이미 수렴해 있었다.
-            # 합격선 아래로 떨어지면 다음 tick 에 이 분기를 안 타므로 즉시 원래 일로 돌아간다.
+            # 한가함이 깨지면 다음 tick 에 이 분기를 안 타므로 즉시 원래 일로 돌아간다.
+            # 합격했는가, 아니면 "우리 축은 한가한데 총점이 낮은가" 를 구별해 적는다.
+            # 뒤쪽이면 남은 부족분은 이 제어기의 것이 아니다 — 무엇인지 말해 준다.
+            passed = self._on_q(q_view) and q_view >= self.q_target
+            why = self._blocked_by(q_parts)
+            head = "합격" if passed else ("여유" + (f" · 남은 부족분: {why}" if why else ""))
             if self.normal_align and shear_xy is not None:
                 nv, nnote = self.na.step(t, shear_xy)
-                if np.any(nv):
-                    self.last_note = f"유지 — {self._mark(q_view)}합격 · {nnote}"
-                    return nv, self.last_note
-                self.last_note = f"유지 — {self._mark(q_view)}합격 · {nnote}"
-                return vel, self.last_note
-            self.last_note = (f"유지 — {self._mark(q_view)}합격 · 중심 {centroid_dx:+.3f} "
+                self.last_note = f"유지 — {self._mark(q_view)}{head} · {nnote}"
+                return (nv if np.any(nv) else vel), self.last_note
+            self.last_note = (f"유지 — {self._mark(q_view)}{head} · 중심 {centroid_dx:+.3f} "
                               f"· 면적 {area:.4f} (가만히 둔다)")
             return vel, self.last_note
 
-        want = self._demand(q_parts)
         # **힘이 아직 자리를 못 잡았으면 면적 부족은 우리 일이 아니다.**
         #
         # 방광 용적이 바뀌면 접촉 강성이 바뀌고, 힘 조절기가 z 로 파고들거나 물러난다.

@@ -167,12 +167,16 @@ def test_runner_uses_measured_quality_not_the_learned_head():
     # 에피소드가 열릴 때 탐색기를 다시 시작한다 — 앞 에피소드의 최고값을 들고 가면 안 된다
     assert "self.search.reset(t, self.q_view)" in run
 
-    # 지령을 내는 조건 목록에 빠지면 그 조건은 조용히 hold 가 된다 — 로봇이 안 움직이는데
-    # 로그는 정상으로 보여서, 한 세션을 다 받고 나서야 안다 (2026-09-14: rule 이 빠져 있었다).
+    # --execute 는 **조건이 아니라 세션의 성질**이다. 조건별로 거르면 러너 안의 규칙과
+    # 두 곳에서 따로 관리하게 되고, 실제로 두 번 틀렸다 (rule 누락 · hold 의 복귀 불발).
     exp = (Path(__file__).resolve().parents[1] / "scripts" / "run_experiment.py").read_text()
-    cmd = re.search(r"COMMANDING = \(([^)]*)\)", exp).group(1)
-    for c in ("policy", "placebo", "search", "rule"):
-        assert f'"{c}"' in cmd, f"드라이버가 {c} 에 --execute 를 안 준다: {cmd}"
+    assert "COMMANDING" not in exp, "조건 목록이 되살아났다 — 러너가 이미 강제한다"
+    blk = re.search(r'if args\.execute:\n\s*cmd\.append\(.--execute.\)', exp)
+    assert blk, "세션이 실행 모드면 조건과 무관하게 --execute 를 준다"
+    # 지령을 막는 것은 러너의 몫이다 — 그 자리는 그대로여야 한다
+    run = (Path(__file__).resolve().parents[1] / "scripts" / "run_policy.py").read_text()
+    assert 'if self.condition in ("hold", "expert") or too_far:' in run, \
+        "hold·expert 를 막는 자리가 러너에 없다"
 
 
 def test_frames_can_be_saved_so_episodes_become_training_data():

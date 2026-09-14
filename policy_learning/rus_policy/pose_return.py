@@ -29,6 +29,8 @@ from typing import Optional, Sequence
 
 import numpy as np
 
+from .frame_map import FrameMap
+
 #: 여기 안에 들어오면 같은 자리로 본다. 실측 근거는 위 도크스트링.
 TOL_MM = 3.0
 TOL_DEG = 1.5
@@ -88,6 +90,11 @@ class PoseTarget:
     q: np.ndarray
     tol_mm: float = TOL_MM
     tol_deg: float = TOL_DEG
+    #: 지령 프레임과 실제 프레임의 어긋남. 기본은 없음(단위행렬).
+    #:
+    #: **여기서만 필요하다.** 이 클래스는 "기저 프레임의 목표 자세" 라는 유도된 양을
+    #: 쓰므로 규약이 맞아야 한다. 규칙 제어기는 필요 없다 — 이득이 이미 지령 축 기준이다.
+    frame: Optional[FrameMap] = None
 
     @classmethod
     def parse(cls, text: str, **kw) -> "PoseTarget":
@@ -122,9 +129,17 @@ class PoseTarget:
         빔축 병진은 언제나 0 이다 — 힘 조절기가 그 축을 쥐고 있다.
         """
         e_probe, r_deg = self._error_vectors(p_now, q_now)
+        # **내고 싶은 움직임과 내야 할 지령은 다르다.** 2026-09-14 실측에서 두 프레임이
+        # z 둘레로 90.2° 어긋나 있었고, 보정 없이 내면 90° 돌아간 방향으로 나가 단조
+        # 발산한다 (기준 자세 복귀가 24 → 70 mm 로 멀어졌다).
+        want_lin = np.array([e_probe[0] * 1000.0, e_probe[1] * 1000.0, 0.0])
+        want_ang = np.asarray(r_deg, float)
+        if self.frame is not None:
+            want_lin = self.frame.to_command(want_lin)
+            want_ang = self.frame.to_command(want_ang)
         vel = np.zeros(6, float)
-        vel[:2] = np.clip(k_p * e_probe[:2] * 1000.0, -max_mm_s, max_mm_s)
-        vel[3:] = np.clip(k_p * r_deg, -max_deg_s, max_deg_s)
+        vel[:2] = np.clip(k_p * want_lin[:2], -max_mm_s, max_mm_s)
+        vel[3:] = np.clip(k_p * want_ang, -max_deg_s, max_deg_s)
         d_mm = float(np.linalg.norm(e_probe[:2]) * 1000.0)
         return vel, (d_mm, float(np.linalg.norm(r_deg)))
 

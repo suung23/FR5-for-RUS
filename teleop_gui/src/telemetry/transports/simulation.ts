@@ -6,8 +6,7 @@ import type {
   RobotState,
   SafetyState,
   Transport,
-  TransportSink,
-} from '../types';
+  TransportSink, ForceLimits } from '../types';
 
 /**
  * Built-in simulator — the default transport.
@@ -52,6 +51,24 @@ export class SimulationTransport implements Transport {
   private joints = [...HOME];
   private velocities = new Array(6).fill(0);
   private contactForce = 0;
+  /**
+   * The contact-force window, as the control stack would hold it. Starts from
+   * the configuration and moves when the console sends `force.limits`, under
+   * the bridge's own rules (fr5_control/force_limits.py): the hold stays at
+   * least 1 N under the limit, and the limit never rises above the ceiling.
+   */
+  private limits: ForceLimits = {
+    floorN: config.targetForceN - 0.05,
+    holdN: config.targetForceN,
+    deadbandN: 0.05,
+    warnN: config.warnForceN,
+    maxN: config.maxForceN,
+    resumeN: config.targetForceN,
+    // The bridge's default ceiling (bridge.force_limit_ceiling_n), not the
+    // yaml limit: the simulator must let the console ask for what the real
+    // bridge would accept, or a refusal here would be the simulator's alone.
+    ceilingN: 10.0,
+  };
   /** Latched safety level, so the state does not chatter at the threshold. */
   private safety: SafetyState = 'normal';
   /** Velocity-limit mode, with the control stack's hysteresis. */
@@ -141,6 +158,36 @@ export class SimulationTransport implements Transport {
     if (command.command === 'calib.tare.clear') {
       this.tare = [0, 0, 0];
       this.ack('calib.tare.clear', true);
+      return true;
+    }
+    if (command.command === 'force.limits') {
+      const floor = Number(command.floorN);
+      const max = Number(command.maxN);
+      const band = this.limits.deadbandN;
+      const hold = floor + band;
+      const refuse = (reason: string) => {
+        this.ack('force.limits', false, reason);
+        return true;
+      };
+      if (![floor, max].every(Number.isFinite)) return refuse('힘은 유한한 값이어야 한다');
+      if (floor < 0.5) return refuse(`최소 접촉력 ${floor.toFixed(2)} N 은 0.5 N 아래로 내릴 수 없다`);
+      if (max > this.limits.ceilingN + 1e-9) {
+        return refuse(`한계 ${max.toFixed(2)} N 은 천장 ${this.limits.ceilingN.toFixed(1)} N 을 넘는다`);
+      }
+      if (hold > max - 1.0 + 1e-9) {
+        return refuse(
+          `최소 접촉력 ${floor.toFixed(2)} N 은 한계 ${max.toFixed(2)} N 보다 ${(1.0 + band).toFixed(2)} N 이상 낮아야 한다`,
+        );
+      }
+      this.limits = {
+        ...this.limits,
+        floorN: floor,
+        holdN: hold,
+        warnN: max - 0.5,
+        maxN: max,
+        resumeN: floor,
+      };
+      this.ack('force.limits', true);
       return true;
     }
     if (command.command === 'contact.inplane') {
@@ -255,11 +302,11 @@ export class SimulationTransport implements Transport {
       // it existed to cross — which is the failure a simulator cannot report,
       // because it looks exactly like an interface that has nothing to show.
       const ramp = Math.min(1, held / 1.5);
-      const firmPeak = Math.max(0, config.maxForceN + 0.5 - config.targetForceN);
+      const firmPeak = Math.max(0, this.limits.maxN + 0.5 - this.limits.holdN);
       const firm = held > 9 ? Math.min(1, (held - 9) / 1.2) * firmPeak : 0;
       this.contactForce =
         ramp *
-        (config.targetForceN + firm + 0.22 * Math.sin(held * 1.9) + 0.09 * Math.sin(held * 5.3));
+        (this.limits.holdN + firm + 0.22 * Math.sin(held * 1.9) + 0.09 * Math.sin(held * 5.3));
     } else if (this.phase === 'retract') {
       this.contactForce = Math.max(0, this.contactForce - 0.35);
     } else {
@@ -326,7 +373,8 @@ export class SimulationTransport implements Transport {
     // that keeps announcing a protective stop at a limit the console no longer
     // uses teaches the operator to distrust both.
     const fn = -fz;
-    const { warnForceN, maxForceN, contactProbingN } = config;
+    const { contactProbingN } = config;
+    const { warnN: warnForceN, maxN: maxForceN } = this.limits;
     if (fn >= maxForceN) this.safety = 'protective_stop';
     else if (fn >= warnForceN) {
       if (this.safety !== 'protective_stop') this.safety = 'warning';
@@ -379,6 +427,7 @@ export class SimulationTransport implements Transport {
       safetyState,
       probingMode: this.probing,
       inplaneRotation: this.inplane,
+      forceLimits: { ...this.limits },
       teleopFrame: {
         operatorYawDeg: this.operatorYawDeg,
         pendingYawDeg: this.pendingYawDeg,

@@ -780,8 +780,8 @@ class PolicyRunner(Node):
             self._warned_no_search = True
             self.get_logger().warn(
                 f"⚠️ 힘 탐색이 보이지 않는다 ({self.args.robot_namespace}/force_setpoint_bar 무음) — "
-                "힘 설정값이 출발값에 고정된 채 돈다. "
-                "`ros2 run fr5_control force_search --ros-args -p execute:=true` 를 띄웠는가")
+                "자리 잡음 게이트가 항상 열린 채 돈다 (유지 힘은 콘솔의 접촉력 창이 정한다). "
+                "`ros2 run fr5_control force_search` 를 띄웠는가")
         if not self.announced and self.t_start is not None:
             v = self._judge_now()
             if v.get("success"):

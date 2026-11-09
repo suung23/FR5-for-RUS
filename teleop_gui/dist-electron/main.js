@@ -1,18 +1,18 @@
-import { app as t, BrowserWindow as d, shell as f } from "electron";
-import { fileURLToPath as w } from "node:url";
+import { app as t, BrowserWindow as d, shell as w } from "electron";
+import { fileURLToPath as c } from "node:url";
 import i from "node:path";
-const r = i.dirname(w(import.meta.url)), o = process.env.VITE_DEV_SERVER_URL;
+const r = i.dirname(c(import.meta.url)), o = process.env.VITE_DEV_SERVER_URL;
 function s() {
   const e = new d({
     width: 1560,
     height: 960,
     minWidth: 1100,
     minHeight: 720,
-    // Opaque white, matching the console canvas. This is what the compositor
+    // Opaque sky blue, matching the console ground. This is what the compositor
     // paints before the first frame and behind anything the page leaves
     // unpainted — a mismatched value here shows as a flash on open, and a
     // translucent one lets the desktop through.
-    backgroundColor: "#ffffff",
+    backgroundColor: "#d8ecf9",
     // Wait for the first paint so the operator never sees a white flash on a
     // dark panel in a darkened room.
     show: !1,
@@ -26,7 +26,7 @@ function s() {
       webviewTag: !1
     }
   });
-  e.once("ready-to-show", () => e.show()), e.webContents.setWindowOpenHandler(({ url: n }) => (f.openExternal(n), { action: "deny" })), e.webContents.on("will-navigate", (n, a) => {
+  e.once("ready-to-show", () => e.show()), e.webContents.setWindowOpenHandler(({ url: n }) => (w.openExternal(n), { action: "deny" })), e.webContents.on("will-navigate", (n, a) => {
     const l = new URL(a);
     !(o && a.startsWith(o)) && l.protocol !== "file:" && n.preventDefault();
   }), o ? e.loadURL(o) : e.loadFile(i.join(r, "../dist/index.html"));

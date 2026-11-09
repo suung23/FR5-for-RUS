@@ -1,13 +1,19 @@
 """힘 설정값을 영상 품질의 경사 방향으로 옮기는 감독 노드 (DESIGN_NOTES §8.4).
 
-    ros2 run fr5_control force_search_node                      # 관찰만 (기본)
-    ros2 run fr5_control force_search_node --ros-args -p execute:=true
+    ros2 run fr5_control force_search_node
 
-``target_force_n`` 을 고정 상수로 두는 대신 **Q 가 가장 높은 힘을 찾아 따라간다.**
-설정값에 구형파 디더를 걸고, 품질 응답을 같은 위상으로 복조해 경사를 얻고, 그 방향으로
-작은 걸음을 옮긴다 (극값 탐색). 판정 자체는 ``ForceSetpointAdapter`` 가 하고 — rclpy 없이
-돌며 시험 14 개가 붙어 있다 — 이 노드는 **배선만** 한다: 품질을 받아 넣고, 나온 설정값을
-``us_diff_ik_node`` 의 파라미터로 민다.
+**관찰 전용이다 (2026-10-19).** 설정값에 구형파 디더를 걸고, 품질 응답을 같은 위상으로
+복조해 경사를 얻고, 그 방향으로 작은 걸음을 옮긴 값 ``f_bar`` 를 **토픽으로만** 낸다
+(``{ns}/force_setpoint_bar``). 판정 자체는 ``ForceSetpointAdapter`` 가 하고 — rclpy 없이
+돌며 시험 14 개가 붙어 있다 — 이 노드는 **배선만** 한다: 품질을 받아 넣고, 나온 값을
+알린다.
+
+이 노드는 ``us_diff_ik_node`` 의 ``contact_control.target_force_n`` 을 **쓰지 않는다.**
+2026-10-19 까지는 ``execute:=true`` 로 그 파라미터를 밀 수 있었다. 그 길은 지웠다 —
+유지 힘(최소 접촉력)의 주인은 콘솔의 접촉력 창 하나다 (telemetry_bridge ``force.limits``,
+fr5_control/force_limits.py). 두 주인이 같은 파라미터를 쓰면 조작자가 넣은 값이 다음
+디더 주기에 조용히 덮인다. run_policy 는 여전히 ``force_setpoint_bar`` 를 "자리 잡았는가"
+게이트와 로그에 쓴다 — 그 토픽은 그대로다.
 
 품질 신호
 --------
@@ -22,18 +28,14 @@ NaN 은 "측정 안 됨" 으로 그대로 넘긴다 (게이트가 닫힌 프레�
 ----
 * 설정값은 ``[f_min + a, f_max − a]`` 에 묶여 디더를 얹어도 ``[f_min, f_max]`` 를 안 넘는다.
   ``f_max`` 는 하드 한계 5.0 이 아니라 **warn 선 4.5** 를 쓴다 (§8.4 주석).
-* 파라미터 set 은 ``us_diff_ik_node`` 가 ``target < warn ≤ max`` 불변식으로 검사해 거절한다.
-  즉 5 N 안전 계층이 이 탐색을 구조적으로 감시한다 — 여기서 문턱을 다시 만들지 않는다.
-* ``/diag/retreating`` 이 뜨면 미는 것을 멈춘다. 후퇴 중에 설정값을 옮기면 후퇴가 끝난 자리가
-  달라진다.
-* ``execute`` 가 거짓이면 **아무것도 밀지 않고** 무엇을 밀었을지만 로그로 남긴다. 처음 붙일 때
-  디더 주기와 복조가 맞는지 이걸로 본다.
+* 로봇에 닿는 길이 없다. 이 노드가 내는 것은 Float32 토픽 하나이고, 그것을 파라미터로
+  옮기는 코드는 어디에도 없다.
+* ``/diag/retreating`` 이 뜨면 설정값 이동을 멈춘다 — 후퇴 중의 품질은 힘의 함수가 아니다.
 """
 
 from __future__ import annotations
 
 import math
-from typing import Optional
 
 import rclpy
 from rclpy.executors import ExternalShutdownException
@@ -41,8 +43,6 @@ try:  # rclpy 배포판마다 위치가 다르다
     from rclpy._rclpy_pybind11 import RCLError
 except ImportError:  # pragma: no cover
     RCLError = RuntimeError
-from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
-from rcl_interfaces.srv import SetParameters
 from rclpy.node import Node
 from std_msgs.msg import Bool, Float32
 
@@ -57,7 +57,6 @@ class ForceSearchNode(Node):
         self.declare_parameter("namespace", "/fr5_right")
         self.declare_parameter("control_node", "/us_diff_ik_node")
         self.declare_parameter("quality_topic", "")
-        self.declare_parameter("execute", False)
         self.declare_parameter("f_bar0_n", 3.0)
         self.declare_parameter("f_min_n", 1.0)
         # 하드 한계 5.0 이 아니라 warn 선. 적응기가 상승 금지선을 넘기는 것이 맞다 (§8.4).
@@ -81,8 +80,9 @@ class ForceSearchNode(Node):
 
         g = lambda n: self.get_parameter(n).value
         ns = str(g("namespace"))
+        # control_node 는 호환을 위해 선언만 남긴다. 이 노드는 더 이상 그 노드의
+        # 파라미터를 건드리지 않는다 (모듈 docstring).
         self.control_node = str(g("control_node"))
-        self.execute = bool(g("execute"))
         self.adapter = ForceSetpointAdapter(
             f_bar0=float(g("f_bar0_n")),          # 탐색의 **시작값**. 고정 목표가 아니다.
             amplitude_n=float(g("dither_amplitude_n")),
@@ -94,9 +94,9 @@ class ForceSearchNode(Node):
             f_max_n=float(g("f_max_n")),
         )
         self.adapter.reset(float(g("f_bar0_n")), self._now())
+        # 로그 중복 제거에만 쓴다 — 바뀐 설정값만 한 줄씩 남긴다.
         self.pusher = SetpointPusher()
         self.retreating = False
-        self._param_client: Optional[rclpy.client.Client] = None
         self._n_q = 0
 
         topic = str(g("quality_topic")) or f"{ns}/image_quality_raw"
@@ -105,9 +105,8 @@ class ForceSearchNode(Node):
         self.f_bar_pub = self.create_publisher(Float32, f"{ns}/force_setpoint_bar", 10)
         self.create_timer(0.05, self._tick)
         self.get_logger().info(
-            f"{'실행' if self.execute else '관찰만 (execute:=true 로 켠다)'} · "
-            f"품질 {topic} · 대상 {self.control_node}/contact_control.target_force_n\n  "
-            f"{self.adapter.describe()}")
+            f"관찰 전용 — 로봇 파라미터를 쓰지 않는다 · 품질 {topic} · "
+            f"출력 {ns}/force_setpoint_bar\n  {self.adapter.describe()}")
 
     def _now(self) -> float:
         return self.get_clock().now().nanoseconds * 1e-9
@@ -134,45 +133,8 @@ class ForceSearchNode(Node):
         sp = self.adapter.setpoint(t)
         if not self.pusher.should_push(sp):
             return
-        if not self.execute:
-            self.pusher.mark(sp)
-            self.get_logger().info(f"[관찰] target_force_n ← {sp:.3f} N (밀지 않음)")
-            return
-        if self._set_remote_parameter("contact_control.target_force_n", float(sp)):
-            self.pusher.mark(sp)
-        else:
-            self.get_logger().warn(
-                f"{self.control_node} 의 파라미터 서비스가 없다 — 제어 스택이 떠 있는가")
-
-    def _set_remote_parameter(self, name: str, value: float) -> bool:
-        """비동기로 민다. 응답을 기다리면 spin 을 잡는다 — 결과는 노드 로그가 말한다.
-
-        거절될 수 있다는 것이 중요하다. ``us_diff_ik_node`` 가 ``target < warn ≤ max``
-        를 검사하므로 안전 범위를 벗어나는 값은 저쪽에서 막힌다.
-        """
-        if self._param_client is None:
-            self._param_client = self.create_client(
-                SetParameters, f"{self.control_node}/set_parameters")
-        # 종료가 시작되면 context 가 무효가 되고 service_is_ready() 는 **예외를 던진다**
-        # (rcl: "node's context is invalid"). 그 예외가 타이머 콜백에서 그대로 올라와
-        # rclpy.spin 을 뚫고 나가면 노드가 트레이스백으로 죽는다 — 2026-09-11 파일럿에서
-        # force_search 가 그렇게 내려갔고, 로그 마지막 22 줄이 전부 종료 경로였다.
-        # 밀지 못한 것은 경고할 일이지 죽을 일이 아니다.
-        try:
-            if not self._param_client.service_is_ready():
-                if not self._param_client.wait_for_service(timeout_sec=0.2):
-                    return False
-        except RCLError:
-            return False
-        req = SetParameters.Request()
-        req.parameters = [Parameter(
-            name=name,
-            value=ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=float(value)))]
-        try:
-            self._param_client.call_async(req)
-        except RCLError:
-            return False
-        return True
+        self.pusher.mark(sp)
+        self.get_logger().info(f"[관찰] 설정값 {sp:.3f} N — 로봇에는 보내지 않는다")
 
 
 def main(args=None) -> None:

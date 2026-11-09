@@ -485,7 +485,7 @@ const adapter = new RobotTelemetryAdapter({
    * the ack was dropped and the button simply appeared not to work.
    */
   onAck(ack) {
-    const label = ack.command.replace(/^(calib|contact|teleop)\./, '');
+    const label = ack.command.replace(/^(calib|contact|teleop|force|policy)\./, '');
     logEvent(
       commandTag(ack.command),
       ack.ok ? `${label} 완료` : `${label} 거절 — ${ack.reason ?? '사유 없음'}`,

@@ -12,8 +12,7 @@ import type {
   TcpPose,
   TeleopFrameState,
   WrenchSample,
-  WrenchSource,
-} from '../types';
+  WrenchSource, ForceLimits, EstopState } from '../types';
 
 /**
  * Tolerant parsing of whatever a telemetry endpoint actually sends.
@@ -68,6 +67,24 @@ function oneOf<T extends string>(value: unknown, allowed: T[]): T | undefined {
     : undefined;
 }
 
+/** The contact-force window, only if every field of it is a finite number. */
+function forceLimits(value: unknown): ForceLimits | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const v = value as Record<string, unknown>;
+  const out = {
+    floorN: finiteOr(v.floorN),
+    holdN: finiteOr(v.holdN),
+    deadbandN: finiteOr(v.deadbandN),
+    warnN: finiteOr(v.warnN),
+    maxN: finiteOr(v.maxN),
+    resumeN: finiteOr(v.resumeN),
+    ceilingN: finiteOr(v.ceilingN),
+  };
+  // Half a window is worse than none: a plate showing a limit without its hold
+  // would invite the operator to fill the gap from memory.
+  return Object.values(out).every((n) => n !== undefined) ? (out as ForceLimits) : undefined;
+}
+
 export function parseTelemetry(raw: unknown, receivedAt: number): RobotTelemetry | null {
   if (!raw || typeof raw !== 'object') return null;
   const src = raw as Record<string, unknown>;
@@ -92,6 +109,7 @@ export function parseTelemetry(raw: unknown, receivedAt: number): RobotTelemetry
     probingMode: oneOf(src.probingMode ?? src.probing_mode, PROBING_MODES),
     inplaneRotation:
       typeof src.inplaneRotation === 'boolean' ? src.inplaneRotation : undefined,
+    forceLimits: forceLimits(src.forceLimits ?? src.force_limits),
     // Image quality, both readings. The bridge omits the key when the value is
     // not finite, and "not measured" must stay distinct from zero — so an
     // absent key becomes `undefined`, never 0.
@@ -111,7 +129,21 @@ export function parseTelemetry(raw: unknown, receivedAt: number): RobotTelemetry
     // here would let the screen disagree with the control stack about whether
     // contact control may be enabled.
     calibration: (src.calibration as never) ?? undefined,
+    // Passed through for the same reason as the calibration block: the console
+    // must never compute a safety state of its own. `phase` is the one field
+    // the plate cannot do without, so a block without it is dropped rather
+    // than rendered as a reassuring default.
+    estop: estopState(src.estop),
   };
+}
+
+const ESTOP_PHASES = ['disarmed', 'armed', 'tripped', 'releasing', 'returning', 'safe'];
+
+function estopState(value: unknown): EstopState | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const v = value as Record<string, unknown>;
+  if (typeof v.phase !== 'string' || !ESTOP_PHASES.includes(v.phase)) return undefined;
+  return v as unknown as EstopState;
 }
 
 /**

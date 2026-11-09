@@ -217,7 +217,7 @@ colcon build --packages-select fr5_control fr5_ik --symlink-install   # 코드�
   **필수**다 (§4 경고).
 
 ```bash
-ros2 run fr5_control force_search                # ② 힘 탐색 (관찰 → execute:=true)
+ros2 run fr5_control force_search                # ② 힘 탐색 (관찰 전용 — 유지 힘은 콘솔 접촉력 창)
 cd ~/FR5-for-RUS/policy_learning                 # ③ 러너 / 세션 드라이버
 ```
 

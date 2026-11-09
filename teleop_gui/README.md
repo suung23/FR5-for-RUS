@@ -7,11 +7,15 @@ short guidance tied to what it is actually reading.
 
 > **Research use only.** This is not a medical device. It is not cleared or
 > approved for diagnosis or treatment, and it does not support autonomous
-> clinical operation. The application **cannot move the robot**: the only
-> commands it sends are the sensor-calibration steps (capture, fit, save,
-> reset), which the bridge accepts from a fixed allowlist and which never
-> command motion. The operator moves the arm by hand. Motion belongs to the
-> ROS 2 stack that owns the velocity clamps and watchdogs.
+> clinical operation. The application **sends no motion commands**: what it
+> sends are the sensor-calibration steps (capture, fit, save, reset), mode
+> permissions (contact probing, in-plane rock, policy inference) and the
+> contact-force window (hold and limit), all from a fixed allowlist in the
+> bridge. The operator moves the arm by hand. Motion belongs to the ROS 2 stack
+> that owns the velocity clamps and watchdogs — but note that the force window
+> *does* change what that stack does in contact: a new hold force is pressed to
+> at once, so the console can never raise the limit above the ceiling the
+> stack was started with.
 
 ![Monitoring view](.screens/monitoring.png)
 
@@ -356,7 +360,10 @@ than either being independently adjustable.
 
 | Value | Default | From |
 |---|---|---|
-| contact enter | 2.0 N | `teleop.contact_probing_force_n` |
+| contact enter | 2.0 N | `teleop.contact_probing_force_n` — unused for mode entry (`contact_probing_force_trigger: false`); probing mode is entered by the policy button |
+| hold target | 3.0 N | `contact_control.target_force_n` — set from the console as *min contact* + deadband (0.05) |
+| warn | 4.5 N | `safety.warn_contact_force_n` — derived: limit − 0.5 |
+| limit (max) | 5.0 N | `safety.max_contact_force_n` — settable from the console, ≤ `bridge.force_limit_ceiling_n` (10.0) |
 | contact release | 0.3 N | `teleop.contact_probing_release_n` |
 | hold band | 3.0 ± 0.5 N | `contact_control.target_force_n`, `deadband_n` |
 | warning | 14.0 N | `safety.warn_contact_force_n` |
@@ -452,3 +459,46 @@ pose coverage, and whether contact control is currently unlocked.
 
 It sends only capture/fit/save/reset. See [`fr5_control/README.md`](../fr5_control/README.md)
 for the frame convention, the sign convention, and the limitations.
+
+## Contact force window
+
+The **Contact force window** plate (monitoring view, under *Policy inference*)
+lets the operator set two numbers and sends them as one `force.limits` command:
+
+| Field | Meaning | Parameter on `us_diff_ik_node` | Default |
+|---|---|---|---|
+| Min contact | least force kept on the abdomen in probing mode | `contact_control.target_force_n` = min + deadband | 2.95 N (target 3.0, deadband 0.05) |
+| Limit (max) | forced retreat | `safety.max_contact_force_n` | 5.0 N |
+
+There is no entry force. Probing mode is entered and left by the *Policy
+inference* START / STOP buttons (`policy.enable`); the force-based trigger is
+off (`teleop.contact_probing_force_trigger: false`). Once in probing mode the
+regulator owns z and pushes in whenever the reading falls to *min contact* —
+its target is placed one deadband above the floor, so the floor is exactly the
+line where it starts pushing. It is a line the controller reacts at, not a
+wall: force follows penetration by a second or two on the phantom, so a short
+dip under the floor during a breath is physically possible.
+
+The bridge reads the node's deadband, derives the rest and sends all four in a
+single `set_parameters` request, so the control node checks its invariants
+(`target < warn ≤ max`, `resume < warn ≤ limit`) against the new values
+together: `warn = limit − 0.5 N` and `resume = min contact`. Rules, enforced
+in the plate and again in the bridge (`fr5_control/force_limits.py`):
+
+- min contact ≥ 0.5 N;
+- min contact + deadband ≤ limit − 1.0 N;
+- limit ≤ `bridge.force_limit_ceiling_n`, **10.0 N by default** (operator
+  decision, 2026-10-19; it was 5.0).
+
+The hold target (min contact) is not an input to policy inference. The policy
+runner's observation is the image and pose; the only force value it reads is
+the force-search setpoint topic, used to gate the rule controller. Changing the
+hold changes the image through penetration depth, nothing more. The console is
+the **only** writer of the hold target: `force_search_node` is observe-only
+since 2026-10-19 and publishes its setpoint as a topic without touching the
+control node's parameters.
+
+The plate's *Stack holds* row and the trend's hold / warn / limit lines come
+from the bridge's one-second readback of the node's parameters, not from the
+request — a refused window never appears there. All forces are `‖F‖`
+(`ft_sensor.contact_force_mode: magnitude`).

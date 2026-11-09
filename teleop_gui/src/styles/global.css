@@ -1,13 +1,13 @@
 /*
- * Visual system: clinical engineering console, white with a green structural
- * accent.
+ * Visual system: clinical engineering console, sky blue with a deep-blue
+ * structural accent.
  *
- * Surfaces are predominantly white. Green is structure and status — the active
- * tab, the selected nav row, the measured force, the chart trace — never
- * decoration and never a large field. Dark red appears as an outline on
- * critical rows and nowhere else.
+ * Surfaces are predominantly pale sky blue. The deep blue is structure and
+ * status — the active tab, the selected nav row, the measured force, the chart
+ * trace — never decoration and never a large field. Dark red appears as an
+ * outline on critical rows and nowhere else.
  *
- * All text is #111111. Nothing is coloured to carry meaning, because colour
+ * All text is one near-black ink. Nothing is coloured to carry meaning, because colour
  * alone is not allowed to carry it:
  *
  *   normal    hairline separator
@@ -23,42 +23,41 @@
  */
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 
-  /* Pale green surface → muted green divider → medium green selection →
-     deep green active control. The interface stays a single dark ground;
-     green carries hierarchy, never mood, and nothing is coloured that is not
-     also stated in words or numbers somewhere on the same panel. */
-  /* Every glyph on this screen is the same ink. Colour is carried by rules, marks,
-     fills and tag borders — never by the text itself. An operator reading a
-     value under a bright lamp, or on a panel someone has turned the contrast
-     down on, should never have a reading that is harder to see than its
-     neighbour because of what it means. */
-  /* Dark console (2026-09-10). The *structure* of the original palette is kept
-     and only its ground is moved: one ink for every glyph, hierarchy carried by
-     rules and fills, one alarm colour, and the green and blue ramps matched
-     step for step in contrast so a mode change moves hue and nothing else.
+  /* Sky-blue clinical console (2026-10-19). The ground is a pale sky blue —
+     the surface colour bedside and imaging consoles have used for decades —
+     and every glyph is one near-black ink on it. The *structure* of the
+     palette is unchanged: hierarchy is carried by rules and fills, there is
+     one alarm colour, and nothing is coloured that is not also stated in
+     words or numbers somewhere on the same panel.
 
-     `--white` keeps its name though it is now the darkest surface. Renaming it
-     would touch every stylesheet in the app for no behavioural gain; read it as
-     "the ground", which is what every rule already uses it for. */
-  --ink: #e9ede9;
-  --white: #0f1210;
-  --panel-pale: #171d18;
-  --sidebar: #131813;
-  --nav-selected: #26382b;
-  --rule: #35493b;
-  --accent: #74b184;
-  --green: #93d1a4;
-  /* The alarm stays the one colour that means something is wrong, and it has to
-     survive the darker ground — the deep red of the light console disappears
-     against it, so the same hue is lifted rather than replaced. */
-  --critical: #ff6f6f;
+     The ramp runs pale ground → tinted panel → selection → divider → deep blue
+     active mark, each step a little more saturated and a little darker than
+     the last, so a rule is always visible against the surface it sits on.
 
-  /* Kept as a name so the intent of a rule stays readable, but it is black
-     too. De-emphasis is done with size and weight, which survive a bad
+     `--white` keeps its name though it is now sky blue. Renaming it would
+     touch every stylesheet in the app for no behavioural gain; read it as
+     "the ground", which is what every rule already uses it for. `--green`
+     likewise keeps its name as "the active mark" — the measured trace, the
+     active tab, the plate header rule — and is blue in this palette. */
+  --ink: #0e1b26;
+  --white: #d8ecf9;
+  --panel-pale: #c6e1f4;
+  --sidebar: #bddbf1;
+  --nav-selected: #9fc8e8;
+  --rule: #6fa6d1;
+  --accent: #1f6fae;
+  --green: #2a7fc4;
+  /* The alarm stays the one colour that means something is wrong. A deep red
+     reads as an outline against the pale ground; the lifted red of the dark
+     console would wash out here. */
+  --critical: #b42318;
+
+  /* Kept as a name so the intent of a rule stays readable, but it is the
+     same ink. De-emphasis is done with size and weight, which survive a bad
      screen; a grey does not. */
-  --ink-soft: #e9ede9;
+  --ink-soft: #0e1b26;
 
   /* Density. An operator glances at this while looking at the patient, so rows
      are tight and type is small but never below legibility. */
@@ -79,30 +78,34 @@
 }
 
 /* ---- contact-probing palette ---------------------------------------------
-   The same ramp in blue, swapped in wholesale when the control stack declares
+   The same ramp in green, swapped in wholesale when the control stack declares
    contact probing (`telemetry/theme.ts` flips the attribute; nothing else in
    the app knows a colour).
 
-   Blue rather than amber or red on purpose. Contact probing is not a fault and
+   Green rather than amber or red on purpose. Contact probing is not a fault and
    must not read as one — the console still has one alarm colour, the dark red
    outline, and it has to keep meaning "something is wrong". This is a change of
    *régime*, not of severity: the arm is doing something correct and different,
    and it deserves a colour that is unmistakably not the resting one and
-   unmistakably not the alarm one.
+   unmistakably not the alarm one. Now that the resting ground is sky blue,
+   green is the hue that is furthest from both.
 
-   Lightness is matched step for step against the green ramp, so nothing shifts
+   Lightness is matched step for step against the blue ramp, so nothing shifts
    in contrast when the palette changes — the same rules stay as visible, the
-   same text stays as readable. Only the hue moves. `--critical` and `--ink` are
-   deliberately absent: the alarm outline and every glyph stay exactly as they
-   were, because those two are what the operator reads when something is wrong,
-   and the mode they are in must not change how a fault looks. */
+   same text stays as readable. Only the hue moves. The ground moves with the
+   ramp here, because on a tinted ground a change confined to rules and fills
+   is too quiet to be seen without being looked at. `--critical` and `--ink`
+   are deliberately absent: the alarm outline and every glyph stay exactly as
+   they were, because those two are what the operator reads when something is
+   wrong, and the mode they are in must not change how a fault looks. */
 :root[data-probing='on'] {
-  --panel-pale: #161c24;
-  --sidebar: #121821;
-  --nav-selected: #243449;
-  --rule: #35485e;
-  --accent: #74a0d1;
-  --green: #93b9e6;
+  --white: #dcf2e4;
+  --panel-pale: #c8e9d3;
+  --sidebar: #bfe3cb;
+  --nav-selected: #9fd3b1;
+  --rule: #6db58a;
+  --accent: #1f8a4c;
+  --green: #2a9a5b;
 }
 
 * {

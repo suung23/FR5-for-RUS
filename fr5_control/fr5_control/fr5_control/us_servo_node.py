@@ -16,9 +16,24 @@
 워치독은 2층 구조의 **하위 층**이다 (DESIGN_NOTES §12.2). 관절 지령이 끊기면 정지한다.
 후퇴하지 않는다 — 이 노드는 관절 공간에서 돌아 법선 방향을 모르고, 방향을 모르는 채
 움직이는 것보다 서는 편이 안전하다. 후퇴는 프로브 프레임을 아는 ``us_diff_ik_node`` 몫이다.
+
+안전 정지 층 (2026-10-19, safety_estop 패키지)
+-----------------------------------------------
+이 노드는 **운동의 마지막 관문**이므로, 보호정지의 금지도 여기서 실행된다.
+
+* ``safety/inhibit`` (Bool, 래치) 가 참이면 ``joint_velocity_cmds`` 를 **무시한다.**
+  텔레옵이든 정책이든 IK 든 상관없다. 그 동안 로봇을 움직일 수 있는 유일한 채널은
+  ``safety/recovery_cmds`` 이고, 그것조차 금지 중에만 받는다 — 권한이 한 곳에
+  있다는 것이 금지의 뜻이다.
+* ``safety/hardware`` 로 컨트롤러 안전입력(물리 비상정지 2채널)을 내보낸다. 이
+  노드만 RPC 연결을 쥐고 있으므로 읽을 수 있는 자리가 여기뿐이다.
+* ``safety/estop_state`` 를 받다가 끊기면 선다 (``watchdog.estop_state_timeout_s``).
+  감시 노드가 죽으면 ``inhibit`` 은 래치된 마지막 값(보통 거짓)으로 남는데, 그것을
+  "금지 없음" 으로 읽으면 **감시가 사라진 채로 계속 움직인다.**
 """
 from __future__ import annotations
 
+import json
 import math
 
 import rclpy
@@ -28,7 +43,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from scipy.spatial.transform import Rotation
 from sensor_msgs.msg import JointState
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 from tf2_ros import TransformBroadcaster
 
 from fr5_control.joint_command_limiter import JointCommandLimiter
@@ -139,6 +154,29 @@ class UsServoNode(Node):
             ),
         )
 
+        # -- 안전 정지 채널 (safety_estop) ------------------------------
+        #
+        # 래치(TRANSIENT_LOCAL)로 받는다. 이 노드가 감시 노드보다 늦게 떠도 현재
+        # 금지 상태를 즉시 받는다 — volatile 이면 다음 전이까지 금지를 모른 채
+        # 지령을 실행한다.
+        self._inhibit = False
+        self._safety_vel = None
+        self._safety_vel_at = None
+        self._estop_state_at = None
+        self._estop_timeout = float(self.get_parameter("watchdog.estop_state_timeout_s").value)
+        self._hardware_present = bool(self.get_parameter("hardware.present").value)
+        latched = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self.create_subscription(Bool, f"{ns}/safety/inhibit", self._on_inhibit, latched)
+        self.create_subscription(
+            JointState, f"{ns}/safety/recovery_cmds", self._on_recovery_velocity, 10)
+        self.create_subscription(
+            String, f"{ns}/safety/estop_state", self._on_estop_state, latched)
+        self.hardware_pub = self.create_publisher(String, f"{ns}/safety/hardware", latched)
+
         self.joint_pub = self.create_publisher(JointState, f"{ns}/joint_states", 10)
         self.pose_pub = self.create_publisher(Pose, f"{ns}/ee_wrt_base", 10)
         self.wrench_pub = self.create_publisher(WrenchStamped, f"{ns}/wrench", 10)
@@ -152,6 +190,9 @@ class UsServoNode(Node):
         self.create_timer(self.cmd_t, self._control_loop)
         self.create_timer(1.0 / wrench_hz, self._publish_wrench)
         self.create_timer(1.0 / status_hz, self._publish_status)
+        # 안전입력은 상태보다 자주 볼 이유가 없다. 10 Hz 면 감시 노드의 신선도
+        # 한계(0.5 s)에 여유가 있다.
+        self.create_timer(0.1, self._publish_hardware)
 
         self.get_logger().info(
             f"서보 {servo_hz:.0f} Hz · wrench {wrench_hz:.0f} Hz · "
@@ -159,6 +200,14 @@ class UsServoNode(Node):
         )
         # 정지 거동은 가속 상한이 아니라 이 두 값이 정한다. teleop 이 "멈춰도 더 간다"
         # 로 느껴질 때 먼저 볼 곳이므로 기동 로그에 남긴다.
+        if self._estop_timeout <= 0.0:
+            self.get_logger().warn(
+                "⚠️ safety_estop 감시를 보지 않는다 (watchdog.estop_state_timeout_s = 0) — "
+                "감시 노드가 죽어도 이 노드는 계속 움직인다")
+        if not self._hardware_present:
+            self.get_logger().warn(
+                "⚠️ hardware.present = false — 물리 비상정지 회로가 없는 구성으로 "
+                "안전입력을 내보낸다 (safety_estop/README §1)")
         self.get_logger().info(
             f"가속 {self.max_joint_accel} / 감속 {self.max_joint_decel} rad/s² · "
             f"정지 되감기 {self.limiter.resync_rate_deg_s:.0f} °/s "
@@ -184,6 +233,12 @@ class UsServoNode(Node):
 
         self.declare_parameter("watchdog.joint_cmd_timeout_s", 0.1)
         self.declare_parameter("watchdog.retreat_until_force_n", 0.2)
+        # 감시 노드(safety_estop)의 상태가 이보다 오래 끊기면 선다 [s].
+        # 0 이면 보지 않는다 — safety_estop 없이 돌리는 벤치용이고, 그때는
+        # 기동 로그에 한 줄 남는다.
+        self.declare_parameter("watchdog.estop_state_timeout_s", 1.0)
+        # 물리 비상정지 회로가 이 설치에 있는가 (safety_estop/README §1).
+        self.declare_parameter("hardware.present", False)
 
         self.declare_parameter("rates.servo_hz", 125.0)
         self.declare_parameter("rates.wrench_publish_hz", 100.0)
@@ -235,6 +290,58 @@ class UsServoNode(Node):
         self.target_vel_rad = list(msg.velocity[:6])
         self.last_cmd_time = self.get_clock().now()
 
+    # -- 안전 정지 채널 --------------------------------------------------
+
+    def _on_inhibit(self, msg: Bool) -> None:
+        want = bool(msg.data)
+        if want != self._inhibit:
+            self.get_logger().warn(
+                "운동 금지 — joint_velocity_cmds 를 실행하지 않는다. "
+                "safety/recovery_cmds 만 로봇을 움직인다"
+                if want else "운동 금지 해제")
+        self._inhibit = want
+        if want:
+            # 금지에 들어가는 순간 쌓여 있던 지령을 버린다. 남겨 두면 금지가
+            # 풀리는 순간 그 오래된 속도가 한 주기 실행된다.
+            self.target_vel_rad = [0.0] * 6
+
+    def _on_recovery_velocity(self, msg: JointState) -> None:
+        """복귀 지령. **금지 중에만** 받는다.
+
+        금지 밖에서도 받으면 이 토픽이 두 번째 운동 경로가 된다 — 평범한 지령과
+        복귀 지령이 동시에 들어와 누가 로봇을 쥐고 있는지 알 수 없게 된다.
+        """
+        if not self._inhibit or len(msg.velocity) < 6:
+            return
+        self._safety_vel = list(msg.velocity[:6])
+        self._safety_vel_at = self.get_clock().now()
+
+    def _on_estop_state(self, msg: String) -> None:
+        self._estop_state_at = self.get_clock().now()
+
+    def _publish_hardware(self) -> None:
+        """컨트롤러 안전입력을 그대로 내보낸다. 판정하지 않는다.
+
+        읽기에 실패하면 **아무것도 내지 않는다.** 실패를 "안 눌렸다" 로 내보내면
+        회로가 열린 것을 감시 노드가 못 본다. 침묵은 그쪽에서 신선도로 잡힌다.
+        """
+        try:
+            inputs = self.backend.safety_inputs()
+        except Exception as exc:
+            self.get_logger().warn(
+                f"안전입력을 못 읽었다: {exc}", throttle_duration_sec=5.0)
+            return
+        inputs["present"] = self._hardware_present
+        self.hardware_pub.publish(String(data=json.dumps(inputs)))
+
+    def _estop_supervisor_lost(self) -> bool:
+        """감시 노드의 상태가 끊겼는가. 한 번도 못 받았으면 끊긴 것이 아니다 —
+        그 구성(safety_estop 없이 돌리는 벤치)은 기동 로그로 드러낸다."""
+        if self._estop_timeout <= 0.0 or self._estop_state_at is None:
+            return False
+        age = (self.get_clock().now() - self._estop_state_at).nanoseconds / 1e9
+        return age > self._estop_timeout
+
     def _on_probing_mode(self, msg: String) -> None:
         """us_diff_ik 가 선언한 모드를 받는다.
 
@@ -285,6 +392,22 @@ class UsServoNode(Node):
                 self.limiter.hard_reset(self.backend.joint_positions_deg())
                 return
 
+            # 보호정지. 평범한 지령을 버리고, 금지 중에만 복귀 채널을 받는다.
+            # 복귀 지령도 아래 limiter 를 그대로 통과하므로 속도·가속도·관절한계가
+            # 다시 걸린다 — 복귀가 규격 밖 운동이 될 수 없는 이유다.
+            if self._estop_supervisor_lost():
+                if not self._inhibit:
+                    self.get_logger().error(
+                        "safety_estop 상태가 끊겼다 — 감시 없이 움직이지 않는다. 정지.",
+                        throttle_duration_sec=2.0)
+                self.target_vel_rad = [0.0] * 6
+            elif self._inhibit:
+                fresh = (
+                    self._safety_vel_at is not None
+                    and (now - self._safety_vel_at).nanoseconds / 1e9 <= self.cmd_timeout
+                )
+                self.target_vel_rad = list(self._safety_vel) if fresh else [0.0] * 6
+
             actual_deg = self.backend.joint_positions_deg()
             was_idle = self.limiter.idle
 
@@ -293,7 +416,10 @@ class UsServoNode(Node):
             # 접촉 프로빙에서는 힘 조절기의 미소 지령이 의도이므로 크기 추측을 끈다.
             commanded_deg = self.limiter.step(
                 self.target_vel_rad, actual_deg, dt,
-                explicit_intent=self._contact_probing,
+                # 복귀 지령도 "의도" 다. 되밟기의 마지막 구간은 P 제어라 속도가
+                # 작아지는데, teleop 의 idle 크기 추측이 그것을 정지로 버리면
+                # 복귀가 목표점 앞에서 멈춘다 (접촉 프로빙과 같은 함정).
+                explicit_intent=self._contact_probing or self._inhibit,
             )
 
             # 정지로 넘어가는 순간의 선행분을 기록한다. 되감기가 없던 시절에는

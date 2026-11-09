@@ -56,6 +56,7 @@ from fr5_control.calibration_service import (
     CalibrationSession,
     StillnessDetector,
 )
+from fr5_control.force_limits import DEFAULT_CEILING_N, floor_of, force_window
 from fr5_control.wrench_calibration import CalibrationPose, MIN_POSES
 from fr5_control.us_servo_node import JOINT_NAMES
 from fr5_control.wrench_frames import FrameRegistration, GRAVITY_B
@@ -131,6 +132,9 @@ class TelemetryBridge(Node):
         # 프로브에 직접 붙으면 capture_sweep 같은 다른 구독자가 영상을 못 본다.
         #: 파라미터를 바꿀 제어 노드. 모드 전환 요청이 여기로 간다.
         self.declare_parameter("bridge.control_node", "/us_diff_ik_node")
+        #: 콘솔이 접촉력 한계를 올릴 수 있는 천장 [N]. 기본 10.0 (2026-10-19 조작자
+        #: 결정). ⚠️ 조직 안전 근거값은 7 N 이다 — fr5_control/force_limits.py 의 경고.
+        self.declare_parameter("bridge.force_limit_ceiling_n", DEFAULT_CEILING_N)
 
         self.declare_parameter("us.enabled", True)
         self.declare_parameter("us.topic", "/us/image")
@@ -289,6 +293,15 @@ class TelemetryBridge(Node):
         # 화면이 과거를 따라가게 된다 — 모니터는 지금을 보여야 한다.
         self._control_node = str(self.get_parameter("bridge.control_node").value)
         self._param_client = None
+        self._force_ceiling = float(self.get_parameter("bridge.force_limit_ceiling_n").value)
+        # 접촉력 창의 **진실**. 콘솔이 보낸 값이 아니라 제어 노드가 지금 들고 있는
+        # 값이다 — 거절된 set 은 여기 나타나지 않으므로, 눌린 버튼이 아니라
+        # 되돌아온 값이 화면의 근거가 된다 (probing_mode 와 같은 규약).
+        self._force_limits: dict | None = None
+        self._force_limits_at = 0.0
+        self._get_param_client = None
+        self._force_poll_inflight = False
+        self.create_timer(1.0, self._poll_force_limits)
         self._us_frame = None
         self._us_at = 0.0
         self._us_seq = 0
@@ -429,6 +442,25 @@ class TelemetryBridge(Node):
                 durability=DurabilityPolicy.TRANSIENT_LOCAL,
             ),
         )
+
+        # -- 비상정지·보호정지 (safety_estop 패키지) ----------------------
+        #
+        # 브리지는 여기서도 **창구만** 연다. 판정도 복귀도 safety_estop_node 의
+        # 것이고, 이쪽은 콘솔의 명령을 그 노드로 넘기고 그 노드의 상태를 콘솔로
+        # 가져온다. 거절 사유는 상태의 ``lastCommand`` 에 실려 돌아오므로, 이
+        # 브리지가 명령의 성공 여부를 판단하지 않는다 — 판단하면 사본이 하나 더
+        # 생기고, 그 사본은 반드시 언젠가 어긋난다.
+        self._estop = None
+        self._estop_at = 0.0
+        latched_qos = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self.create_subscription(
+            String, f"{ns}/safety/estop_state", self._on_estop_state, latched_qos)
+        self.estop_cmd = self.create_publisher(
+            String, f"{ns}/safety/estop_cmd", 10)
 
         self.wrench_pub = None
         if bool(self.get_parameter("bridge.publish_wrench").value):
@@ -597,6 +629,18 @@ class TelemetryBridge(Node):
             o = msg.orientation
             self._pose_quat = [o.x, o.y, o.z, o.w]
 
+    def _on_estop_state(self, msg: String) -> None:
+        """safety_estop_node 의 상태 한 장. 그대로 들고 있다가 프레임에 싣는다."""
+        try:
+            state = json.loads(msg.data)
+        except Exception:
+            self.get_logger().warn("estop 상태가 JSON 이 아니다", throttle_duration_sec=5.0)
+            return
+        if isinstance(state, dict):
+            with self._lock:
+                self._estop = state
+                self._estop_at = time.time()
+
     def _on_mode(self, msg: String) -> None:
         """로봇이 선언한 프로빙 모드. 콘솔이 추측하지 않게 그대로 전달한다."""
         if msg.data != self._mode:
@@ -675,12 +719,80 @@ class TelemetryBridge(Node):
             f"자동 캡처: {label} — 정지 감지 (직전 자세들과 {separation:.0f}°)"
         )
 
-    def _set_remote_parameter(self, name: str, value) -> bool:
-        """제어 노드의 파라미터를 **비동기로** 바꾼다.
+    _FORCE_LIMIT_NAMES = (
+        "contact_control.target_force_n",
+        "contact_control.deadband_n",
+        "safety.warn_contact_force_n",
+        "safety.max_contact_force_n",
+        "safety.teleop_resume_force_n",
+    )
+
+    def _poll_force_limits(self) -> None:
+        """제어 노드의 접촉력 창을 1 Hz 로 읽어 둔다.
+
+        노드는 이 다섯을 토픽으로 내지 않는다 (force_diag 에 목표 하나만 실린다).
+        deadband 도 함께 읽는다 — 콘솔이 보는 "최소 접촉력" 은 ``target - deadband``
+        이고(force_limits.py), 그 뺄셈을 상수로 하면 yaml 이 바뀔 때 조용히 어긋난다.
+        콘솔이 바꾸는 값이니 콘솔이 되돌려 받아야 하고, 콘솔 밖에서 바뀐 값
+        (``ros2 param set``)도 같은 길로 화면에 와야 한다 — 그래서 묻는다.
+        """
+        if self._force_poll_inflight:
+            return
+        from rcl_interfaces.srv import GetParameters
+
+        if self._get_param_client is None:
+            self._get_param_client = self.create_client(
+                GetParameters, f"{self._control_node}/get_parameters")
+        if not self._get_param_client.service_is_ready():
+            return
+        req = GetParameters.Request()
+        req.names = list(self._FORCE_LIMIT_NAMES)
+        self._force_poll_inflight = True
+        future = self._get_param_client.call_async(req)
+        future.add_done_callback(self._on_force_limits)
+
+    def _on_force_limits(self, future) -> None:
+        self._force_poll_inflight = False
+        try:
+            values = future.result().values
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().warn(f"접촉력 창 조회 실패: {exc}", throttle_duration_sec=10.0)
+            return
+        if len(values) != len(self._FORCE_LIMIT_NAMES):
+            return
+        try:
+            hold, band, warn, mx, resume = (float(v.double_value) for v in values)
+        except (TypeError, ValueError):
+            return
+        if not all(math.isfinite(v) for v in (hold, band, warn, mx, resume)):
+            return
+        limits = {
+            "floorN": floor_of(hold, band),
+            "holdN": hold,
+            "deadbandN": band,
+            "warnN": warn,
+            "maxN": mx,
+            "resumeN": resume,
+            "ceilingN": self._force_ceiling,
+        }
+        if limits != self._force_limits:
+            self.get_logger().info(
+                f"접촉력 창: 최소 {limits['floorN']:.2f} · 목표 {hold:.2f} · "
+                f"경고 {warn:.2f} · 한계 {mx:.2f} N")
+        with self._lock:
+            self._force_limits = limits
+            self._force_limits_at = time.time()
+
+    def _set_remote_parameters(self, values: dict) -> bool:
+        """제어 노드의 파라미터 여럿을 **한 요청으로, 비동기로** 바꾼다.
+
+        한 요청이어야 하는 이유: 노드의 set 콜백은 한 요청 안의 값들을 함께 받아
+        ``target < warn <= max`` 를 새 값끼리 검사한다. 따로 보내면 중간 상태가
+        불변식에 걸려 둘째 요청부터 거절되고, 첫째만 적용된 채 남는다.
 
         응답을 기다리지 않는 이유는 이 함수가 웹소켓 스레드에서 불리고 rclpy 의
         spin 은 다른 스레드에 있기 때문이다 — 여기서 기다리면 서로를 잡는다.
-        결과는 되돌아오는 `probing_mode` 로 확인한다.
+        결과는 되돌아오는 상태(`probing_mode`, 접촉력 창 조회)로 확인한다.
 
         Returns:
             요청을 보냈는가. 서비스가 없으면 거짓 — 제어 스택이 없다는 뜻이다.
@@ -696,18 +808,27 @@ class TelemetryBridge(Node):
             if not self._param_client.wait_for_service(timeout_sec=1.0):
                 return False
 
-        if isinstance(value, bool):
-            pv = ParameterValue(type=ParameterType.PARAMETER_BOOL, bool_value=value)
-        elif isinstance(value, float):
-            pv = ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=value)
-        else:
-            raise TypeError(f"지원하지 않는 파라미터 형식: {type(value).__name__}")
+        params = []
+        for name, value in values.items():
+            if isinstance(value, bool):
+                pv = ParameterValue(type=ParameterType.PARAMETER_BOOL, bool_value=value)
+            elif isinstance(value, float):
+                pv = ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=value)
+            else:
+                raise TypeError(f"지원하지 않는 파라미터 형식: {type(value).__name__}")
+            params.append(Parameter(name=name, value=pv))
 
         req = SetParameters.Request()
-        req.parameters = [Parameter(name=name, value=pv)]
+        req.parameters = params
         self._param_client.call_async(req)
-        self.get_logger().info(f"{self._control_node} {name} := {value} 요청")
+        self.get_logger().info(
+            f"{self._control_node} "
+            + " · ".join(f"{n} := {v}" for n, v in values.items()) + " 요청")
         return True
+
+    def _set_remote_parameter(self, name: str, value) -> bool:
+        """제어 노드의 파라미터 하나를 바꾼다. `_set_remote_parameters` 를 본다."""
+        return self._set_remote_parameters({name: value})
 
     # -- 초음파 -----------------------------------------------------------
 
@@ -1300,10 +1421,22 @@ class TelemetryBridge(Node):
             joints = self._joints
             joints_at = self._joints_at
             pose = self._pose
+            estop = self._estop
+            estop_at = self._estop_at
 
         # 토픽이 끊긴 지 오래면 연결되지 않은 것으로 보고한다. 마지막 자세를 계속
         # 내보내면 GUI 는 멈춘 로봇과 살아 있는 로봇을 구별할 수 없다.
         fresh = joints is not None and (now - joints_at) < 0.5
+
+        # 안전 상태는 **연결 여부와 무관하게** 싣는다. 관절 토픽이 끊긴 것과
+        # 보호정지가 걸린 것은 다른 사건이고, 끊김 때문에 정지 표시가 사라지면
+        # 조작자는 가장 알아야 할 때 그것을 못 본다.
+        estop_frame = None
+        if estop is not None:
+            estop_frame = dict(estop)
+            # 감시 노드가 내려가면 상태도 멈춘다. 멈춘 값을 현재라고 내보내지
+            # 않는다 — 콘솔은 이 나이를 보고 "감시 없음" 을 말한다.
+            estop_frame["ageS"] = now - estop_at
 
         # 종류를 명시한다. 한 소켓에 두 종류가 흐르므로 받는 쪽이 모양으로
         # 추측하게 두면, 필드가 빠진 프레임이 다른 종류로 오인된다.
@@ -1312,6 +1445,9 @@ class TelemetryBridge(Node):
             "timestamp": int(now * 1000),
             "connected": bool(fresh),
         }
+        if estop_frame is not None:
+            frame["estop"] = estop_frame
+
         if not fresh:
             return frame
 
@@ -1329,6 +1465,11 @@ class TelemetryBridge(Node):
 
         if self._teleop_frame is not None:
             frame["teleopFrame"] = self._teleop_frame
+
+        # 제어 노드가 들고 있는 접촉력 창. 오래된 값은 싣지 않는다 — 노드가
+        # 내려간 뒤 마지막 값이 남아 있으면 콘솔은 한계가 살아 있는 줄로 읽는다.
+        if self._force_limits is not None and (now - self._force_limits_at) < 5.0:
+            frame["forceLimits"] = dict(self._force_limits)
 
         # 지령은 **최근 것만** 싣는다. 러너가 내려간 뒤 마지막 값이 화면에 남아 있으면
         # 조작자는 아직 지령이 나가는 줄로 읽는다.
@@ -1609,10 +1750,13 @@ class TelemetryBridge(Node):
     def handle_command(self, request) -> dict | None:
         """교정 명령 하나를 처리한다.
 
-        받는 것은 다섯 가지뿐이다 — 영점 수집, 자세 수집, 적합, 저장, 초기화.
-        **어느 것도 로봇을 움직이지 않는다.** 모르는 명령은 조용히 버리는 대신
-        거절 사유를 돌려준다: 무시된 명령이 성공처럼 보이면 조작자가 하지 않은 교정을
-        했다고 믿게 된다.
+        모르는 명령은 조용히 버리는 대신 거절 사유를 돌려준다: 무시된 명령이
+        성공처럼 보이면 조작자가 하지 않은 교정을 했다고 믿게 된다.
+
+        **로봇을 움직이는 명령이 둘 있다.** 교정 명령은 전부 움직이지 않지만,
+        ``force.limits`` 는 프로빙 중이면 조절기 목표를 옮기고, ``estop.recover``
+        는 복귀 운동을 시작한다. 그 둘만 경고 수준으로 로그에 남는다 —
+        나머지와 섞이면 로그에서 운동을 찾을 수 없다.
         """
         if not isinstance(request, dict):
             return None
@@ -1869,6 +2013,61 @@ class TelemetryBridge(Node):
             self.teleop_frame_req.publish(Float64(data=yaw))
             self.get_logger().info(f"조작자 위치 요청 {yaw:+.0f}° → us_diff_ik")
             return ok(yawDeg=yaw, appliesOn="next-grip")
+
+        if command == "force.limits":
+            # 접촉력 창 — 조작자가 고치는 것은 최소 접촉력(floor)과 하드 한계(max)
+            # 둘이고, 조절기 목표(floor + deadband)·경고선·복귀선은
+            # fr5_control/force_limits.py 가 유도한다. 넷을 **한 요청**으로 보내
+            # 제어 노드가 새 값끼리 불변식을 검사하게 한다. 접촉 문턱은 없다 —
+            # 프로빙 모드는 힘이 아니라 콘솔의 추론 버튼이 연다.
+            #
+            # ⚠️ 이것은 로봇이 하는 일을 바꾼다. 프로빙 중이면 조절기가 새 목표로
+            # 곧바로 옮겨 간다 — 올리면 더 파고들고, 내리면 물러난다. 그래서
+            # 천장(bridge.force_limit_ceiling_n)은 콘솔이 못 올린다.
+            if self._force_limits is None:
+                return fail("제어 노드의 접촉력 창을 아직 읽지 못했다 — 제어 스택이 떠 있는가")
+            try:
+                window = force_window(
+                    request.get("floorN"), request.get("maxN"),
+                    self._force_limits["deadbandN"], self._force_ceiling)
+            except ValueError as exc:
+                return fail(str(exc))
+            try:
+                ok_sent = self._set_remote_parameters(window.as_parameters())
+            except Exception as exc:  # noqa: BLE001
+                return fail(f"파라미터 요청 실패: {exc}")
+            if not ok_sent:
+                return fail("us_diff_ik_node 의 파라미터 서비스가 없다 — 제어 스택이 떠 있는가")
+            self.get_logger().warn(
+                f"접촉력 창 요청 — 최소 {window.floor_n:.2f} · 목표 {window.hold_n:.2f} · "
+                f"경고 {window.warn_n:.2f} · 한계 {window.max_n:.2f} N "
+                f"(복귀 {window.resume_n:.2f})")
+            return ok(floorN=window.floor_n, holdN=window.hold_n, warnN=window.warn_n,
+                      maxN=window.max_n, resumeN=window.resume_n, confirmed=False)
+
+        if command.startswith("estop."):
+            # 비상정지·보호정지 명령. 브리지는 **넘기기만** 한다.
+            #
+            # 받아들여졌는지는 여기서 말하지 않는다 (``confirmed=False``). 거절
+            # 사유는 safety_estop_node 가 상태의 ``lastCommand`` 에 실어 보내고,
+            # 콘솔은 그 되돌아온 상태를 근거로 화면을 그린다. 브리지가 자기
+            # 판단으로 성공을 말하면, 노드가 거절한 명령이 콘솔에서 성공으로
+            # 보이는 구간이 생긴다 — 그 구간에 조작자는 정지가 걸린 줄 안다.
+            action = command.split(".", 1)[1]
+            if action not in ("arm", "disarm", "stop", "recover", "abort", "reset", "limits"):
+                return fail(f"모르는 estop 명령: {action}")
+            if self._estop is None:
+                return fail(
+                    "safety_estop_node 의 상태를 아직 못 받았다 — 감시 노드가 떠 있는가")
+            payload = {"command": action}
+            for key in ("forceTripN", "forceInstantN", "jointReachTrip", "detail", "requestId"):
+                if key in request:
+                    payload[key] = request[key]
+            self.estop_cmd.publish(String(data=json.dumps(payload)))
+            level = self.get_logger().warn if action in ("stop", "recover", "disarm") \
+                else self.get_logger().info
+            level(f"estop 명령 [{action}] → safety_estop_node")
+            return ok(action=action, confirmed=False)
 
         if command == "calib.reset":
             self.stillness.reset()

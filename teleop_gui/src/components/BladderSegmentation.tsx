@@ -148,7 +148,7 @@ export function BladderSegmentation({
           const src = sctx.getImageData(0, 0, w, h).data;
           const out = sctx.createImageData(w, h);
           const px = out.data;
-          const [r, g, b] = rgb(token('--accent', '#74b184'), [116, 177, 132]);
+          const [r, g, b] = rgb(token('--accent', '#1f6fae'), [31, 111, 174]);
 
           for (let y = 0; y < h; y += 1) {
             for (let x = 0; x < w; x += 1) {
@@ -186,7 +186,7 @@ export function BladderSegmentation({
         if (state.beamAxisPx !== null) {
           // The axis `ê` is measured from. Dashed so it cannot be mistaken for
           // anything the network drew.
-          ctx.strokeStyle = rgba(token('--ink', '#e9ede9'), 0.55);
+          ctx.strokeStyle = rgba(token('--ink', '#0e1b26'), 0.55);
           ctx.setLineDash([4, 4]);
           ctx.beginPath();
           ctx.moveTo(state.beamAxisPx + 0.5, 0);
@@ -196,7 +196,7 @@ export function BladderSegmentation({
         }
         if (state.centroidPx) {
           const [cx, cy] = state.centroidPx;
-          ctx.strokeStyle = rgba(token('--accent', '#74b184'), 1);
+          ctx.strokeStyle = rgba(token('--accent', '#1f6fae'), 1);
           ctx.beginPath();
           ctx.moveTo(cx - 6, cy + 0.5);
           ctx.lineTo(cx + 6, cy + 0.5);
@@ -357,6 +357,6 @@ export function BladderSegmentation({
 
 /** `#rrggbb` at an alpha, for canvas strokes. */
 function rgba(hex: string, alpha: number): string {
-  const [r, g, b] = rgb(hex, [233, 237, 233]);
+  const [r, g, b] = rgb(hex, [14, 27, 38]);
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }

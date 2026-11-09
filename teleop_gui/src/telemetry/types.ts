@@ -72,6 +72,17 @@ export interface RobotTelemetry {
    */
   inplaneRotation?: boolean;
   /**
+   * The contact-force window the control stack is holding **right now**, read
+   * back from its parameters once a second by the bridge.
+   *
+   * This is the truth the force-limit plate and the trend's reference lines
+   * draw from. The console's own `config` values are only the fallback for a
+   * source that does not report them (an old bridge, the simulation before a
+   * change). A request the operator sent is not reflected here until the stack
+   * accepted it — a refused window never appears.
+   */
+  forceLimits?: ForceLimits;
+  /**
    * Image quality, in two independent readings — never collapse them into one.
    *
    * `qualitySeg` is segmentation-based: *is the bladder properly shown*. It is
@@ -107,6 +118,116 @@ export interface RobotTelemetry {
   teleopFrame?: TeleopFrameState;
   /** Sensor calibration state, forwarded by the bridge. */
   calibration?: CalibrationStatus;
+  /**
+   * Emergency / protective stop state, as `safety_estop_node` declares it.
+   *
+   * Forwarded verbatim by the bridge, never recomputed here. The console must
+   * not derive a safety state: a screen that computes its own stop condition
+   * can show STOPPED while the arm is moving, or ARMED while nothing is
+   * watching, and the operator has no way to tell which of the two is lying.
+   *
+   * Absent means the supervisor has never been heard from — which is **not**
+   * the same as "no stop is in force". The plate says so in those words.
+   */
+  estop?: EstopState;
+}
+
+/**
+ * What tripped, and what the sequencer is doing about it.
+ *
+ * Three levels are kept apart on purpose (safety_estop/README §1):
+ *
+ * - `operator` — the console STOP. It travels through the GUI, the websocket
+ *   and ROS, so it only works while all of those are alive.
+ * - `force` / `joint` / `*_stale` — the automatic **protective** stop.
+ * - `hardware` — the physical latching button. That circuit passes through no
+ *   software at all; this field is an *observation* of it, nothing more.
+ *
+ * Calling all three "e-stop" on screen would teach the operator that the
+ * software layer is the emergency stop, which is exactly the belief that makes
+ * a real one feel unnecessary.
+ */
+export type EstopPhase =
+  | 'disarmed'
+  | 'armed'
+  | 'tripped'
+  | 'releasing'
+  | 'returning'
+  | 'safe';
+
+export type EstopSource =
+  | 'force'
+  | 'joint'
+  | 'hardware'
+  | 'operator'
+  | 'force_stale'
+  | 'joint_stale';
+
+export interface EstopTrip {
+  source: EstopSource;
+  detail: string;
+  at: number;
+  value: number | null;
+  threshold: number | null;
+  /** Whether an automatic withdrawal is permitted for this cause. */
+  allowsRelease: boolean;
+}
+
+export interface EstopState {
+  phase: EstopPhase;
+  /** Ordinary motion commands are being discarded by the servo node. */
+  inhibit: boolean;
+  armed: boolean;
+  latched: EstopTrip | null;
+  limits: {
+    forceTripN: number;
+    forceInstantN: number;
+    forceCeilingN: number;
+    jointReachTrip: number;
+    jointReachCeiling: number;
+    tripOnStale: boolean;
+  };
+  /** Contact-force magnitude the supervisor is comparing against. */
+  forceN: number | null;
+  /** Per joint, travel used from mid-range toward the bound it is approaching. */
+  jointReach: number[];
+  /** Per joint, degrees left to that bound. */
+  jointMarginDeg: number[];
+  worstJoint: number | null;
+  hardware: {
+    present: boolean;
+    asserted: boolean;
+    stale: boolean;
+    channelsDisagree: boolean;
+    blocksMotion: boolean;
+    reason: string;
+    ageS: number;
+  } | null;
+  /** Why a recovery stopped short. Empty when none has. */
+  haltReason: string;
+  trail: {
+    points: number;
+    /** The oldest crumbs fell off: "home" is no longer the original pose. */
+    truncated: boolean;
+    remaining: number | null;
+    homeDeg: number[] | null;
+  };
+  recovery: {
+    releaseSpeedDegS: number;
+    returnSpeedDegS: number;
+    releaseForceN: number;
+    inContact: boolean | null;
+  };
+  /** The supervisor's answer to the last command — accepted, or why not. */
+  lastCommand: {
+    command: string;
+    ok: boolean;
+    reason: string;
+    at: number;
+    requestId?: string | number | null;
+  } | null;
+  /** Seconds since the bridge last heard from the supervisor. */
+  ageS?: number;
 }
 
 /**
@@ -351,6 +472,28 @@ export interface LinkStatus {
  * load on it, the pose has not arrived. Dropping these on the floor is what
  * makes a button look dead when it is in fact being turned away.
  */
+/**
+ * Contact-force window, in newtons of `‖F‖` (`ft_sensor.contact_force_mode`).
+ *
+ * `floorN` is the least force the probe keeps on the abdomen in probing mode:
+ * the regulator pushes in as soon as the reading falls to it. `holdN` is the
+ * regulator's own target, one `deadbandN` above the floor. `maxN` is the hard
+ * limit that forces a retreat. `warnN` (rising refused) and `resumeN` (teleop
+ * handed back after a retreat) are derived by the bridge, never set directly.
+ * `ceilingN` is the most `maxN` may be raised to from the console.
+ *
+ * No entry force: probing mode is entered by the policy button, not by force.
+ */
+export interface ForceLimits {
+  floorN: number;
+  holdN: number;
+  deadbandN: number;
+  warnN: number;
+  maxN: number;
+  resumeN: number;
+  ceilingN: number;
+}
+
 export interface CommandAck {
   command: string;
   ok: boolean;

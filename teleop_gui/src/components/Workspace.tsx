@@ -66,7 +66,7 @@ export function Workspace({
               the shaded faces readable, and a low ambient floor. The earlier
               flat 2.1 ambient washed every surface to the same value, which is
               what made the arm read as an outline drawing. */}
-          <hemisphereLight args={['#ffffff', '#20261f', 0.85]} />
+          <hemisphereLight args={['#ffffff', '#9fc8e8', 0.85]} />
           <ambientLight intensity={0.55} />
           <directionalLight
             position={[2.2, 3.4, 1.8]}

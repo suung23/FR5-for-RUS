@@ -1,4 +1,4 @@
-/* A very light green tint, not an opaque sheet and not a dark backdrop. The
+/* A very light sky-blue tint, not an opaque sheet and not a dark backdrop. The
    console has to stay visible behind the gate — the checklist is meant to be
    read against the live state it refers to, and telemetry keeps updating while
    it is open. No blur: the panel is separated by its border and by the tint,
@@ -10,7 +10,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(239, 247, 241, 0.92);
+  background: rgba(232, 243, 251, 0.92);
 }
 
 .panel {

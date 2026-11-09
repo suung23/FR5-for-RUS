@@ -135,6 +135,20 @@ class RobotBackend(abc.ABC):
     def move_j(self, joint_pos_deg, vel: float) -> int:
         """블로킹 관절 이동. 서보 모드 밖에서만 쓴다."""
 
+    def safety_inputs(self) -> dict:
+        """컨트롤러의 안전입력 상태. 물리 비상정지 루프의 **관측** 이다.
+
+        돌려주는 키는 ``estop``, ``stop0``, ``stop1`` 셋이고 전부 bool 이다
+        (safety_estop/README §1). 추상이 아닌 이유는 ``reset_error`` 와 같다 —
+        안전입력이라는 개념이 없는 백엔드가 있고, 그쪽에서 "안 눌렸다" 를
+        돌려주는 것이 옳은 구현이다.
+
+        ⚠️ 이 값이 전부 False 인 것과 **못 읽은 것**은 다르다. 구별은 여기서
+        하지 않는다 — 읽기가 실패하면 호출자가 발행을 멈추고, 그 침묵을
+        safety_estop 가 신선도로 본다.
+        """
+        return {"estop": False, "stop0": False, "stop1": False}
+
     def reset_error(self) -> int:
         """컨트롤러 폴트를 지운다. 0 이 성공.
 
@@ -217,6 +231,20 @@ class FairinoBackend(RobotBackend):
             joint_pos=list(joint_pos_deg), tool=0, user=0, vel=vel, blendT=-1.0
         )
 
+    def safety_inputs(self) -> dict:
+        """``RobotStatePkg`` 의 급정지 플래그와 2채널 안전정지 상태.
+
+        XML-RPC 왕복이 아니라 컨트롤러 UDP 상태 패키지를 읽는다 — wrench 와 같은
+        경로이므로 추가 지연이 없다. 두 채널을 **따로** 낸다: 합쳐서 하나로
+        보내면 한쪽 접점이 용착된 고장(다음번에 안 멈추는 고장)이 보이지 않는다.
+        """
+        state = self._state
+        return {
+            "estop": bool(state.EmergencyStop),
+            "stop0": bool(state.safety_stop0_state),
+            "stop1": bool(state.safety_stop1_state),
+        }
+
     def reset_error(self) -> int:
         """``ResetAllError``. 폴트가 걸린 뒤에는 이것 없이는 어떤 모션도 받지 않는다.
 
@@ -279,6 +307,9 @@ class MockBackend(RobotBackend):
         self.drop_wrench_after_s = drop_wrench_after_s
         self.freeze_state_after_s = freeze_state_after_s
         self._rng = random.Random(seed)
+        #: 주입된 물리 비상정지. 고장 시험이 버튼을 누르는 자리다 —
+        #: 실로봇에서 일부러 일으키기 곤란한 경로가 정확히 이것이다.
+        self.estop_channels = [False, False]
 
     # -- 주입된 실패 ------------------------------------------------------
 
@@ -383,6 +414,10 @@ class MockBackend(RobotBackend):
             self._q_deg = list(joint_pos_deg)
             self._qd_deg_s = [0.0] * 6
         return 0
+
+    def safety_inputs(self) -> dict:
+        ch0, ch1 = self.estop_channels
+        return {"estop": bool(ch0 and ch1), "stop0": bool(ch0), "stop1": bool(ch1)}
 
     def close(self) -> None:
         self.servo_end()

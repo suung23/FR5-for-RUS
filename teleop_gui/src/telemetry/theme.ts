@@ -53,20 +53,20 @@ export type Palette = Record<Token, string>;
 /**
  * Values to fall back on if a token resolves empty.
  *
- * Only reachable before the stylesheet has been applied. They are the green
+ * Only reachable before the stylesheet has been applied. They are the sky-blue
  * resting palette, so a console that somehow renders without CSS is the
  * *resting* colour rather than the probing one — the failure mode has to be
  * "looks normal while probing", never "looks like probing while approaching".
  */
 const FALLBACK: Palette = {
-  '--accent': '#74b184',
-  '--green': '#93d1a4',
-  '--rule': '#35493b',
-  '--panel-pale': '#171d18',
-  '--nav-selected': '#26382b',
-  '--sidebar': '#131813',
-  '--critical': '#ff6f6f',
-  '--ink': '#e9ede9',
+  '--accent': '#1f6fae',
+  '--green': '#2a7fc4',
+  '--rule': '#6fa6d1',
+  '--panel-pale': '#c6e1f4',
+  '--nav-selected': '#9fc8e8',
+  '--sidebar': '#bddbf1',
+  '--critical': '#b42318',
+  '--ink': '#0e1b26',
 };
 
 function read(): Palette {

@@ -8,6 +8,7 @@ import { NavRail, viewFromHash, type ConsoleView } from './components/NavRail';
 import { OperatorFrame } from './components/OperatorFrame';
 import { ProbingNotice } from './components/ProbingNotice';
 import { PolicyInference } from './components/PolicyInference';
+import { ForceLimitsPlate } from './components/ForceLimits';
 import { QualityScores } from './components/QualityScores';
 import { SafetyPanel } from './components/SafetyPanel';
 import { SensorCalibration } from './components/SensorCalibration';
@@ -210,12 +211,18 @@ export function App() {
                   <ForceTrend
                     history={history}
                     waveformHz={waveformHz}
+                    limits={available ? telemetry.forceLimits : undefined}
                   />
                   {/* 오른쪽 기둥: 품질 두 눈금 위, 인계 버튼 아래. 조작자가 누르기 전에
                       보는 것이 품질이고, 누른 뒤 보는 것이 힘 추세다 — 셋이 한 화면에 있다. */}
                   <div className={styles.lowerRight}>
                     <QualityScores telemetry={telemetry} available={available} />
                     <PolicyInference
+                      telemetry={telemetry}
+                      available={available}
+                      onCommand={sendCommand}
+                    />
+                    <ForceLimitsPlate
                       telemetry={telemetry}
                       available={available}
                       onCommand={sendCommand}

@@ -13,11 +13,19 @@ import {
 } from 'recharts';
 import { config } from '../telemetry/config';
 import { contactMagnitude, type ForcePoint } from '../store/telemetryStore';
+import type { ForceLimits } from '../telemetry/types';
 import styles from './ForceTrend.module.css';
 import { usePalette } from '../telemetry/theme';
 
 interface Props {
   history: ForcePoint[];
+  /**
+   * The window the control stack reports. The hold, warn and limit rules are
+   * drawn from it when present, so the lines on the plot are the ones the arm
+   * is actually acting on; `config` is only the fallback for a source that
+   * does not report one.
+   */
+  limits?: ForceLimits;
   /**
    * Bins per second behind the trace, or null when each point is one reading.
    *
@@ -165,7 +173,12 @@ function decimalsFor(step: number): number {
  * Traces are black; only the measured contact force is navy, so the line the
  * operator is actually reading is the one that differs.
  */
-function ForceTrendView({ history, waveformHz }: Props) {
+function ForceTrendView({ history, waveformHz, limits }: Props) {
+  const thr = {
+    targetForceN: limits?.holdN ?? config.targetForceN,
+    warnForceN: limits?.warnN ?? config.warnForceN,
+    maxForceN: limits?.maxN ?? config.maxForceN,
+  };
   // Recharts takes colours as props, not from CSS, so the trace has to be told
   // which palette is in force. `accent` is the structural colour — green at
   // rest, blue in contact probing — and the trace, the hold band and the grid
@@ -271,7 +284,7 @@ function ForceTrendView({ history, waveformHz }: Props) {
 
     if (scale === 'full') {
       if (series === 'normal') {
-        return plain([-1, Math.ceil(Math.max(config.maxForceN * 1.2, high))]);
+        return plain([-1, Math.ceil(Math.max(thr.maxForceN * 1.2, high))]);
       }
       const peak = Math.max(1, Math.abs(low), Math.abs(high));
       return plain([-Math.ceil(peak), Math.ceil(peak)]);
@@ -292,8 +305,8 @@ function ForceTrendView({ history, waveformHz }: Props) {
   const inView = (v: number) => v > domain[0] && v < domain[1];
   // The hold band is the reference that matters at a fitted scale: the
   // question stops being "how close to the limit" and becomes "am I holding".
-  const holdLow = config.targetForceN - config.targetBandN;
-  const holdHigh = config.targetForceN + config.targetBandN;
+  const holdLow = thr.targetForceN - config.targetBandN;
+  const holdHigh = thr.targetForceN + config.targetBandN;
   // Shade only when an edge of the band is on the plot. A band wider than the
   // view would tint every pixel the same, which carries no information and
   // just dulls the trace — that case is said in words in the key instead.
@@ -301,7 +314,7 @@ function ForceTrendView({ history, waveformHz }: Props) {
   const withinHold =
     series === 'normal' && holdLow <= domain[0] && holdHigh >= domain[1];
   const offScale =
-    series === 'normal' && !inView(config.maxForceN) && !inView(config.warnForceN);
+    series === 'normal' && !inView(thr.maxForceN) && !inView(thr.warnForceN);
 
   return (
     <section className="plate">
@@ -402,9 +415,9 @@ function ForceTrendView({ history, waveformHz }: Props) {
                       ifOverflow="visible"
                     />
                   ) : null}
-                  {inView(config.targetForceN) ? (
+                  {inView(thr.targetForceN) ? (
                     <ReferenceLine
-                      y={config.targetForceN}
+                      y={thr.targetForceN}
                       stroke={accent}
                       strokeDasharray="4 4"
                       strokeWidth={1}
@@ -415,18 +428,18 @@ function ForceTrendView({ history, waveformHz }: Props) {
                       would clamp an out-of-range line to the edge, which reads
                       as "the limit is right there" at a scale where it is
                       ten newtons away. */}
-                  {inView(config.warnForceN) ? (
+                  {inView(thr.warnForceN) ? (
                     <ReferenceLine
-                      y={config.warnForceN}
+                      y={thr.warnForceN}
                       stroke={palette['--ink']}
                       strokeDasharray="5 3"
                       strokeWidth={1}
                       label={{ value: 'Warn', position: 'right', fill: palette['--ink'], fontSize: 9 }}
                     />
                   ) : null}
-                  {inView(config.maxForceN) ? (
+                  {inView(thr.maxForceN) ? (
                     <ReferenceLine
-                      y={config.maxForceN}
+                      y={thr.maxForceN}
                       stroke={palette['--ink']}
                       strokeDasharray="2 2"
                       strokeWidth={1.6}
@@ -504,13 +517,13 @@ function ForceTrendView({ history, waveformHz }: Props) {
           ) : null}
           {withinHold ? (
             <span className={styles.keyItem}>
-              whole view inside the hold band {config.targetForceN.toFixed(1)} ±
+              whole view inside the hold band {thr.targetForceN.toFixed(1)} ±
               {config.targetBandN.toFixed(1)} N
             </span>
           ) : null}
           {offScale ? (
             <span className={styles.keyItem}>
-              Warn {config.warnForceN.toFixed(0)} N · Limit {config.maxForceN.toFixed(0)} N — off
+              Warn {thr.warnForceN.toFixed(0)} N · Limit {thr.maxForceN.toFixed(0)} N — off
               scale, see the gauge
             </span>
           ) : null}

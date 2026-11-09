@@ -178,9 +178,9 @@ if [[ -d "$OUT" ]] && [[ "$MODE" != "loop" ]]; then
 fi
 echo
 
-# ① 힘 탐색 — 설정값을 Q_raw 경사로 옮긴다. --dry 면 관찰만.
-FS_ARGS=(--ros-args -p "execute:=$([[ -n "$EXECUTE" ]] && echo true || echo false)")
-ros2 run fr5_control force_search "${FS_ARGS[@]}" >"$FS_LOG" 2>&1 &
+# ① 힘 탐색 — Q_raw 경사로 옮긴 설정값을 **토픽으로만** 낸다 (2026-10-19 관찰 전용).
+#    유지 힘의 주인은 콘솔의 접촉력 창이다. --dry/--execute 는 러너에만 적용된다.
+ros2 run fr5_control force_search >"$FS_LOG" 2>&1 &
 FS_PID=$!
 sleep 2
 if ! kill -0 "$FS_PID" 2>/dev/null; then
